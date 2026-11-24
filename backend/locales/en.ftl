@@ -194,6 +194,7 @@ usb-order-edit-unchanged = Order unchanged: nothing to save
 usb-order-edit-cancelled = Order changes discarded
 # Why an order edit command was refused.
 usb-order-edit-not-active = Order editing isn't on for this USB
+usb-order-edit-move-other-folder = Items move only within their own folder
 usb-order-edit-saving = The new order is being saved to the USB; wait for it to finish
 usb-write-busy = Another USB write is running; try again when it's done
 usb-order-edit-read-only = This USB can't be written to, so its order can't be changed
@@ -1101,6 +1102,13 @@ repair-strict-parity-summary = merged { $playlists ->
 # The same, when one database was missing. $summary: the line above.
 repair-strict-parity-rebuilt-pdb = rebuilt the missing PDB from the eDB; { $summary }
 repair-strict-parity-rebuilt-edb = rebuilt the missing eDB from the PDB; { $summary }
+# The same, when the eDB had top-level copies of playlists that sit in folders
+# (an earlier version's repair flattened them). $count: copies removed;
+# $summary: the line above.
+repair-strict-parity-flattened-copies = removed { $count ->
+    [one] { $count } top-level eDB copy
+   *[other] { $count } top-level eDB copies
+} of playlists in folders; { $summary }
 repair-fix-duplicate-entries = Remove Duplicate PDB Playlist Entries
 # $count: the rows.
 repair-fix-duplicate-entries-description = Remove { $count ->
@@ -1585,6 +1593,7 @@ analysis-warning-mp3-seek-skipped-report = MP3 seek data not added ({ $reason })
 # $id: the track's or playlist's id in the app's library.
 error-track-not-found = track not found: { $id }
 error-playlist-not-found = playlist not found: { $id }
+error-playlist-folder-not-found = playlist folder not found: { $id }
 error-track-not-found-anywhere = track not found in Library or selected USB
 # $playlist: the USB playlist's name or id.
 error-usb-playlist-not-found = USB playlist not found: { $playlist }
@@ -2060,6 +2069,18 @@ scan-warning-playlist-tracks-unplayable = { $count ->
 # The status lines after creating and deleting a playlist. $name: the playlist's name.
 playlist-created = Playlist created: { $name }
 playlist-deleted = Playlist deleted: { $name }
+# The same, for a playlist folder. $name: the folder's name.
+playlist-folder-created = Folder created: { $name }
+playlist-folder-deleted = Folder deleted: { $name }
+# What the dialog asks before deleting a playlist folder. $name: the folder's name.
+playlist-folder-delete-confirm = Delete the folder "{ $name }"?
+# The same, for a folder that holds playlists or folders.
+playlist-folder-delete-confirm-items = Delete the folder "{ $name }"?
+
+    What it holds moves up one level. No playlist is deleted.
+# The tooltips of a folder's arrow in the sidebar.
+playlist-folder-collapse = Collapse
+playlist-folder-expand = Expand
 
 # What the dialog asks before deleting a playlist. $name: the playlist's name.
 playlist-delete-confirm = Delete "{ $name }"?
@@ -2142,6 +2163,10 @@ playlist-reorder-lock-tooltip = Won't reorder on USB — "{ $name }" already exi
 playlist-error-name-empty = playlist name must not be empty
 # Status lines when a playlist action fails. $error: why it failed.
 playlist-create-failed = Could not create playlist: { $error }
+playlist-folder-error-name-empty = folder name must not be empty
+playlist-folder-error-move-into-playlist = only a folder can hold other items
+playlist-folder-error-move-into-itself = a folder can't go inside itself
+playlist-folder-create-failed = Could not create the folder: { $error }
 playlist-rename-failed = Rename failed: { $error }
 playlist-order-failed = Save playlist order failed: { $error }
 playlist-track-order-failed = Save track order failed: { $error }
@@ -2871,20 +2896,25 @@ ui-settings-update-release-link = What's new ↗
 
 ## ui-sidebar
 
-ui-sidebar-add-playlist = New
 ui-sidebar-collapse = Collapse sidebar
 ui-sidebar-donate = Donate
 ui-sidebar-donate-tooltip = Please consider donating
 ui-sidebar-export-playlists = Export playlists…
 ui-sidebar-export-playlists-tooltip = Export several playlists to the USB at once
 ui-sidebar-expand = Expand sidebar
+ui-sidebar-folder-delete = Delete folder
+ui-sidebar-folder-delete-title = Delete Folder
+ui-sidebar-folder-name-placeholder = Folder name
+ui-sidebar-folder-new-playlist = New playlist in this folder
+ui-sidebar-folder-rename = Rename folder
 ui-sidebar-history = History
 ui-sidebar-import-playlist-aria-label = Import playlists
 ui-sidebar-import-playlist-tooltip = Import playlists from rekordbox or Mixxx
 ui-sidebar-library = Library
 ui-sidebar-manage = Manage
 ui-sidebar-nav-aria-label = App sections
-ui-sidebar-new-playlist = New playlist
+ui-sidebar-new-folder = New folder, inside the selected folder
+ui-sidebar-new-playlist = New playlist, inside the selected folder
 ui-sidebar-player-menu = Player Menu
 ui-sidebar-playlists = Playlists
 ui-sidebar-resizer-tooltip = Drag to resize · double-click to reset

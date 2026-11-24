@@ -213,6 +213,7 @@ fn an_error_shows_the_current_language_and_logs_english() {
     // A command's own errors: the user's input, and something that isn't there.
     let empty_name = backend.create_playlist(CreatePlaylistRequest {
         name: "  ".to_string(),
+        folder_id: None,
     });
     let empty_name = empty_name.error.expect("empty name refused").message;
     assert!(is_test_language(&empty_name), "{empty_name:?}");

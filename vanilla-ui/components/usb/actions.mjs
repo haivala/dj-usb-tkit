@@ -313,6 +313,7 @@ export function clearUsbPlaylistsView(ctx) {
   const { state, el } = ctx;
   forgetUsbListRead(ctx, "usb-playlists");
   state.usbPlaylists = [];
+  state.usbPlaylistTree = [];
   state.usbOrderEditBlockedText = null;
   el.usbCountsText.textContent = "";
   renderUsbPlaylists(ctx);
@@ -695,6 +696,7 @@ async function readUsbPlaylists(ctx, isCurrent) {
   const tracksCtl = ctx.usbPlaylistTracksCtl;
   const openSummary = findByScopeId(state.usbPlaylists, tracksCtl.scopeId)?.listSummaryText;
   state.usbPlaylists = data.items;
+  state.usbPlaylistTree = data.tree || [];
   const stillOpen = findByScopeId(state.usbPlaylists, tracksCtl.scopeId);
   if (stillOpen) stillOpen.listSummaryText = openSummary;
   ctx.applyPlaylistsState(data);
@@ -1100,19 +1102,31 @@ export async function exportPlaylistsToUsb(ctx, { playlistIds, forcePlaylistOrde
   return true;
 }
 
+// The stick's folders and playlists as the backend's tree lists them
+// (`state.usbPlaylistTree`), each level indented as in the sidebar. A row
+// carries its place for Edit order's drag (tree_drag_move.mjs).
 export function renderUsbPlaylists(ctx) {
   const { state, el, document } = ctx;
   const openId = String(ctx.usbPlaylistTracksCtl.scopeId);
-  el.usbPlaylists.replaceChildren(...state.usbPlaylists.map((playlist) => {
-    const li = cloneTemplate(document, "tplUsbPlaylistItem");
+  const byId = new Map(state.usbPlaylists.map((playlist) => [String(playlist.id), playlist]));
+  const rows = [];
+  for (const entry of state.usbPlaylistTree || []) {
+    const playlist = entry.kind === "playlist" ? byId.get(String(entry.id)) : null;
+    if (entry.kind === "playlist" && !playlist) continue;
+    const li = cloneTemplate(document, entry.kind === "folder" ? "tplUsbFolderItem" : "tplUsbPlaylistItem");
+    Object.assign(li.dataset, { treeKind: entry.kind, treeId: entry.id, treeParent: entry.parentId || "", depth: String(entry.depth) });
+    li.style.setProperty("--nav-depth", String(entry.depth));
     const btn = li.firstElementChild;
-    btn.dataset.usbPlaylist = playlist.id;
-    btn.classList.toggle("active", String(playlist.id) === openId);
-    btn.querySelector(".playlist-label").textContent = playlist.name;
-    btn.querySelector(".playlist-order-edited").classList.toggle("hidden", !playlist.orderEdited);
-    btn.querySelector(".playlist-remove").dataset.usbRemovePlaylist = playlist.id;
-    return li;
-  }));
+    btn.querySelector(".playlist-label").textContent = entry.name;
+    if (playlist) {
+      btn.dataset.usbPlaylist = playlist.id;
+      btn.classList.toggle("active", String(playlist.id) === openId);
+      btn.querySelector(".playlist-order-edited").classList.toggle("hidden", !playlist.orderEdited);
+      btn.querySelector(".playlist-remove").dataset.usbRemovePlaylist = playlist.id;
+    }
+    rows.push(li);
+  }
+  el.usbPlaylists.replaceChildren(...rows);
   renderUsbPlaylistHeading(ctx);
 }
 

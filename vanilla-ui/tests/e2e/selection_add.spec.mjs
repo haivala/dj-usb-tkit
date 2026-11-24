@@ -514,6 +514,37 @@ test("library selection and bulk add", async ({ page }) => {
       await expect(addTo).toBeFocused();
     }
     expect((await page.evaluate(() => window.__calls)).filter((c) => c.command === "add_library_selection_to_playlists")).toHaveLength(1);
+
+    // Playlists in folders are listed under their folder's row, indented as
+    // in the sidebar (Sets / Late, Sets / Inner / Peak); a folder's box
+    // ticks the ones at any depth that can still take the selection.
+    await page.evaluate(() => {
+      const { store } = window.__e2eBackend;
+      store.folders.push({ id: "pf-sets", name: "Sets", parentId: null, collapsed: false });
+      store.folders.push({ id: "pf-inner", name: "Inner", parentId: "pf-sets", collapsed: true });
+      store.folders.push({ id: "pf-empty", name: "Nothing", parentId: "pf-sets", collapsed: false });
+      for (const playlist of store.playlists) {
+        if (playlist.name === "Late") playlist.folderId = "pf-sets";
+        if (playlist.name === "Peak") playlist.folderId = "pf-inner";
+      }
+    });
+    await addTo.click();
+    await expect(dialog).toBeVisible();
+    const heading = page.locator("#addToList li.add-to-folder");
+    // A folder holding no playlist isn't listed; a closed one is listed open.
+    await expect(heading).toHaveText(["Sets", "Inner"]);
+    const depths = await page.locator("#addToList li .add-to-item").evaluateAll((items) =>
+      items.map((item) => `${item.style.getPropertyValue("--list-depth")} ${item.querySelector(".add-to-name").textContent}`));
+    expect(depths.slice(-4)).toEqual(["0 Sets", "1 Late", "1 Inner", "2 Peak"]);
+    const folderBox = heading.first().locator("input");
+    await expect(folderBox).toHaveAttribute("aria-label", "Select all Sets");
+    await expect(folderBox).not.toBeChecked();
+    await folderBox.check();
+    await expect(row("Peak").locator("input")).toBeChecked();
+    await expect(row("Late").locator("input")).toBeDisabled();
+    await page.locator("#addToApplyBtn").click();
+    await expect(dialog).toBeHidden();
+    expect((await lastCall(page, "add_library_selection_to_playlists")).playlistIds).toEqual(["pl-2"]);
   }
 
   await page.reload();

@@ -273,6 +273,7 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Ordering Test".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist data")
@@ -406,6 +407,7 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Reorder Test".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist data")
@@ -684,6 +686,7 @@ fn rename_playlist_updates_the_stored_name() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Original Name".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -840,6 +843,7 @@ fn usb_order_edit_moves_need_an_edit_and_ids_on_the_usb() {
             usb_root: usb.clone(),
             playlist_id: "usb-pl-name-not-on-this-usb".to_string(),
             before_playlist_id: None,
+            after_playlist_id: None,
         })
     };
 

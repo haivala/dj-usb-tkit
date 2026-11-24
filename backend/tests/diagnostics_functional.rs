@@ -409,6 +409,7 @@ fn setup_clean_strict_parity_fixture_with_artwork() -> (TempDir, BackendCommands
     let playlist_name = "Clean Parity Artwork".to_string();
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.clone(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -548,6 +549,7 @@ fn setup_two_playlist_fixture(
     for (playlist_name, track_id) in playlist_names.iter().zip(track_ids) {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: playlist_name.clone(),
+            folder_id: None,
         });
         assert!(created.ok, "create failed: {created:?}");
         let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -780,6 +782,7 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
     let playlist_name = "Diag Stable";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3484,6 +3487,7 @@ fn parity_report_overall_status_and_required_summary_use_strict_player_wording()
     let playlist_name = "Strict Summary";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3633,6 +3637,7 @@ fn parity_report_fails_when_membership_exists_only_in_pdb() {
     let playlist_name = "Only In eDB";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3788,6 +3793,7 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
     let full_playlist_name = "Resolution Full";
     let full_created = backend.create_playlist(CreatePlaylistRequest {
         name: full_playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(full_created.ok, "create failed: {full_created:?}");
     let full_playlist_id = full_created.data.expect("playlist data").data.playlist_id;
@@ -3814,6 +3820,7 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
     let playlist_name = "Resolution Partial";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3986,6 +3993,7 @@ fn playlist_resolution_warns_for_partially_resolved_playlist() {
     let playlist_name = "Partial Resolution";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -4155,6 +4163,7 @@ fn parity_report_flags_player_quality_metadata_gaps_and_required_section() {
     let playlist_name = "Player Quality";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -4355,6 +4364,7 @@ fn multi_track_export_produces_structurally_clean_pdb() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Structural Check".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;

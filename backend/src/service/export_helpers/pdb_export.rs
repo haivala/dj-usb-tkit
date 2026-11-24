@@ -461,6 +461,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
             playlist_id: override_playlist_id,
             sort_order: override_sort_order,
             placement: PlaylistPlacement::MoveToFront,
+            folders: None,
         }],
         session,
     )
@@ -499,6 +500,7 @@ fn write_pdb_playlists(
         // The eDB export runs first, so this is the property it just wrote.
         edb_t19_property(usb_root),
         false,
+        &[],
     )?;
     if let Some(session) = session {
         session.write_pdb(&build.bytes)?;
@@ -528,6 +530,63 @@ pub(crate) struct PdbPlaylistWrite<'a> {
     /// Where the playlist goes in the playlist list: first, as an export
     /// does by default; the repair keeps every playlist's order.
     pub placement: PlaylistPlacement,
+    /// The folders the playlist sits in, outermost first, as the repair
+    /// takes them from the eDB's tree: a row found by name is looked for
+    /// only there, and a new row goes there (folders created where missing).
+    /// `None` (an export): found by name anywhere, new rows at the top.
+    pub folders: Option<&'a [crate::pdb_reader::PdbPlaylistTreeRow]>,
+}
+
+/// The PDB folder at `folders` (outermost first, from the eDB's tree) in
+/// `tree`, created where missing: each is found by name under its parent,
+/// else added with its own id when that is free (`next_id` otherwise) and
+/// its own sort order. Each folder is moved first in its parent when
+/// `placement` moves a playlist there (new, or found), as the eDB side does.
+/// Returns the innermost folder's id, or 0 (the top level) for none.
+fn ensure_pdb_folder_path(
+    tree: &mut Vec<crate::pdb_writer::PdbPlaylistTreeRow>,
+    folders: &[crate::pdb_reader::PdbPlaylistTreeRow],
+    next_id: &mut u32,
+    placement: PlaylistPlacement,
+) -> u32 {
+    let mut parent = 0u32;
+    for folder in folders {
+        let key = canonicalize_playlist_name(&folder.name);
+        if let Some(existing) = tree
+            .iter()
+            .filter(|row| {
+                row.is_folder
+                    && row.parent_id == parent
+                    && canonicalize_playlist_name(&row.name) == key
+            })
+            .min_by_key(|row| (row.sort_order, row.id))
+        {
+            let id = existing.id;
+            if placement.moves_to_front(true) {
+                move_playlist_tree_row_to_front(tree, id);
+            }
+            parent = id;
+            continue;
+        }
+        let id = if folder.id == 0 || tree.iter().any(|row| row.id == folder.id) {
+            *next_id
+        } else {
+            folder.id
+        };
+        tree.push(crate::pdb_writer::PdbPlaylistTreeRow {
+            id,
+            parent_id: parent,
+            sort_order: folder.sort_order,
+            is_folder: true,
+            name: folder.name.clone(),
+        });
+        *next_id = (*next_id).max(id + 1);
+        if placement.moves_to_front(false) {
+            move_playlist_tree_row_to_front(tree, id);
+        }
+        parent = id;
+    }
+    parent
 }
 
 /// A PDB [`build_pdb_for_playlists`] built in memory, not yet written.
@@ -549,11 +608,14 @@ pub(crate) struct PdbBuild {
 /// `remove_duplicate_entries` also drops every repeated `(playlist, track)`
 /// playlist entry but the first, across the whole PDB (stale copies left on
 /// shared tt=8 pages by older writes), as the strict parity repair needs.
+/// `folder_paths` are folders the PDB must have, empty ones too, each
+/// outermost first (the repair passes the eDB's; an export, none).
 pub(crate) fn build_pdb_for_playlists(
     usb_root: &Path,
     writes: &[PdbPlaylistWrite<'_>],
     t19_property: Option<crate::pdb_writer::T19Property>,
     remove_duplicate_entries: bool,
+    folder_paths: &[Vec<crate::pdb_reader::PdbPlaylistTreeRow>],
 ) -> BackendResult<PdbBuild> {
     use crate::pdb_writer::{
         PdbAlbumRow, PdbArtistRow, PdbArtworkRow, PdbData, PdbKeyRow, PdbPlaylistEntryRow,
@@ -940,6 +1002,16 @@ pub(crate) fn build_pdb_for_playlists(
         value.clone().filter(|v| !v.trim().is_empty())
     };
 
+    // Folders the PDB must have, empty ones too (the repair passes the
+    // eDB's, outermost first).
+    for path in folder_paths {
+        ensure_pdb_folder_path(
+            &mut all_playlist_tree,
+            path,
+            &mut next_playlist_id,
+            PlaylistPlacement::AsGiven,
+        );
+    }
     let mut written_playlist_ids = HashSet::<u32>::new();
     for write in writes {
         let PdbPlaylistWrite {
@@ -950,12 +1022,20 @@ pub(crate) fn build_pdb_for_playlists(
             playlist_id: override_playlist_id,
             sort_order: override_sort_order,
             placement,
+            folders,
         } = *write;
         let export_date_added = normalize_export_date(Some(&manifest.generated_at))
             .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
 
+        // The folder the playlist goes in: the eDB's tree for the repair, the
+        // library's folder path for an export. None (a top-level library
+        // playlist): matched by name in any folder, a new one at the top.
+        let parent_id = folders.map(|folders| {
+            ensure_pdb_folder_path(&mut all_playlist_tree, folders, &mut next_playlist_id, placement)
+        });
         // The playlist's existing row: the one asked for by id, else the
-        // same-named one with the lowest sort order.
+        // same-named one (in its folder, for the repair) with the lowest
+        // sort order.
         let by_id = row_id.filter(|id| {
             all_playlist_tree
                 .iter()
@@ -965,7 +1045,11 @@ pub(crate) fn build_pdb_for_playlists(
             Some(id) => HashSet::from([id]),
             None => all_playlist_tree
                 .iter()
-                .filter(|row| !row.is_folder && row.name == playlist.name)
+                .filter(|row| {
+                    !row.is_folder
+                        && row.name == playlist.name
+                        && parent_id.is_none_or(|parent| row.parent_id == parent)
+                })
                 .map(|row| row.id)
                 .collect(),
         };
@@ -1006,7 +1090,7 @@ pub(crate) fn build_pdb_for_playlists(
             let so = override_sort_order.unwrap_or(next_sort_order);
             all_playlist_tree.push(PdbPlaylistTreeRow {
                 id,
-                parent_id: 0,
+                parent_id: parent_id.unwrap_or(0),
                 sort_order: so,
                 is_folder: false,
                 name: playlist.name.clone(),

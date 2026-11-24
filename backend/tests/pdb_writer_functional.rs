@@ -200,6 +200,7 @@ fn export_playlist(
 ) -> String {
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create_playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;

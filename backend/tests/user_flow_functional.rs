@@ -187,6 +187,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
 
     let source_playlist = backend.create_playlist(CreatePlaylistRequest {
         name: "Flow Source Playlist".to_string(),
+        folder_id: None,
     });
     assert!(source_playlist.ok, "create source playlist failed");
     let source_playlist_id = source_playlist
@@ -384,6 +385,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
 
     let target_playlist = backend.create_playlist(CreatePlaylistRequest {
         name: "Flow Target Playlist".to_string(),
+        folder_id: None,
     });
     assert!(target_playlist.ok, "create target playlist failed");
     let target_playlist_id = target_playlist
@@ -933,6 +935,7 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Cue Export".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist")
@@ -1054,6 +1057,7 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
     let fresh_playlist_id = fresh
         .create_playlist(CreatePlaylistRequest {
             name: "Cue Reimport".to_string(),
+            folder_id: None,
         })
         .data
         .expect("fresh playlist")
@@ -1170,6 +1174,7 @@ fn add_never_viewed_usb_track_materializes_row_and_imports_anlz_cues() {
     let playlist_id = fresh
         .create_playlist(CreatePlaylistRequest {
             name: "Never Viewed".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist")
@@ -1325,6 +1330,7 @@ fn export_one_track_with_cues_to(
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "USB Cue Edit".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist")
@@ -3449,6 +3455,7 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Browse Only".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3515,6 +3522,7 @@ fn a_playlist_add_logs_its_result_in_the_event_log() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Logged".to_string(),
+            folder_id: None,
         })
         .data
         .expect("create playlist")

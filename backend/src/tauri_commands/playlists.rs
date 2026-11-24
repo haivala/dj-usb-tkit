@@ -13,7 +13,12 @@ use crate::models::{
     GetPlaylistTracksRequest, GetSelectionDurationData, GetSelectionDurationRequest,
     RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RenamePlaylistData,
     RenamePlaylistRequest, ReorderPlaylistTracksData, ReorderPlaylistTracksRequest,
-    ReorderPlaylistsData, ReorderPlaylistsRequest,
+};
+use crate::models::{
+    CreatePlaylistFolderData, CreatePlaylistFolderRequest, DeletePlaylistFolderData,
+    DeletePlaylistFolderRequest, MovePlaylistTreeItemData, MovePlaylistTreeItemRequest,
+    RenamePlaylistFolderData, RenamePlaylistFolderRequest, SetPlaylistFolderCollapsedData,
+    SetPlaylistFolderCollapsedRequest, WithPlaylists,
 };
 use tauri::State;
 
@@ -36,15 +41,65 @@ pub async fn rename_playlist(
 }
 
 #[tauri::command]
-pub async fn reorder_playlists(
+pub async fn move_playlist_tree_item(
     state: State<'_, BackendCommands>,
-    request: ReorderPlaylistsRequest,
-) -> Result<ApiResponse<ReorderPlaylistsData>, String> {
+    request: MovePlaylistTreeItemRequest,
+) -> Result<ApiResponse<WithPlaylists<MovePlaylistTreeItemData>>, String> {
     let commands = state.inner().clone();
-    Ok(run_blocking_command("reorder_playlists", move || {
-        commands.reorder_playlists(request)
+    Ok(run_blocking_command("move_playlist_tree_item", move || {
+        commands.move_playlist_tree_item(request)
     })
     .await)
+}
+
+#[tauri::command]
+pub async fn create_playlist_folder(
+    state: State<'_, BackendCommands>,
+    request: CreatePlaylistFolderRequest,
+) -> Result<ApiResponse<WithPlaylists<CreatePlaylistFolderData>>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("create_playlist_folder", move || {
+        commands.create_playlist_folder(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn rename_playlist_folder(
+    state: State<'_, BackendCommands>,
+    request: RenamePlaylistFolderRequest,
+) -> Result<ApiResponse<WithPlaylists<RenamePlaylistFolderData>>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("rename_playlist_folder", move || {
+        commands.rename_playlist_folder(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn delete_playlist_folder(
+    state: State<'_, BackendCommands>,
+    request: DeletePlaylistFolderRequest,
+) -> Result<ApiResponse<WithPlaylists<DeletePlaylistFolderData>>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("delete_playlist_folder", move || {
+        commands.delete_playlist_folder(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn set_playlist_folder_collapsed(
+    state: State<'_, BackendCommands>,
+    request: SetPlaylistFolderCollapsedRequest,
+) -> Result<ApiResponse<WithPlaylists<SetPlaylistFolderCollapsedData>>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("set_playlist_folder_collapsed", move || {
+            commands.set_playlist_folder_collapsed(request)
+        })
+        .await,
+    )
 }
 
 #[tauri::command]

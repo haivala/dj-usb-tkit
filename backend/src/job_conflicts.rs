@@ -240,7 +240,11 @@ pub fn command_block(command: &str) -> Option<CommandBlock> {
         // them stays allowed.
         "create_playlist"
         | "rename_playlist"
-        | "reorder_playlists"
+        | "move_playlist_tree_item"
+        | "create_playlist_folder"
+        | "rename_playlist_folder"
+        | "delete_playlist_folder"
+        | "set_playlist_folder_collapsed"
         | "delete_playlist"
         | "add_track_candidates_to_playlist"
         | "add_library_selection_to_playlist"

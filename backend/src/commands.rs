@@ -12,28 +12,30 @@ use crate::models::{
     AnalyzeNewTracksRequest, ApiResponse, ApplyExternalTrackDataData,
     ApplyExternalTrackDataRequest, BrowseSourceFilesData, BrowseSourceFilesRequest,
     BuildUsbHistoryTracklistData, BuildUsbHistoryTracklistRequest, CreatePlaylistData,
-    CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
-    DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
-    ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
-    FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
-    GetFrontendSettingsData, GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest,
-    GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetSelectionDurationData, GetSelectionDurationRequest,
-    GetTrackDetailRequest, GetTracksMetadataSummaryRequest, GetUsbBackgroundColorRequest,
-    GetUsbHistoryTracklistOptionsData, GetUsbHistoryTracklistOptionsRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
-    GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistsData,
-    ImportExternalPlaylistsRequest, InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData,
-    InspectUsbTrackRequest, LibrarySourcesData, ListExternalPlaylistsData,
-    ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
-    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, PlayResolvedTrackData, PlayResolvedTrackRequest,
+    CreatePlaylistFolderData, CreatePlaylistFolderRequest, CreatePlaylistRequest,
+    DeletePlaylistData, DeletePlaylistFolderData, DeletePlaylistFolderRequest,
+    DeletePlaylistRequest, DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMixxxDbData,
+    DetectExternalRekordboxDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData,
+    FetchUsbTracksRequest, GetFrontendSettingsData, GetPlaylistExportSpaceData,
+    GetPlaylistExportSpaceRequest, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
+    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
+    GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksMetadataSummaryRequest,
+    GetUsbBackgroundColorRequest, GetUsbHistoryTracklistOptionsData,
+    GetUsbHistoryTracklistOptionsRequest, GetUsbPlayerMenuConfigData,
+    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
+    ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, LibrarySourcesData,
+    ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
+    ListMatchingTrackIdsRequest, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, MovePlaylistTreeItemData,
+    MovePlaylistTreeItemRequest, PlayResolvedTrackData, PlayResolvedTrackRequest,
     PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
     RelocateSourceRootData, RelocateSourceRootRequest, RemoveSourceFolderData,
     RemoveSourceFolderRequest, RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest,
-    RemoveUsbPlaylistData, RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
-    ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ReorderPlaylistsData,
-    ReorderPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
+    RemoveUsbPlaylistData, RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistFolderData,
+    RenamePlaylistFolderRequest, RenamePlaylistRequest, ReorderPlaylistTracksData,
+    ReorderPlaylistTracksRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
     ResolveTrackIdentityData, ResolveTrackIdentityRequest, RestoreUsbBackupData,
     RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
     RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
@@ -42,10 +44,11 @@ use crate::models::{
     SaveUsbTrackMetadataEditsData, SaveUsbTrackMetadataEditsRequest, ScanLibraryData,
     ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SetAnalysisPausedData,
     SetExternalLibraryEnabledRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SetPlaybackMetronomeRequest, SetSourceFolderEnabledRequest, SetUsbBackgroundColorRequest,
-    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
-    TracksMetadataSummary, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
-    UsbBackgroundColorData, UsbTrackAnalysisDetail, WithPlaylists,
+    SetPlaybackMetronomeRequest, SetPlaylistFolderCollapsedData, SetPlaylistFolderCollapsedRequest,
+    SetSourceFolderEnabledRequest, SetUsbBackgroundColorRequest, SetUsbDeviceNameData,
+    SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, TracksMetadataSummary,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbBackgroundColorData,
+    UsbTrackAnalysisDetail, WithPlaylists,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -334,14 +337,48 @@ impl BackendCommands {
         )
     }
 
-    pub fn reorder_playlists(
+    pub fn move_playlist_tree_item(
         &self,
-        req: ReorderPlaylistsRequest,
-    ) -> ApiResponse<ReorderPlaylistsData> {
+        req: MovePlaylistTreeItemRequest,
+    ) -> ApiResponse<WithPlaylists<MovePlaylistTreeItemData>> {
         wrap_failed(
-            self.service.reorder_playlists(req),
+            self.with_playlists(self.service.move_playlist_tree_item(req)),
             tr::playlist_order_failed,
         )
+    }
+
+    pub fn create_playlist_folder(
+        &self,
+        req: CreatePlaylistFolderRequest,
+    ) -> ApiResponse<WithPlaylists<CreatePlaylistFolderData>> {
+        wrap_failed(
+            self.with_playlists(self.service.create_playlist_folder(req)),
+            tr::playlist_folder_create_failed,
+        )
+    }
+
+    pub fn rename_playlist_folder(
+        &self,
+        req: RenamePlaylistFolderRequest,
+    ) -> ApiResponse<WithPlaylists<RenamePlaylistFolderData>> {
+        wrap_failed(
+            self.with_playlists(self.service.rename_playlist_folder(req)),
+            tr::playlist_rename_failed,
+        )
+    }
+
+    pub fn delete_playlist_folder(
+        &self,
+        req: DeletePlaylistFolderRequest,
+    ) -> ApiResponse<WithPlaylists<DeletePlaylistFolderData>> {
+        wrap(self.with_playlists(self.service.delete_playlist_folder(req)))
+    }
+
+    pub fn set_playlist_folder_collapsed(
+        &self,
+        req: SetPlaylistFolderCollapsedRequest,
+    ) -> ApiResponse<WithPlaylists<SetPlaylistFolderCollapsedData>> {
+        wrap(self.with_playlists(self.service.set_playlist_folder_collapsed(req)))
     }
 
     pub fn delete_playlist(

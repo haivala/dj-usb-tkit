@@ -2029,8 +2029,7 @@ fn order_edit_usb() -> (tempfile::TempDir, std::path::PathBuf) {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
+            placement: PlaylistPlacement::MoveToFront, folders: None }],
     )
     .expect("write edb playlist");
     session.commit().expect("write edb playlist");
@@ -2187,6 +2186,7 @@ fn edit_playlist_order(service: &crate::service::BackendService, usb_root: &Path
                 usb_root: root_text(usb_root),
                 playlist_id: id.clone(),
                 before_playlist_id: None,
+                after_playlist_id: None,
             })
             .expect("move playlist");
     }
@@ -2292,8 +2292,7 @@ fn usb_order_edit_writes_one_playlist_order_to_both_databases() {
                 manifest: &manifest,
                 mirror_playlist_entries: true,
                 identity: None,
-                placement: PlaylistPlacement::MoveToFront,
-            }],
+                placement: PlaylistPlacement::MoveToFront, folders: None }],
         )
         .expect("write edb playlist");
         session.commit().expect("write edb playlist");
@@ -2354,8 +2353,7 @@ fn usb_order_edit_saves_order_with_only_edb_playlists() {
                 manifest: &manifest,
                 mirror_playlist_entries: true,
                 identity: None,
-                placement: PlaylistPlacement::MoveToFront,
-            }],
+                placement: PlaylistPlacement::MoveToFront, folders: None }],
         )
         .expect("write edb playlist");
         session.commit().expect("write edb playlist");
@@ -2636,6 +2634,7 @@ fn usb_order_edit_refuses_changes_while_it_saves() {
                     usb_root: root.clone(),
                     playlist_id: playlist_id.clone(),
                     before_playlist_id: None,
+                    after_playlist_id: None,
                 })
                 .is_err()
         );
@@ -2772,8 +2771,7 @@ fn remove_usb_playlist_writes_back_edb_to_usb_when_staging_enabled() {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
+            placement: PlaylistPlacement::MoveToFront, folders: None }],
     )
     .expect("seed edb playlist");
     session.commit().expect("seed edb playlist");
@@ -2871,6 +2869,7 @@ fn merge_orphaned_usb_placeholder_tracks_reassigns_playlist_and_links() {
     let playlist = service
         .create_playlist(crate::models::CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     let conn = service.db.connect().expect("connect");

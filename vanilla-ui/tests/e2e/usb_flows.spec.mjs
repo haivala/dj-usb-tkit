@@ -466,10 +466,15 @@ function installTauriMock(page, mode) {
         return orderEditAnswer({ statusText: "Editing the order: nothing is written until Save order." });
       }
       if (command === "move_usb_playlist") {
-        const { playlistId, beforePlaylistId } = payload.request;
-        const ids = moveBefore(pendingPlaylists().map((p) => p.id), playlistId, beforePlaylistId);
+        const { playlistId, beforePlaylistId, afterPlaylistId } = payload.request;
+        const current = pendingPlaylists().map((p) => p.id);
+        const others = current.filter((id) => id !== playlistId);
+        const before = afterPlaylistId ? (others[others.indexOf(afterPlaylistId) + 1] ?? null) : beforePlaylistId;
+        const ids = moveBefore(current, playlistId, before);
         orderEdit.playlists = ids.join() === state.usbPlaylists.map((p) => p.id).join() ? null : ids;
-        return orderEditAnswer();
+        // The list in its new order, as the backend answers.
+        const tree = pendingPlaylists().map((p) => ({ kind: "playlist", id: p.id, parentId: "", depth: 0, name: p.name }));
+        return orderEditAnswer({ tree });
       }
       if (command === "move_usb_playlist_track") {
         const { playlistId, moveTrackId, beforeTrackId } = payload.request;
@@ -1208,6 +1213,71 @@ const usbTrackIds = (page) => page.locator("#usbPlaylistTracks .track-grid-row[d
 const usbTrackHandle = (trackId) => `#usbPlaylistTracks .track-grid-row[data-track-id="${trackId}"] [data-playlist-track-drag-handle]`;
 const usbTrackRow = (trackId) => `#usbPlaylistTracks .track-grid-row[data-track-id="${trackId}"]`;
 
+// The stick's folders: the list is the backend's tree, indented as in the sidebar; in Edit
+// order a row drops only among its own folder's rows, and a folder moves too.
+test("USB playlists in folders: tree rows and Edit order within a folder", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const backend = window.__e2eBackend;
+    const playlist = (id, name) => ({ id, name, source: "PDB", trackCount: 1, totalDurationMs: 0, durationUnknownCount: 0 });
+    const row = (kind, id, parentId, depth, name) => ({ kind, id, parentId, depth, name });
+    window.__moves = [];
+    let tree = [
+      row("folder", "usb-f-sets", "", 0, "Sets"),
+      row("playlist", "usb-pl-1", "usb-f-sets", 1, "Warm"),
+      row("playlist", "usb-pl-2", "usb-f-sets", 1, "Peak"),
+      row("playlist", "usb-pl-3", "", 0, "Top"),
+    ];
+    backend.override(async (command, request) => {
+      if (command === "fetch_usb_playlists") {
+        return backend.ok(backend.usbPlaylists({
+          items: [playlist("usb-pl-1", "Sets / Warm"), playlist("usb-pl-2", "Sets / Peak"), playlist("usb-pl-3", "Top")],
+          tree,
+        }));
+      }
+      if (command === "begin_usb_order_edit") {
+        return backend.ok({ orderEdit: backend.orderEditState({ active: true, editingText: "Editing" }), statusText: "" });
+      }
+      if (command === "move_usb_playlist") {
+        window.__moves.push(request);
+        // The backend's answer: Top moved before Sets with what it holds.
+        if (request.playlistId === "usb-pl-3") tree = [tree[3], ...tree.slice(0, 3)];
+        return backend.ok({ orderEdit: backend.orderEditState({ active: true, changed: true, editingText: "Editing" }), tree });
+      }
+    });
+  });
+  await page.goto("/");
+  await openUsb(page);
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+
+  const items = page.locator("#usbPlaylists > li");
+  await expect(items).toHaveText([/Sets/, /Warm/, /Peak/, /Top/]);
+  expect(await items.evaluateAll((lis) => lis.map((li) => `${li.dataset.treeKind} ${li.style.getPropertyValue("--nav-depth")}`)))
+    .toEqual(["folder 0", "playlist 1", "playlist 1", "playlist 0"]);
+  await expect(items.first().locator(".nav-folder-toggle.is-open")).toHaveCount(1);
+  // A folder row opens nothing.
+  await items.first().locator("button").click();
+  await expect(page.locator("#usbPlaylistHeading")).toBeHidden();
+
+  await page.locator("#usbEditOrderBtn").click();
+  const handle = (n) => `#usbPlaylists > li:nth-child(${n}) [data-usb-drag-handle]`;
+  // Top onto Warm (in Sets): not its folder, nothing sent.
+  await dragViaHandle(page, handle(4), "#usbPlaylists > li:nth-child(2)", true);
+  expect(await page.evaluate(() => window.__moves)).toEqual([]);
+  // Top onto the top of Sets: before it.
+  await dragViaHandle(page, handle(4), "#usbPlaylists > li:nth-child(1)", true);
+  await expect(items).toHaveText([/Top/, /Sets/, /Warm/, /Peak/]);
+  expect(await page.evaluate(() => window.__moves)).toEqual([
+    { usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-3", beforePlaylistId: "usb-f-sets", afterPlaylistId: null }
+  ]);
+  // Peak onto the bottom half of Warm: after it, in Sets.
+  await dragViaHandle(page, handle(4), "#usbPlaylists > li:nth-child(3)", false);
+  await expect.poll(async () => (await page.evaluate(() => window.__moves)).length).toBe(2);
+  expect((await page.evaluate(() => window.__moves)).at(-1)).toEqual(
+    { usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-2", beforePlaylistId: null, afterPlaylistId: "usb-pl-1" }
+  );
+});
+
 // Edit order: playlists and tracks are put in a new order (drag or sort) and nothing is sent to
 // be written until Save order; Cancel drops it. Going to any other page with unsaved changes,
 // the other USB pages too, asks to save, discard or stay.
@@ -1270,7 +1340,7 @@ test("USB playlist reorder", async ({ page }) => {
   await expect(rows.nth(1)).toContainText("Charlie");
   await expect(rows.nth(2)).toContainText("Alpha");
   expect(await sentRequests(page, "move_usb_playlist")).toEqual([
-    { usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-1", beforePlaylistId: null }
+    { usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-1", beforePlaylistId: null, afterPlaylistId: "usb-pl-3" }
   ]);
   await expect(editText).toHaveText("Editing order: playlist order changed");
   await expect(saveBtn).toBeEnabled();
@@ -2456,6 +2526,13 @@ test("export playlists page: a row per playlist, selection, order ticks and one 
         lastExportedText: status === "new" ? "Never" : "2026-11-01 20:00 · TEST STICK",
         status, statusText, disabledReason
       });
+    // Charlie and Delta are in the library folder Sets.
+    const playlist = (id, depth = 0) => ({ kind: "playlist", id, depth, name: "", playlistIds: [] });
+    const tree = [
+      playlist("pl-a"), playlist("pl-b"),
+      { kind: "folder", id: "pf-sets", depth: 0, name: "Sets", playlistIds: ["pl-c", "pl-d"] },
+      playlist("pl-c", 1), playlist("pl-d", 1),
+    ];
     backend.override(async (command, request, payload) => {
       if (command === "get_batch_export_overview") {
         return backend.ok({
@@ -2465,6 +2542,7 @@ test("export playlists page: a row per playlist, selection, order ticks and one 
             row("pl-c", "Charlie", "new", "Not on USB yet"),
             row("pl-d", "Delta", "new", "Not on USB yet", "no tracks"),
           ],
+          tree,
           usbName: "TEST STICK",
           forceTrackOrderAvailable: false,
           forceTrackOrderTooltip: "Mirror export always writes the app's track order.",
@@ -2513,6 +2591,26 @@ test("export playlists page: a row per playlist, selection, order ticks and one 
   await expect(page.locator("#exportPlaylistsForceTrackOrderRow")).toHaveAttribute("data-tooltip", "Mirror export always writes the app's track order.");
   await expect(run).toHaveText("Export 3 playlists to TEST STICK");
   await expect(page.locator("#exportPlaylistsSpace")).toHaveText("3 playlists to copy");
+
+  // A folder's playlists are listed under its row, indented as in the
+  // sidebar; its box (or a click on the row) ticks the ones that can be exported.
+  const folder = page.locator("#exportPlaylistsList .export-playlists-folder");
+  await expect(folder).toHaveCount(1);
+  await expect(folder).toHaveText("Sets");
+  await expect(page.locator("#exportPlaylistsList > *")).toHaveText([/Alpha/, /Bravo/, "Sets", /Charlie/, /Delta/]);
+  expect(await page.locator("#exportPlaylistsList > *").evaluateAll((rows) =>
+    rows.map((row) => row.style.getPropertyValue("--list-depth")))).toEqual(["0", "0", "0", "1", "1"]);
+  const folderBox = folder.locator("input");
+  await expect(folderBox).toHaveAttribute("aria-label", "Select all Sets");
+  await expect(folderBox).toBeChecked();
+  await folderBox.uncheck();
+  await expect(check("Charlie")).not.toBeChecked();
+  await expect(page.locator("#exportPlaylistsCount")).toHaveText("2 of 3 selected");
+  await folder.locator(".export-playlists-folder-name").click();
+  await expect(check("Charlie")).toBeChecked();
+  await expect(folderBox).toBeChecked();
+  await expect(check("Delta")).not.toBeChecked();
+  await expect(page.locator("#exportPlaylistsCount")).toHaveText("3 of 3 selected");
 
   // Not everything chosen: no long-time warning, no forced playlist order.
   await forceOrder.check();

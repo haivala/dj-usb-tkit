@@ -194,7 +194,7 @@ fn playlist_requires_strict_upgrade_detects_failure_cases() {
 }
 
 #[test]
-fn strict_repair_playlist_names_follow_pdb_order_with_edb_only_tail() {
+fn strict_repair_playlist_keys_follow_pdb_order_with_edb_only_tail() {
     let mut parsed = ParsedPdb::default();
     parsed.playlist_tree.push(PdbPlaylistTreeRow {
         id: 10,
@@ -217,6 +217,7 @@ fn strict_repair_playlist_names_follow_pdb_order_with_edb_only_tail() {
         ExportDbPlaylist {
             playlist_id: 20,
             sort_order: 0,
+            path: crate::pdb_reader::PlaylistPath::top_level("Alpha"),
             tracks: Vec::new(),
         },
     );
@@ -225,6 +226,7 @@ fn strict_repair_playlist_names_follow_pdb_order_with_edb_only_tail() {
         ExportDbPlaylist {
             playlist_id: 10,
             sort_order: 1,
+            path: crate::pdb_reader::PlaylistPath::top_level("Zeta"),
             tracks: Vec::new(),
         },
     );
@@ -233,13 +235,14 @@ fn strict_repair_playlist_names_follow_pdb_order_with_edb_only_tail() {
         ExportDbPlaylist {
             playlist_id: 30,
             sort_order: 0,
+            path: crate::pdb_reader::PlaylistPath::top_level("Beta"),
             tracks: Vec::new(),
         },
     );
 
-    let names = strict_repair_ordered_playlist_names(&parsed, Some(&edb_playlists));
+    let keys = strict_repair_ordered_playlist_keys(&parsed, Some(&edb_playlists));
 
-    assert_eq!(names, vec!["Zeta", "Alpha", "Beta"]);
+    assert_eq!(keys, vec!["zeta", "alpha", "beta"]);
 }
 
 #[test]
@@ -2490,4 +2493,320 @@ fn unindexed_playlist_name_is_the_typed_name_or_the_default() {
     assert_eq!(name(Some("   ")), "Unindexed");
     assert_eq!(name(Some("\0")), "Unindexed");
     assert_eq!(name(Some("  My Strays ")), "My Strays");
+}
+
+/// A PDB with folders in rekordbox's shape: two style folders, each with an
+/// "Opening" folder holding a "Warmup" playlist of its own track (same
+/// names, different tracks), an empty folder and a top-level playlist.
+fn write_folder_tree_pdb(usb_root: &Path) {
+    use crate::pdb_writer::{PdbArtistRow, PdbData, PdbPlaylistEntryRow, PdbPlaylistTreeRow};
+    let mut data = PdbData::empty();
+    data.colors = crate::pdb_writer::standard_colors();
+    data.columns_raw_rows = crate::pdb_writer::standard_columns_raw();
+    data.artists.push(PdbArtistRow {
+        id: 1,
+        name: "Fixture Artist".into(),
+    });
+    for id in 1..=3 {
+        data.tracks.push(PdbTrackRowData {
+            composer_id: 0,
+            label_id: 0,
+            remixer_id: 0,
+            header_flags_u32: None,
+            id,
+            artist_id: 1,
+            album_id: 0,
+            artwork_id: 0,
+            key_id: 0,
+            genre_id: 0,
+            title: format!("Track {id}"),
+            anlz_path: format!("/PIONEER/USBANLZ/P000/0000000{id}/ANLZ0000.DAT"),
+            file_path: format!("/Contents/Fixture Artist/Track {id}.mp3"),
+            content_link: None,
+            sample_rate_hz: None,
+            file_size_bytes: None,
+            master_content_id: None,
+            master_db_id: None,
+            bitrate_kbps: None,
+            track_number: None,
+            bpm: None,
+            release_year: None,
+            bit_depth: None,
+            duration_seconds: Some(180),
+            file_type: None,
+            isrc: None,
+            date_added: None,
+            analyze_date: None,
+            release_date: None,
+            dj_comment: None,
+            file_name: Some(format!("Track {id}.mp3")),
+            publish_track_info_on: None,
+            autoload_hotcues_on: None,
+            color_id: None,
+            rating: None,
+        });
+    }
+    let row = |id, parent_id, sort_order, is_folder, name: &str| PdbPlaylistTreeRow {
+        id,
+        parent_id,
+        sort_order,
+        is_folder,
+        name: name.into(),
+    };
+    // Sort orders with gaps, as rekordbox leaves them in the PDB.
+    data.playlist_tree = vec![
+        row(1, 0, 0, true, "Style A"),
+        row(2, 1, 0, true, "Opening"),
+        row(3, 2, 0, false, "Warmup"),
+        row(4, 0, 2, true, "Style B"),
+        row(5, 4, 0, true, "Opening"),
+        row(6, 5, 0, false, "Warmup"),
+        row(7, 0, 4, true, "Empty"),
+        row(8, 0, 6, false, "Top"),
+    ];
+    data.playlist_entries = [(3, 1), (6, 2), (8, 3)]
+        .map(|(playlist_id, track_id)| PdbPlaylistEntryRow {
+            entry_index: 1,
+            track_id,
+            playlist_id,
+        })
+        .to_vec();
+    std::fs::write(
+        vendor_pdb_path(usb_root),
+        crate::pdb_writer::write_pdb(&data).expect("write PDB"),
+    )
+    .expect("store PDB");
+}
+
+/// Every folder and playlist of a playlist tree, by path.
+fn tree_paths(
+    rows: &[crate::pdb_reader::PdbPlaylistTreeRow],
+) -> std::collections::BTreeSet<(String, bool)> {
+    let tree = crate::pdb_reader::PlaylistTree::new(rows);
+    rows.iter()
+        .map(|row| (tree.path(row).display(), row.is_folder))
+        .collect()
+}
+
+fn edb_tree_of(usb_root: &Path) -> Vec<crate::pdb_reader::PdbPlaylistTreeRow> {
+    let conn = staging::UsbDatabases::of(usb_root)
+        .expect("databases")
+        .open_edb_writable()
+        .expect("open eDB");
+    crate::edb::read_edb_playlist_tree(&conn).expect("eDB tree")
+}
+
+fn pdb_tree_of(usb_root: &Path) -> Vec<crate::pdb_reader::PdbPlaylistTreeRow> {
+    crate::pdb_reader::parse_pdb(&vendor_pdb_path(usb_root))
+        .expect("parse PDB")
+        .playlist_tree
+}
+
+/// The eDB playlist at `path` ("Folder / Name"): its tracks' file paths.
+fn edb_playlist_tracks(usb_root: &Path, path: &str) -> Vec<String> {
+    let conn = staging::UsbDatabases::of(usb_root)
+        .expect("databases")
+        .open_edb_writable()
+        .expect("open eDB");
+    let library = crate::edb::read_edb(
+        &conn,
+        usb_root,
+        crate::edb::EdbRead {
+            playlists: true,
+            ..crate::edb::EdbRead::default()
+        },
+    )
+    .expect("read eDB");
+    library
+        .playlists
+        .get(path)
+        .unwrap_or_else(|| panic!("no eDB playlist {path}: {:?}", library.playlists.keys()))
+        .tracks
+        .iter()
+        .map(|track| track.usb_media_path.clone().unwrap_or_default())
+        .collect()
+}
+
+fn apply_strict_parity(service: &BackendService, usb_root: &Path) {
+    let data = service
+        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
+            usb_root: Some(usb_root.to_string_lossy().to_string()),
+            apply: true,
+            selected_fix_ids: vec![STRICT_PARITY_UPGRADE_FIX_ID.to_string()],
+        })
+        .expect("repair apply");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|line| line.contains("Strict Parity")),
+        "{data:?}"
+    );
+    assert!(data.failed_fixes.is_empty(), "{data:?}");
+}
+
+/// The folder-tree stick with its eDB rebuilt from the PDB.
+fn folder_tree_stick_with_rebuilt_edb() -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    tempfile::TempDir,
+    BackendService,
+) {
+    let (td, usb_root) = test_usb_root();
+    write_folder_tree_pdb(&usb_root);
+    let edb = crate::service::usb::vendor_compat::vendor_edb_path(&usb_root);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", edb.display()));
+    }
+    let data_dir = tempdir().expect("service data dir");
+    let service = BackendService::new(data_dir.path()).expect("backend service");
+    apply_strict_parity(&service, &usb_root);
+    (td, usb_root, data_dir, service)
+}
+
+#[test]
+fn rebuilt_edb_has_the_pdb_folders_and_same_named_playlists() {
+    let (_td, usb_root, _data_dir, _service) = folder_tree_stick_with_rebuilt_edb();
+
+    let edb = tree_paths(&edb_tree_of(&usb_root));
+    assert_eq!(edb, tree_paths(&pdb_tree_of(&usb_root)));
+    for expected in [
+        ("Style A / Opening / Warmup", false),
+        ("Style B / Opening / Warmup", false),
+        ("Empty", true),
+        ("Top", false),
+    ] {
+        assert!(
+            edb.contains(&(expected.0.to_string(), expected.1)),
+            "{expected:?} missing from {edb:?}"
+        );
+    }
+    assert_eq!(
+        edb_playlist_tracks(&usb_root, "Style A / Opening / Warmup"),
+        ["/Contents/Fixture Artist/Track 1.mp3"]
+    );
+    assert_eq!(
+        edb_playlist_tracks(&usb_root, "Style B / Opening / Warmup"),
+        ["/Contents/Fixture Artist/Track 2.mp3"]
+    );
+    // Each folder numbered 0..n, folders and playlists together, in the
+    // PDB's order.
+    let mut top = edb_tree_of(&usb_root)
+        .into_iter()
+        .filter(|row| row.parent_id == 0)
+        .map(|row| (row.sort_order, row.name))
+        .collect::<Vec<_>>();
+    top.sort();
+    assert_eq!(
+        top,
+        [
+            (0, "Style A".to_string()),
+            (1, "Style B".to_string()),
+            (2, "Empty".to_string()),
+            (3, "Top".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn strict_parity_keeps_same_named_playlists_in_other_folders() {
+    let (_td, usb_root, _data_dir, service) = folder_tree_stick_with_rebuilt_edb();
+    let tree_before = tree_paths(&edb_tree_of(&usb_root));
+    // Style B's Warmup loses its track in the eDB: the repair puts it back
+    // without touching Style A's.
+    {
+        let edb_rows = edb_tree_of(&usb_root);
+        let tree = crate::pdb_reader::PlaylistTree::new(&edb_rows);
+        let style_b = edb_rows
+            .iter()
+            .find(|row| tree.path(row).display() == "Style B / Opening / Warmup")
+            .expect("Style B Warmup");
+        let conn = staging::UsbDatabases::of(&usb_root)
+            .expect("databases")
+            .open_edb_writable()
+            .expect("open eDB");
+        conn.execute(
+            "DELETE FROM playlist_content WHERE playlist_id = ?1",
+            rusqlite::params![style_b.id],
+        )
+        .expect("empty Style B Warmup");
+    }
+
+    apply_strict_parity(&service, &usb_root);
+
+    assert_eq!(tree_paths(&edb_tree_of(&usb_root)), tree_before);
+    assert_eq!(
+        edb_playlist_tracks(&usb_root, "Style A / Opening / Warmup"),
+        ["/Contents/Fixture Artist/Track 1.mp3"]
+    );
+    assert_eq!(
+        edb_playlist_tracks(&usb_root, "Style B / Opening / Warmup"),
+        ["/Contents/Fixture Artist/Track 2.mp3"]
+    );
+}
+
+#[test]
+fn rebuilt_pdb_has_the_edb_folders() {
+    let (_td, usb_root, _data_dir, service) = folder_tree_stick_with_rebuilt_edb();
+    let edb = tree_paths(&edb_tree_of(&usb_root));
+    std::fs::remove_file(vendor_pdb_path(&usb_root)).expect("delete PDB");
+
+    apply_strict_parity(&service, &usb_root);
+
+    assert_eq!(tree_paths(&pdb_tree_of(&usb_root)), edb);
+}
+
+#[test]
+fn strict_parity_replaces_flattened_edb_copies_with_the_pdb_folders() {
+    let (_td, usb_root, _data_dir, service) = folder_tree_stick_with_rebuilt_edb();
+    let pdb = tree_paths(&pdb_tree_of(&usb_root));
+    // The eDB as earlier versions' repair left it: no folders, and the two
+    // Warmups merged into one top-level playlist holding both tracks.
+    {
+        let edb_rows = edb_tree_of(&usb_root);
+        let tree = crate::pdb_reader::PlaylistTree::new(&edb_rows);
+        let id_of = |path: &str| {
+            edb_rows
+                .iter()
+                .find(|row| tree.path(row).display() == path)
+                .map(|row| row.id)
+                .expect("eDB playlist")
+        };
+        let (a, b) = (
+            id_of("Style A / Opening / Warmup"),
+            id_of("Style B / Opening / Warmup"),
+        );
+        let conn = staging::UsbDatabases::of(&usb_root)
+            .expect("databases")
+            .open_edb_writable()
+            .expect("open eDB");
+        conn.execute_batch(&format!(
+            "UPDATE playlist_content SET playlist_id = {a}, sequenceNo = 2 WHERE playlist_id = {b};
+             DELETE FROM playlist WHERE playlist_id = {b} OR attribute = 1;
+             UPDATE playlist SET playlist_id_parent = 0;"
+        ))
+        .expect("flatten the eDB");
+    }
+    assert_eq!(
+        edb_playlist_tracks(&usb_root, "Warmup").len(),
+        2,
+        "the flattened copy holds both Warmups' tracks"
+    );
+
+    apply_strict_parity(&service, &usb_root);
+
+    assert_eq!(tree_paths(&edb_tree_of(&usb_root)), pdb);
+    assert_eq!(
+        tree_paths(&pdb_tree_of(&usb_root)),
+        pdb,
+        "the PDB gains no copies"
+    );
+    assert_eq!(
+        edb_playlist_tracks(&usb_root, "Style A / Opening / Warmup"),
+        ["/Contents/Fixture Artist/Track 1.mp3"]
+    );
+    assert_eq!(
+        edb_playlist_tracks(&usb_root, "Style B / Opening / Warmup"),
+        ["/Contents/Fixture Artist/Track 2.mp3"]
+    );
 }

@@ -345,6 +345,7 @@ export async function switchView(ctx, viewId) {
 
   el.eventLogBtn.classList.toggle("active", viewId === "event-log");
 
+  state.selectedPlaylistFolderId = null;
   el.navPlaylistList.querySelectorAll(".nav-playlist-item").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.playlistId === viewId);
   });

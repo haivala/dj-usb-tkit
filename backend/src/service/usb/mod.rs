@@ -12,6 +12,7 @@ pub(crate) mod identity;
 pub(crate) mod initialize;
 pub(crate) mod layout;
 pub(super) mod order_edit;
+pub(crate) mod playlist_tree;
 mod playlists;
 pub(crate) mod root;
 pub mod staging;

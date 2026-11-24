@@ -29,6 +29,7 @@ mod wine_paths;
 
 mod library;
 mod playback;
+mod playlist_tree;
 mod playlists;
 mod rekordbox_resources;
 mod settings;
@@ -90,12 +91,12 @@ use crate::models::{
     PlaylistMembership, PlaylistMembershipState, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveSourceFolderData, RemoveSourceFolderRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
-    ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ReorderPlaylistsData,
-    ReorderPlaylistsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
-    ResolveTrackIdentityData, ResolveTrackIdentityRequest, ResolvedBy, ScanLibraryData,
-    ScanLibraryRequest, SetExternalLibraryEnabledRequest, SetFrontendSettingData,
-    SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SetSourceFolderEnabledRequest,
-    SourceFolder, StopPlaybackData, Track, TrackFileSource, TrackMatch, WarningEntry,
+    ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ResolvePlaybackSourceData,
+    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
+    ResolvedBy, ScanLibraryData, ScanLibraryRequest, SetExternalLibraryEnabledRequest,
+    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
+    SetSourceFolderEnabledRequest, SourceFolder, StopPlaybackData, Track, TrackFileSource,
+    TrackMatch, WarningEntry,
 };
 use crate::player::PlaybackController;
 use crate::scanner::{ScanCache, scan_audio_files, unique_paths};

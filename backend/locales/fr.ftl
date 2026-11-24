@@ -123,6 +123,7 @@ usb-order-edit-saved = Ordre enregistré sur la clé USB
 usb-order-edit-unchanged = Ordre inchangé : rien à enregistrer
 usb-order-edit-cancelled = Modifications de l'ordre abandonnées
 usb-order-edit-not-active = La modification de l'ordre n'est pas active pour cette clé USB
+usb-order-edit-move-other-folder = Les éléments ne se déplacent qu’à l’intérieur de leur dossier
 usb-order-edit-saving = Le nouvel ordre est en cours d'enregistrement sur la clé USB ; attendez la fin
 usb-write-busy = Une autre écriture USB est en cours ; réessayez quand elle sera terminée
 usb-order-edit-read-only = Cette clé USB n'est pas accessible en écriture, son ordre ne peut donc pas être modifié
@@ -846,6 +847,10 @@ repair-strict-parity-summary = { $playlists ->
 }
 repair-strict-parity-rebuilt-pdb = PDB manquante reconstruite depuis l'eDB ; { $summary }
 repair-strict-parity-rebuilt-edb = eDB manquante reconstruite depuis la PDB ; { $summary }
+repair-strict-parity-flattened-copies = { $count ->
+    [one] { $count } copie eDB de premier niveau d'une playlist rangée dans un dossier retirée
+   *[other] { $count } copies eDB de premier niveau de playlists rangées dans des dossiers retirées
+} ; { $summary }
 repair-fix-duplicate-entries = Retirer les entrées de playlists PDB en double
 repair-fix-duplicate-entries-description = Retire { $count ->
     [one] { $count } ligne playlist_entries obsolète en double
@@ -1216,6 +1221,7 @@ analysis-warning-mp3-seek-skipped-report = données de recherche MP3 non ajouté
 
 error-track-not-found = morceau introuvable : { $id }
 error-playlist-not-found = playlist introuvable : { $id }
+error-playlist-folder-not-found = dossier de playlists introuvable : { $id }
 error-track-not-found-anywhere = morceau introuvable dans la Bibliothèque ou sur la clé USB sélectionnée
 error-usb-playlist-not-found = playlist USB introuvable : { $playlist }
 error-usb-history-not-found = historique USB introuvable : { $history }
@@ -1554,6 +1560,14 @@ scan-warning-playlist-tracks-unplayable = { $count ->
 
 playlist-created = Playlist créée : { $name }
 playlist-deleted = Playlist supprimée : { $name }
+playlist-folder-created = Dossier créé : { $name }
+playlist-folder-deleted = Dossier supprimé : { $name }
+playlist-folder-delete-confirm = Supprimer le dossier « { $name } » ?
+playlist-folder-delete-confirm-items = Supprimer le dossier « { $name } » ?
+
+    Son contenu remonte d'un niveau. Aucune playlist n'est supprimée.
+playlist-folder-collapse = Replier
+playlist-folder-expand = Déplier
 
 playlist-delete-confirm = Supprimer « { $name } » ?
 
@@ -1610,6 +1624,10 @@ playlist-reorder-lock-tooltip = Pas de réordonnancement sur la clé USB — «�
 
 playlist-error-name-empty = le nom de la playlist ne doit pas être vide
 playlist-create-failed = Impossible de créer la playlist : { $error }
+playlist-folder-error-name-empty = le nom du dossier ne doit pas être vide
+playlist-folder-error-move-into-playlist = seul un dossier peut contenir d'autres éléments
+playlist-folder-error-move-into-itself = un dossier ne peut pas aller dans lui-même
+playlist-folder-create-failed = Impossible de créer le dossier : { $error }
 playlist-rename-failed = Échec du renommage : { $error }
 playlist-order-failed = Échec de l'enregistrement de l'ordre des playlists : { $error }
 playlist-track-order-failed = Échec de l'enregistrement de l'ordre des morceaux : { $error }
@@ -2180,20 +2198,25 @@ ui-settings-update-release-link = Nouveautés ↗
 
 ## ui-sidebar
 
-ui-sidebar-add-playlist = Nouvelle
 ui-sidebar-collapse = Réduire la barre latérale
 ui-sidebar-donate = Faire un don
 ui-sidebar-donate-tooltip = Pensez à faire un don
 ui-sidebar-export-playlists = Exporter des playlists…
 ui-sidebar-export-playlists-tooltip = Exporter plusieurs playlists vers la clé USB en une fois
 ui-sidebar-expand = Déplier la barre latérale
+ui-sidebar-folder-delete = Supprimer le dossier
+ui-sidebar-folder-delete-title = Supprimer le dossier
+ui-sidebar-folder-name-placeholder = Nom du dossier
+ui-sidebar-folder-new-playlist = Nouvelle playlist dans ce dossier
+ui-sidebar-folder-rename = Renommer le dossier
 ui-sidebar-history = Historique
 ui-sidebar-import-playlist-aria-label = Importer des playlists
 ui-sidebar-import-playlist-tooltip = Importer des playlists depuis rekordbox ou Mixxx
 ui-sidebar-library = Bibliothèque
 ui-sidebar-manage = Gérer
 ui-sidebar-nav-aria-label = Sections de l'application
-ui-sidebar-new-playlist = Nouvelle playlist
+ui-sidebar-new-folder = Nouveau dossier, dans le dossier sélectionné
+ui-sidebar-new-playlist = Nouvelle playlist, dans le dossier sélectionné
 ui-sidebar-player-menu = Menu du lecteur
 ui-sidebar-playlists = Playlists
 ui-sidebar-resizer-tooltip = Glisser pour redimensionner · double-cliquer pour réinitialiser

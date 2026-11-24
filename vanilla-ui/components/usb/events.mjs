@@ -1,5 +1,5 @@
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
-import { bindListDragReorder } from "../shared/list_drag_reorder.mjs";
+import { bindTreeDragMove } from "../shared/tree_drag_move.mjs";
 import { bindTrackDragReorder } from "../shared/track_drag_reorder.mjs";
 import {
   beginUsbOrderEdit, cancelUsbOrderEdit, commitUsbViewSort, isUsbOrderEditing, isUsbViewSortActive,
@@ -230,11 +230,12 @@ export function bindUsbEvents(ctx) {
     saveUsbOrderEdit(ctx).catch(catchErr(emitStatus));
   });
 
-  bindListDragReorder(el.usbPlaylists, {
+  bindTreeDragMove(el.usbPlaylists, {
     handleSelector: "[data-usb-drag-handle]",
     itemSelector: "li",
+    siblingsOnly: true,
     // It reports its own failure (and re-reads the real order).
-    onMove: (fromIndex, toIndex) => moveUsbPlaylistInOrder(ctx, fromIndex, toIndex),
+    onMove: (item, target, placement) => moveUsbPlaylistInOrder(ctx, item, target, placement),
   });
 
   bindTrackDragReorder(el.usbPlaylistTracks, usbPlaylistTracksCtl, {
@@ -295,7 +296,7 @@ export function bindUsbEvents(ctx) {
 
   // The Export playlists page.
   el.exportPlaylistsList.addEventListener("change", (event) => {
-    if (event.target.matches(".export-playlists-check")) ctx.toggleExportPlaylist(event.target);
+    if (event.target.matches(".export-playlists-check, .export-playlists-folder-check")) ctx.toggleExportPlaylist(event.target);
   });
   el.exportPlaylistsList.addEventListener("click", (event) => ctx.clickExportPlaylistRow(event.target));
   el.exportPlaylistsSelectAll.addEventListener("change", () => ctx.selectExportPlaylists("all"));

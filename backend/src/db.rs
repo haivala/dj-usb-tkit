@@ -138,6 +138,16 @@ impl Db {
               updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS playlist_folders (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              parent_id TEXT,
+              sort_order INTEGER,
+              collapsed INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS playlist_tracks (
               id TEXT PRIMARY KEY,
               playlist_id TEXT NOT NULL,
@@ -281,6 +291,7 @@ impl Db {
         ensure_playlists_column(&conn, "last_exported_usb_name", "TEXT")?;
         ensure_playlists_column(&conn, "import_source", "TEXT")?;
         ensure_playlists_column(&conn, "sort_order", "INTEGER")?;
+        ensure_playlists_column(&conn, "folder_id", "TEXT")?;
         ensure_track_cues_column(&conn, "is_playback_start", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_track_cues_column(&conn, "is_memory", "INTEGER NOT NULL DEFAULT 0")?;
         conn.execute_batch(
@@ -339,6 +350,7 @@ const ALLOWED_PLAYLIST_COLUMNS: &[&str] = &[
     "last_exported_usb_name",
     "import_source",
     "sort_order",
+    "folder_id",
 ];
 
 const ALLOWED_TRACK_CUES_COLUMNS: &[&str] = &["is_playback_start", "is_memory"];

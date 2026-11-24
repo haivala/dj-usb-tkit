@@ -18,6 +18,9 @@ the additive export appends and patches instead of rewriting.
 - `repair_pdb_t19_template_state` (export still rewrites an app-written `t19`)
 - ANLZ: `fix_beat_grid_header`, `add_missing_mp3_seek_data`,
   `add_analysis_track_path`, `separate_shared_analysis`
+- strict parity's flattened-copy removal (`flattened_edb_copies`): top-level
+  eDB copies of playlists in folders, which the repair wrote before it kept
+  folders
 
 Keep beyond 1.0.0, since other writers or interrupted writes cause these too:
 torn growth pages, truncated table chain, unknown header compatibility values,

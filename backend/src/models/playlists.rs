@@ -33,12 +33,167 @@ pub struct Playlist {
     /// That line's tooltip: the USB's folder, when the line names the USB by its name.
     #[serde(default)]
     pub export_status_tooltip: Option<String>,
+    /// The library folder the playlist is in; none at the top level.
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    /// Its folders' names from the top down, joined as "Sets / Friday"; none
+    /// at the top level.
+    #[serde(default)]
+    pub folder_path: Option<String>,
+}
+
+/// A library playlist folder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistFolder {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub collapsed: bool,
+    /// What the dialog asks before deleting the folder.
+    pub delete_confirm_text: String,
+    /// The collapse arrow's tooltip.
+    pub toggle_tooltip: String,
+}
+
+/// A folder or a playlist in the sidebar tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaylistTreeKind {
+    Folder,
+    Playlist,
+}
+
+/// One row the sidebar draws, top first: the children of a collapsed folder
+/// are left out.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistSidebarRow {
+    pub kind: PlaylistTreeKind,
+    pub id: String,
+    /// Folders above it: 0 at the top level.
+    pub depth: usize,
+}
+
+/// One row of a list of every playlist in the sidebar's tree, every folder
+/// open (the Add to… dialog, the Export playlists page): a folder, or a
+/// playlist whose own row the list carries by its id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistListRow {
+    pub kind: PlaylistTreeKind,
+    pub id: String,
+    /// Folders above it: 0 at the top level.
+    pub depth: usize,
+    /// A folder's name; empty for a playlist.
+    #[serde(default)]
+    pub name: String,
+    /// A folder's playlists, at any depth, which its box ticks; empty for a
+    /// playlist. A folder holding none is left out.
+    #[serde(default)]
+    pub playlist_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePlaylistRequest {
     pub name: String,
+    /// The folder it goes in, at the top; none for the top level.
+    #[serde(default)]
+    pub folder_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePlaylistFolderRequest {
+    pub name: String,
+    /// The folder it goes in, at the top; none for the top level.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePlaylistFolderData {
+    pub folder_id: String,
+    pub name: String,
+    pub status_text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenamePlaylistFolderRequest {
+    pub folder_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenamePlaylistFolderData {
+    pub folder_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletePlaylistFolderRequest {
+    pub folder_id: String,
+}
+
+/// The folder is gone; what it held moved up one level, in its place.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletePlaylistFolderData {
+    pub folder_id: String,
+    pub deleted: bool,
+    pub status_text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPlaylistFolderCollapsedRequest {
+    pub folder_id: String,
+    pub collapsed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPlaylistFolderCollapsedData {
+    pub folder_id: String,
+    pub collapsed: bool,
+}
+
+/// A folder or a playlist, by id.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistTreeItem {
+    pub kind: PlaylistTreeKind,
+    pub id: String,
+}
+
+/// Where a moved item lands, next to `target` or inside it (a folder, at the end).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaylistTreePlacement {
+    Before,
+    After,
+    Inside,
+}
+
+/// Moves a folder (with what it holds) or a playlist in the sidebar tree.
+/// The tree is the library's own; it never changes anything on the USB.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovePlaylistTreeItemRequest {
+    pub item: PlaylistTreeItem,
+    pub target: PlaylistTreeItem,
+    pub placement: PlaylistTreePlacement,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovePlaylistTreeItemData {
+    pub item: PlaylistTreeItem,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,20 +218,6 @@ pub struct RenamePlaylistData {
     pub name: String,
 }
 
-/// The full new sidebar order of the local playlists, top first. Must name
-/// every playlist exactly once.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReorderPlaylistsRequest {
-    pub ordered_playlist_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReorderPlaylistsData {
-    pub reordered: usize,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeletePlaylistRequest {
@@ -94,7 +235,10 @@ pub struct DeletePlaylistData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListPlaylistsData {
+    /// In tree order: top first, depth-first.
     pub items: Vec<Playlist>,
+    pub folders: Vec<PlaylistFolder>,
+    pub sidebar: Vec<PlaylistSidebarRow>,
 }
 
 /// The playlists as they are, with their export status against the selected USB: what
@@ -102,7 +246,11 @@ pub struct ListPlaylistsData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistsState {
+    /// In tree order: top first, depth-first.
     pub playlists: Vec<Playlist>,
+    pub folders: Vec<PlaylistFolder>,
+    /// What the sidebar draws, top first.
+    pub sidebar: Vec<PlaylistSidebarRow>,
     pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
@@ -504,6 +652,8 @@ pub struct PlaylistMembership {
 #[serde(rename_all = "camelCase")]
 pub struct GetPlaylistMembershipData {
     pub items: Vec<PlaylistMembership>,
+    /// The dialog's rows: `items` by id, under their folders.
+    pub tree: Vec<PlaylistListRow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

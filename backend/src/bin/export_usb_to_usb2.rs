@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddSourceFoldersRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
-    BrowseSourceFilesRequest, ExportToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest,
+    AddSourceFoldersRequest, AddTrackCandidate, AnalyzeNewTracksRequest, AddTrackCandidatesToPlaylistRequest,
+    BrowseSourceFilesRequest, CreatePlaylistFolderRequest, CreatePlaylistRequest,
+    ExportPlaylistsToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest,
+    MovePlaylistTreeItemRequest, PlaylistTreeItem, PlaylistTreeKind, PlaylistTreePlacement,
 };
 
 fn fail(message: impl AsRef<str>) -> ! {
@@ -34,7 +36,7 @@ fn main() {
     let args = env::args().collect::<Vec<_>>();
     if args.len() != 3 {
         fail(
-            "usage: cargo run --bin export_usb_to_usb2 -- <usb_source_root> <usb_target_root> (copies all source playlists)",
+            "usage: cargo run --bin export_usb_to_usb2 -- <usb_source_root> <usb_target_root> (copies all source playlists, in their folders and order)",
         );
     }
 
@@ -156,38 +158,44 @@ fn main() {
         fail_with_cleanup("no USB playlists found to export", &data_dir);
     }
 
-    let mut exported_count = 0usize;
-    for usb_playlist in usb_data.data.items {
-        let create = backend.create_playlist(backend::models::CreatePlaylistRequest {
-            name: usb_playlist.name.clone(),
-        });
-        if !create.ok {
-            eprintln!(
-                "warn: skipping playlist '{}': create failed: {}",
-                usb_playlist.name,
-                create
-                    .error
-                    .as_ref()
-                    .map(|e| e.message.as_str())
-                    .unwrap_or("unknown error")
-            );
+    // The source stick's tree, rebuilt in the library: its folders, then each
+    // playlist in its folder with the tracks matched by path.
+    let usb = usb_data.data;
+    let items: HashMap<&str, &backend::models::UsbPlaylist> =
+        usb.items.iter().map(|item| (item.id.as_str(), item)).collect();
+    let mut folders = HashMap::<String, String>::new();
+    // Per library folder ("" at the top), its items in the source order.
+    let mut siblings = HashMap::<String, Vec<PlaylistTreeItem>>::new();
+    let mut playlist_ids = Vec::<String>::new();
+    let mut analyze_ids = std::collections::BTreeSet::<String>::new();
+    for row in &usb.tree {
+        let parent = folders.get(&row.parent_id).cloned();
+        if row.kind == PlaylistTreeKind::Folder {
+            let created = backend.create_playlist_folder(CreatePlaylistFolderRequest {
+                name: row.name.clone(),
+                parent_id: parent.clone(),
+            });
+            let Some(data) = created.data.filter(|_| created.ok) else {
+                fail_with_cleanup(format!("creating folder '{}' failed", row.name), &data_dir);
+            };
+            let folder_id = data.data.folder_id;
+            folders.insert(row.id.clone(), folder_id.clone());
+            siblings.entry(parent.unwrap_or_default()).or_default().push(PlaylistTreeItem {
+                kind: PlaylistTreeKind::Folder,
+                id: folder_id,
+            });
             continue;
         }
-        let playlist_id = create
-            .data
-            .as_ref()
-            .map(|d| d.data.playlist_id.clone())
-            .unwrap_or_else(|| fail_with_cleanup("missing create_playlist data", &data_dir));
-
-        let mut ids = Vec::<String>::new();
-        for t in &usb_playlist.tracks {
-            let Some(key) = canonical_path_key(&t.file_path) else {
-                continue;
-            };
-            if let Some(id) = track_map.get(&key) {
-                ids.push(id.clone());
-            }
-        }
+        let Some(usb_playlist) = items.get(row.id.as_str()) else {
+            continue;
+        };
+        let ids: Vec<String> = usb_playlist
+            .tracks
+            .iter()
+            .filter_map(|t| canonical_path_key(&t.file_path))
+            .filter_map(|key| track_map.get(&key).cloned())
+            .collect();
+        analyze_ids.extend(ids.iter().cloned());
         if ids.is_empty() {
             eprintln!(
                 "warn: playlist '{}' has no matched local tracks by path",
@@ -195,7 +203,15 @@ fn main() {
             );
             continue;
         }
-
+        let create = backend.create_playlist(CreatePlaylistRequest {
+            name: row.name.clone(),
+            folder_id: parent.clone(),
+        });
+        let Some(created) = create.data.filter(|_| create.ok) else {
+            eprintln!("warn: skipping playlist '{}': create failed", usb_playlist.name);
+            continue;
+        };
+        let playlist_id = created.data.playlist_id;
         // Candidates keep the USB playlist's order (a library selection would
         // add in library order).
         let add = backend.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
@@ -213,7 +229,7 @@ fn main() {
         });
         if !add.ok {
             eprintln!(
-                "warn: skipping playlist '{}': add_track_candidates_to_playlist failed: {}",
+                "warn: skipping playlist '{}': adding its tracks failed: {}",
                 usb_playlist.name,
                 add.error
                     .as_ref()
@@ -222,47 +238,72 @@ fn main() {
             );
             continue;
         }
-
-        let export = backend.export_to_usb(ExportToUsbRequest {
-            usb_root: Some(target_root.to_string_lossy().to_string()),
-            playlist_id: playlist_id.clone(),
-            options: None,
-            sort: None,
+        siblings.entry(parent.unwrap_or_default()).or_default().push(PlaylistTreeItem {
+            kind: PlaylistTreeKind::Playlist,
+            id: playlist_id.clone(),
         });
-        if !export.ok {
-            eprintln!(
-                "warn: export failed for '{}': {}",
-                usb_playlist.name,
+        playlist_ids.push(playlist_id);
+    }
+    if playlist_ids.is_empty() {
+        fail_with_cleanup("no playlist had tracks to export", &data_dir);
+    }
+
+    // Export takes analyzed tracks only: analyze the ones it will write.
+    let analyze = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+        track_ids: analyze_ids.into_iter().collect(),
+        ..Default::default()
+    });
+    if !analyze.ok {
+        fail_with_cleanup("analyzing the tracks failed", &data_dir);
+    }
+
+    // New items go first in their folder: each after the one before it puts
+    // them back in the source order.
+    for items in siblings.values() {
+        for pair in items.windows(2) {
+            let moved = backend.move_playlist_tree_item(MovePlaylistTreeItemRequest {
+                item: pair[1].clone(),
+                target: pair[0].clone(),
+                placement: PlaylistTreePlacement::After,
+            });
+            if !moved.ok {
+                fail_with_cleanup("ordering the rebuilt playlists failed", &data_dir);
+            }
+        }
+    }
+
+    // One export of everything, in the app's (the source's) order.
+    let export = backend.export_playlists_to_usb_with_progress(
+        ExportPlaylistsToUsbRequest {
+            usb_root: Some(target_root.to_string_lossy().to_string()),
+            playlist_ids,
+            force_playlist_order: true,
+            force_track_order: false,
+            options: None,
+        },
+        |_, _, _| {},
+    );
+    let Some(data) = export.data.filter(|_| export.ok) else {
+        fail_with_cleanup(
+            format!(
+                "export failed: {}",
                 export
                     .error
                     .as_ref()
                     .map(|e| e.message.as_str())
                     .unwrap_or("unknown error")
-            );
-            continue;
-        }
-        let data = export
-            .data
-            .unwrap_or_else(|| fail_with_cleanup("missing export_to_usb data", &data_dir))
-            .data;
-        exported_count += 1;
-        println!(
-            "exported '{}' -> {} (tracks={}, skipped={})",
-            data.playlist_name, data.usb_root, data.exported_tracks, data.skipped_tracks
+            ),
+            &data_dir,
         );
-        if !data.warnings.is_empty() {
-            let lines = data
-                .warnings
-                .iter()
-                .map(|w| w.message.as_str())
-                .collect::<Vec<_>>();
-            println!("  warnings: {}", lines.join(" | "));
-        }
+    };
+    let data = data.data;
+    println!("{}", data.status_text);
+    for warning in &data.warnings {
+        println!("  warning: {}", warning.message);
     }
-
     println!(
         "done: exported {} playlist(s) from {} to {}",
-        exported_count,
+        data.exported_playlists,
         source_root.display(),
         target_root.display()
     );

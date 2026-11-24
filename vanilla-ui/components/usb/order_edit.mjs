@@ -1,6 +1,5 @@
 import { t } from "../../ui_texts.mjs";
 import { clearTrackSort, renderTrackSortHeader } from "../shell/actions.mjs";
-import { moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { clearUsbDiagnostics, refreshUsb, renderUsbPlaylists } from "./actions.mjs";
 
 // Edit order: the USB playlists' order and the order of the tracks in them,
@@ -110,15 +109,18 @@ export async function settleUsbOrderEditBeforeLeaving(ctx) {
   return false;
 }
 
-// A playlist row dropped at a new index in the list.
-export async function moveUsbPlaylistInOrder(ctx, fromIndex, toIndex) {
+// A playlist or folder row dropped before or after another row of its folder;
+// the backend answers with the list in its new order.
+export async function moveUsbPlaylistInOrder(ctx, item, target, placement) {
   const { state } = ctx;
-  const moved = moveArrayItem(state.usbPlaylists, fromIndex, toIndex);
-  const playlistId = moved[toIndex].id;
-  const beforePlaylistId = moved[toIndex + 1]?.id ?? null;
   try {
-    const data = await ctx.command("move_usb_playlist", { usbRoot: state.usbRoot, playlistId, beforePlaylistId });
-    state.usbPlaylists = moved;
+    const data = await ctx.command("move_usb_playlist", {
+      usbRoot: state.usbRoot,
+      playlistId: item.id,
+      beforePlaylistId: placement === "before" ? target.id : null,
+      afterPlaylistId: placement === "after" ? target.id : null,
+    });
+    if (data.tree) state.usbPlaylistTree = data.tree;
     applyUsbOrderEdit(ctx, data.orderEdit);
   } catch (err) {
     // The drag already moved the row: read the order back.

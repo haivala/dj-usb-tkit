@@ -16,6 +16,7 @@
 //! [`apply_pending_order`], the same function that orders the view, so what
 //! the view shows is what gets written.
 
+use super::playlist_tree;
 use super::root::{can_write_file_at, has_write_access, resolve_usb_root};
 use super::staging::{SessionBackup, UsbDatabases, UsbWriteGuard};
 use super::text::canonicalize_playlist_name;
@@ -48,9 +49,12 @@ const BACKUP_REASON: &str = "Before order edit";
 /// The pending order: what a save would write.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct PendingOrder {
-    /// USB playlist ids (`UsbPlaylist::id`) in the new order; `None` while the
-    /// list is in the stick's order.
-    playlists: Option<Vec<String>>,
+    /// Per folder (`UsbTreeNode::id`, [`TOP`] for the top level) whose
+    /// items were moved, its items' ids (playlists and folders) in the new
+    /// order. A folder back in the stick's order has none.
+    ///
+    /// [`TOP`]: super::playlist_tree::TOP
+    playlists: HashMap<String, Vec<String>>,
     /// Per edited playlist (`UsbPlaylist::id`), the media path key
     /// ([`track_order_key`]) of each of its rows in the new order.
     tracks: HashMap<String, Vec<String>>,
@@ -58,7 +62,7 @@ struct PendingOrder {
 
 impl PendingOrder {
     fn is_empty(&self) -> bool {
-        self.playlists.is_none() && self.tracks.is_empty()
+        self.playlists.is_empty() && self.tracks.is_empty()
     }
 
     /// Stores `keys` as `playlist_id`'s order, or drops it when it is the
@@ -143,9 +147,9 @@ fn pdb_playlist_id(id: &str) -> Option<u32> {
         .and_then(|rest| rest.parse::<u32>().ok())
 }
 
-/// The canonical names an eDB playlist can have to be this USB playlist, as
-/// the playlist read pairs them: an eDB-only playlist's own name, a PDB
-/// playlist's leaf name and its "Folder / Leaf" name.
+/// The path keys an eDB playlist can have to be this USB playlist, as the
+/// playlist read pairs them: an eDB-only playlist's own key, a PDB
+/// playlist's path key.
 fn edb_playlist_names(id: &str, parsed: Option<&ParsedPdb>) -> Vec<String> {
     if let Some(name) = id.strip_prefix("usb-pl-name-") {
         return vec![name.to_string()];
@@ -160,21 +164,18 @@ fn edb_playlist_names(id: &str, parsed: Option<&ParsedPdb>) -> Vec<String> {
     else {
         return Vec::new();
     };
-    let mut names = vec![canonicalize_playlist_name(&leaf.name)];
-    if let Some(folder) = parsed.playlist_tree.iter().find(|p| p.id == leaf.parent_id) {
-        names.push(canonicalize_playlist_name(&format!(
-            "{} / {}",
-            folder.name, leaf.name
-        )));
-    }
-    names
+    vec![
+        crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree)
+            .path(leaf)
+            .key(),
+    ]
 }
 
 fn order_edit_state(edit: &UsbOrderEdit) -> UsbOrderEditState {
     let mut edited_playlist_ids: Vec<String> = edit.pending.tracks.keys().cloned().collect();
     edited_playlist_ids.sort();
     let count = edited_playlist_ids.len();
-    let editing_text = match (edit.pending.playlists.is_some(), count) {
+    let editing_text = match (!edit.pending.playlists.is_empty(), count) {
         (false, 0) => tr::usb_order_edit_editing(),
         (false, count) => tr::usb_order_edit_editing_changed(count),
         (true, 0) => tr::usb_order_edit_editing_list_changed(),
@@ -205,7 +206,33 @@ fn verify_saved_order(
     let edb_playlists = crate::edb::read_edb(&conn, usb_root, crate::edb::EdbRead::ALL)
         .map(|library| library.resolved_playlists(usb_root))
         .unwrap_or_default();
+    let edb_tree = crate::edb::read_edb_playlist_tree(&conn)?;
     drop(conn);
+    // Each moved folder's place, where both databases have the folder.
+    let folder_places = |rows: &[crate::pdb_reader::PdbPlaylistTreeRow]| -> HashMap<String, (String, u32)> {
+        let tree = crate::pdb_reader::PlaylistTree::new(rows);
+        rows.iter()
+            .filter(|row| row.is_folder)
+            .map(|row| {
+                let path = tree.path(row);
+                let display = path.display();
+                let mut segments = path.folders;
+                segments.push(path.name);
+                (playlist_tree::folder_id(&segments), (display, row.sort_order))
+            })
+            .collect()
+    };
+    let pdb_folders = folder_places(&parsed.playlist_tree);
+    let edb_folders = folder_places(&edb_tree);
+    let mut differing_folders: Vec<String> = pending
+        .playlists
+        .values()
+        .flatten()
+        .filter_map(|id| match (pdb_folders.get(id), edb_folders.get(id)) {
+            (Some((name, pdb)), Some((_, edb))) if pdb != edb => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
     let (_, _, details, _) = build_usb_parity_comparison(
         parsed,
         &edb_playlists,
@@ -219,7 +246,7 @@ fn verify_saved_order(
     let track_edited: HashSet<String> = pending.tracks.keys().flat_map(|id| names_of(id)).collect();
     let moved: HashSet<String> = pending
         .playlists
-        .iter()
+        .values()
         .flatten()
         .flat_map(|id| names_of(id))
         .collect();
@@ -236,6 +263,7 @@ fn verify_saved_order(
         })
         .map(|detail| detail.name.clone())
         .collect();
+    differing.append(&mut differing_folders);
     if differing.is_empty() {
         return Ok(());
     }
@@ -299,12 +327,14 @@ impl BackendService {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The pending playlist order of `usb_root`'s edit, if it has one.
-    pub(crate) fn pending_usb_playlist_order(&self, usb_root: &Path) -> Option<Vec<String>> {
+    /// The pending order of the folders whose items `usb_root`'s edit moved
+    /// (see `PendingOrder::playlists`); empty without one.
+    pub(crate) fn pending_usb_playlist_order(&self, usb_root: &Path) -> HashMap<String, Vec<String>> {
         self.order_edit_slot()
             .as_ref()
             .filter(|edit| edit.usb_root == usb_root)
-            .and_then(|edit| edit.pending.playlists.clone())
+            .map(|edit| edit.pending.playlists.clone())
+            .unwrap_or_default()
     }
 
     /// The pending track order of a playlist in `usb_root`'s edit, if it has one.
@@ -421,7 +451,9 @@ impl BackendService {
         })
     }
 
-    /// Moves a playlist in the pending playlist order.
+    /// Moves a playlist or a folder among its folder's items in the pending
+    /// order: before `before_playlist_id`, after `after_playlist_id`, or to
+    /// the folder's end. Refused for an item of another folder.
     pub fn move_usb_playlist(
         &self,
         req: MoveUsbPlaylistRequest,
@@ -429,30 +461,59 @@ impl BackendService {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         self.require_usb_order_edit(&usb_root)?;
         let resolved = self.usb_playlists_resolved(&usb_root)?;
-        let base: Vec<String> = resolved.items.iter().map(|p| p.id.clone()).collect();
-        self.change_usb_order_edit(&usb_root, |pending| {
-            let mut order = base.clone();
-            apply_pending_order(
-                &mut order,
-                pending.playlists.as_deref().unwrap_or_default(),
-                Clone::clone,
-            );
-            let position = |id: &str| {
+        let nodes = &resolved.tree;
+        let not_found = |id: &str| BackendError::NotFound(tr::error_usb_playlist_not_found(id));
+        let parent = playlist_tree::parent_of(nodes, &req.playlist_id)
+            .ok_or_else(|| not_found(&req.playlist_id))?;
+        for other in [&req.before_playlist_id, &req.after_playlist_id]
+            .into_iter()
+            .flatten()
+        {
+            match playlist_tree::parent_of(nodes, other) {
+                None => return Err(not_found(other)),
+                Some(other_parent) if other_parent != parent => {
+                    return Err(BackendError::Validation(
+                        tr::usb_order_edit_move_other_folder(),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        let ids = |pending: &HashMap<String, Vec<String>>| -> Vec<String> {
+            playlist_tree::children_in_order(nodes, parent, pending)
+                .into_iter()
+                .map(|node| node.id.clone())
+                .collect()
+        };
+        let base = ids(&HashMap::new());
+        let mut data = self.change_usb_order_edit(&usb_root, |pending| {
+            let mut order = ids(&pending.playlists);
+            let position = |order: &[String], id: &str| {
                 order
                     .iter()
                     .position(|other| other == id)
-                    .ok_or_else(|| BackendError::NotFound(tr::error_usb_playlist_not_found(id)))
+                    .ok_or_else(|| not_found(id))
             };
-            let from = position(&req.playlist_id)?;
-            let before = req
-                .before_playlist_id
-                .as_deref()
-                .map(position)
-                .transpose()?;
+            let from = position(&order, &req.playlist_id)?;
+            let before = match (&req.before_playlist_id, &req.after_playlist_id) {
+                (Some(before), _) => Some(position(&order, before)?),
+                (None, Some(after)) => {
+                    let at = position(&order, after)? + 1;
+                    (at < order.len()).then_some(at)
+                }
+                (None, None) => None,
+            };
             move_before(&mut order, from, before);
-            pending.playlists = (order != base).then_some(order);
+            if order == base {
+                pending.playlists.remove(parent);
+            } else {
+                pending.playlists.insert(parent.to_string(), order);
+            }
             Ok(())
-        })
+        })?;
+        let pending = self.pending_usb_playlist_order(&usb_root);
+        data.tree = Some(playlist_tree::tree_rows(&playlist_tree::walk(nodes, &pending)));
+        Ok(data)
     }
 
     /// Moves one row of a USB playlist in its pending track order. Not for a history.
@@ -622,6 +683,7 @@ impl BackendService {
             status_text: tr::usb_order_edit_saved().render(),
             warning_text: warning_text(warning_count),
             warnings,
+            tree: None,
         })
     }
 
@@ -664,16 +726,43 @@ impl BackendService {
         };
         let parsed = parsed.as_ref();
 
-        // Playlist order: every playlist's place in the whole list, in both
-        // databases, so a read sorts rows from either database together.
+        // Playlist order: in each moved folder, every item's place, folders
+        // and playlists numbered together as rekordbox numbers them, the same
+        // in both databases.
+        let pdb_folder_ids: HashMap<String, u32> = parsed
+            .map(|parsed| {
+                let tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
+                parsed
+                    .playlist_tree
+                    .iter()
+                    .filter(|row| row.is_folder)
+                    .map(|row| {
+                        let path = tree.path(row);
+                        let mut segments = path.folders;
+                        segments.push(path.name);
+                        (playlist_tree::folder_id(&segments), row.id)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut pdb_sort = HashMap::<u32, u32>::new();
         let mut edb_sort = HashMap::<String, u32>::new();
-        for (position, id) in (0u32..).zip(pending.playlists.iter().flatten()) {
-            if let Some(pdb_id) = pdb_playlist_id(id) {
-                pdb_sort.insert(pdb_id, position);
-            }
-            for name in edb_playlist_names(id, parsed) {
-                edb_sort.insert(name, position);
+        let mut edb_folder_sort = HashMap::<String, u32>::new();
+        for ids in pending.playlists.values() {
+            for (position, id) in (0u32..).zip(ids) {
+                if let Some(folder) = pdb_folder_ids.get(id) {
+                    pdb_sort.insert(*folder, position);
+                }
+                if id.starts_with(playlist_tree::FOLDER_PREFIX) {
+                    edb_folder_sort.insert(id.clone(), position);
+                    continue;
+                }
+                if let Some(pdb_id) = pdb_playlist_id(id) {
+                    pdb_sort.insert(pdb_id, position);
+                }
+                for name in edb_playlist_names(id, parsed) {
+                    edb_sort.insert(name, position);
+                }
             }
         }
 
@@ -747,7 +836,7 @@ impl BackendService {
                 .edb()?
                 .ok_or_else(|| BackendError::Validation(tr::usb_order_edit_edb_open_failed()))?;
             let tx = conn.transaction()?;
-            let mut updated = write_edb_playlist_order(&tx, &edb_sort)?;
+            let mut updated = write_edb_playlist_order(&tx, &edb_sort, &edb_folder_sort)?;
             for (playlist_id, order) in &pending.tracks {
                 let names: HashSet<String> = edb_playlist_names(playlist_id, parsed)
                     .into_iter()

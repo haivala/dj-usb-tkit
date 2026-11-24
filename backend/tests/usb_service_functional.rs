@@ -75,6 +75,7 @@ fn scan_and_export_single_track(
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -163,6 +164,7 @@ fn scan_and_export_tracks(
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;

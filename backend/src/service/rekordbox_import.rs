@@ -359,12 +359,14 @@ fn list_rekordbox_playlists_from(conn: &Connection) -> BackendResult<Vec<Externa
     Ok(items)
 }
 
-/// A playlist's / history session's name and its content ids in play order.
+/// A playlist's / history session's name, its folders (outermost first; a
+/// history's year / month folders are left out, as the dialog leaves them),
+/// and its content ids in play order.
 fn load_rb_list_entries(
     conn: &Connection,
     kind: ExternalPlaylistKind,
     id: &str,
-) -> BackendResult<(String, Vec<String>)> {
+) -> BackendResult<(String, Vec<String>, Vec<String>)> {
     let tables = rb_tables(kind)?;
     let nodes = load_rb_list_nodes(conn, tables)?;
     let node = nodes
@@ -384,7 +386,17 @@ fn load_rb_list_entries(
         .query_map(params![id], |row| row.get::<_, Option<String>>(0))?
         .filter_map(|r| r.ok().flatten())
         .collect();
-    Ok((node.name.clone(), ids))
+    let folders = match kind {
+        ExternalPlaylistKind::History => Vec::new(),
+        _ => {
+            let path = rb_node_path(&nodes, node);
+            path[..path.len() - 1]
+                .iter()
+                .map(|folder| folder.name.trim().to_string())
+                .collect()
+        }
+    };
+    Ok((node.name.clone(), folders, ids))
 }
 
 /// One row of `djmdCue`.
@@ -993,7 +1005,7 @@ impl BackendService {
         req: ImportExternalPlaylistRequest,
     ) -> BackendResult<ImportExternalPlaylistData> {
         let (master_path, conn) = open_rekordbox_db(req.path.as_deref())?;
-        let (rb_name, entry_ids) = load_rb_list_entries(&conn, req.kind, req.id.trim())?;
+        let (rb_name, folders, entry_ids) = load_rb_list_entries(&conn, req.kind, req.id.trim())?;
         let name = non_empty_db_value(&rb_name)
             .map(str::to_string)
             .unwrap_or_else(|| "rekordbox playlist".to_string());
@@ -1045,7 +1057,7 @@ impl BackendService {
             return Err(no_importable_tracks_error(&name, entry_ids.len()));
         }
         let key = external_playlist_key(REKORDBOX_LIBRARY, req.kind, &req.id);
-        let (playlist, updated_existing) = save_imported_playlist(&tx, &key, &name, &local_ids)?;
+        let (playlist, updated_existing) = save_imported_playlist(&tx, &key, &name, &folders, &local_ids)?;
         tx.commit()?;
 
         let mut warnings = importer.finish_warnings();

@@ -62,11 +62,25 @@ Once analysis finishes, the selection is kept and Export returns. Other blocked 
 greyed out with the reason. Every selectable playlist is chosen to start with; "New and
 changed" chooses only the ones the USB lacks or has out of date. The line on top shows what the
 choice copies against the free space, and the chosen playlists export as one job with one backup.
+Playlists are listed in the sidebar's tree, every folder open and indented as in the sidebar; a
+folder's box chooses all its playlists.
 
 With every playlist chosen, "Use the app's playlist order" puts them on top of the USB's list in
 the app's order. In additive mode, "Use the app's track order" also reorders the tracks of
 playlists already on the USB. Without these, playlists already on the USB keep their place and
 their track order, new playlists go on top and new tracks at the end.
+
+#### Folders
+
+A playlist in app folders is exported into the same folders on the USB, in the PDB and the eDB
+alike, with the same ids in both. A missing folder is made, first in its parent folder like a new
+playlist; the app's playlist order (above) puts folders in the app's order too, as rekordbox
+numbers folders and playlists in one order per parent. A playlist in folders is matched only in
+its folder, so same-named playlists in different folders stay apart; a top-level app playlist is
+matched by name in any USB folder, as before folders existed. Moving a playlist into another
+folder after exporting it doesn't move or remove the USB copy: the next export makes a new one in
+the new folder, and the old one stays until it is removed in USB → Playlists. Engine DJ export
+still puts every playlist at the top level.
 
 ![Export playlists: every playlist, what exporting it would copy, and whether the USB has it](assets/export-playlists.png)
 

@@ -1377,8 +1377,7 @@ impl BackendService {
                         manifest: &manifest,
                         mirror_playlist_entries: false,
                         identity: None,
-                        placement: PlaylistPlacement::MoveToFront,
-                    }],
+                        placement: PlaylistPlacement::MoveToFront, folders: None }],
                 )?;
                 let identity = written.first().map(|w| {
                     (
@@ -1401,9 +1400,11 @@ impl BackendService {
                 playlist_id,
                 sort_order,
                 placement: PlaylistPlacement::MoveToFront,
+                folders: None,
             }],
             t19_property,
             false,
+            &[],
         )?;
         std::fs::write(&pdb_path, &build.bytes)?;
         if let Some(tx) = tx

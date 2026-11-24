@@ -393,6 +393,46 @@ fn list_and_import_rekordbox_playlists_and_history() {
         playlist_titles(&data_dir, &history.playlist_id),
         vec!["Charlie", "Bravo"]
     );
+    // The playlist goes into rekordbox's folders, made in the library; a
+    // history session (rekordbox files it by year and month) at the top.
+    let folder_paths = |backend: &BackendCommands| -> Vec<(String, Option<String>)> {
+        backend
+            .list_playlists()
+            .data
+            .expect("playlists")
+            .playlists
+            .into_iter()
+            .map(|p| (p.name, p.folder_path))
+            .collect()
+    };
+    assert_eq!(
+        folder_paths(&backend),
+        vec![
+            ("HISTORY 2025-01-02".to_string(), None),
+            ("Friday".to_string(), Some("Sets".to_string())),
+        ]
+    );
+    // Imported again (moved to the top meanwhile): it stays where it is.
+    let moved = backend.move_playlist_tree_item(backend::models::MovePlaylistTreeItemRequest {
+        item: backend::models::PlaylistTreeItem {
+            kind: backend::models::PlaylistTreeKind::Playlist,
+            id: imported.playlist_id.clone(),
+        },
+        target: backend::models::PlaylistTreeItem {
+            kind: backend::models::PlaylistTreeKind::Playlist,
+            id: history.playlist_id.clone(),
+        },
+        placement: backend::models::PlaylistTreePlacement::After,
+    });
+    assert!(moved.ok, "move: {moved:?}");
+    import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "11").expect("reimport");
+    assert_eq!(
+        folder_paths(&backend),
+        vec![
+            ("HISTORY 2025-01-02".to_string(), None),
+            ("Friday".to_string(), None),
+        ]
+    );
 
     // Nothing importable: an error, and no empty playlist left behind.
     let err = import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "15").unwrap_err();

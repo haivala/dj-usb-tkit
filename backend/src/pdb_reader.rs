@@ -79,6 +79,82 @@ pub struct PdbPlaylistTreeRow {
     pub name: String,
 }
 
+/// Where a playlist sits in its database's folder tree: the names of the
+/// folders above it, outermost first, then its own. Playlists in different
+/// folders may share a name; their paths tell them apart.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlaylistPath {
+    pub folders: Vec<String>,
+    pub name: String,
+}
+
+impl PlaylistPath {
+    /// A playlist at the top of the tree.
+    pub fn top_level(name: impl Into<String>) -> Self {
+        Self {
+            folders: Vec::new(),
+            name: name.into(),
+        }
+    }
+
+    /// "Folder / Sub / Name"; just the name at the top level.
+    pub fn display(&self) -> String {
+        let mut parts = self.folders.clone();
+        parts.push(self.name.clone());
+        parts.join(" / ")
+    }
+
+    /// The key the two databases' playlists are matched by: the canonical
+    /// form of [`Self::display`], so a top-level playlist's key is its
+    /// name's.
+    pub fn key(&self) -> String {
+        crate::service::usb::text::canonicalize_playlist_name(&self.display())
+    }
+}
+
+/// A database's playlist tree (PDB t07 rows, or the eDB's `playlist` table
+/// read into the same shape), indexed by id.
+pub struct PlaylistTree<'a> {
+    by_id: HashMap<u32, &'a PdbPlaylistTreeRow>,
+}
+
+impl<'a> PlaylistTree<'a> {
+    pub fn new(rows: &'a [PdbPlaylistTreeRow]) -> Self {
+        Self {
+            by_id: rows.iter().map(|row| (row.id, row)).collect(),
+        }
+    }
+
+    /// The folders from the top of the tree down to `parent_id`, outermost
+    /// first. A parent the tree lacks, or a loop, ends the chain there.
+    pub fn folders(&self, parent_id: u32) -> Vec<&'a PdbPlaylistTreeRow> {
+        let mut chain = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut at = parent_id;
+        while at != 0 && seen.insert(at) {
+            let Some(row) = self.by_id.get(&at).copied().filter(|row| row.is_folder) else {
+                break;
+            };
+            chain.push(row);
+            at = row.parent_id;
+        }
+        chain.reverse();
+        chain
+    }
+
+    /// `row`'s path in the tree.
+    pub fn path(&self, row: &PdbPlaylistTreeRow) -> PlaylistPath {
+        PlaylistPath {
+            folders: self
+                .folders(row.parent_id)
+                .into_iter()
+                .map(|folder| folder.name.clone())
+                .collect(),
+            name: row.name.clone(),
+        }
+    }
+}
+
 /// A playlist entry row (t08). A track's place in a playlist is
 /// `(playlist_id, track_id)`; `entry_index` is its position, which an export
 /// may change in place.

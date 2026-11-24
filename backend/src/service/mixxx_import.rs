@@ -1035,7 +1035,7 @@ impl BackendService {
             return Err(no_importable_tracks_error(&name, entry_ids.len()));
         }
         let key = external_playlist_key(MIXXX_LIBRARY, req.kind, &req.id);
-        let (playlist, updated_existing) = save_imported_playlist(&tx, &key, &name, &local_ids)?;
+        let (playlist, updated_existing) = save_imported_playlist(&tx, &key, &name, &[], &local_ids)?;
         tx.commit()?;
 
         let mut warnings = importer.finish_warnings();

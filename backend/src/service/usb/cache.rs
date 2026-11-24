@@ -56,6 +56,8 @@ pub(crate) struct UsbParseCacheKey {
 #[derive(Debug, Clone)]
 pub(crate) struct CachedUsbPlaylists {
     pub(in crate::service) items: Vec<UsbPlaylist>,
+    /// The stick's folders and playlists (`items` by id).
+    pub(in crate::service) tree: Vec<super::playlist_tree::UsbTreeNode>,
     pub(super) stats: UsbImportStats,
     pub(super) warnings: Vec<WarningEntry>,
 }
@@ -228,7 +230,10 @@ impl BackendService {
     /// The names of the playlists on `usb_root`, for the export status. From the parse
     /// caches while the staged databases are unchanged, so a playlist change doesn't read
     /// the USB again; else a names-only read of the staged PDB and eDB.
-    pub(crate) fn usb_playlist_names(&self, usb_root: &Path) -> Arc<HashSet<String>> {
+    pub(crate) fn usb_playlist_names(
+        &self,
+        usb_root: &Path,
+    ) -> Arc<crate::service::export::UsbPlaylistNames> {
         let parsed = UsbDatabases::present(usb_root)
             .ok()
             .flatten()
@@ -238,8 +243,12 @@ impl BackendService {
         Arc::new(
             crate::service::export::usb_playlist_names_for_export_compare(
                 parsed.as_deref().map(|staged| &*staged.parsed),
-                edb.iter()
-                    .flat_map(|library| library.playlists.keys().cloned()),
+                edb.iter().flat_map(|library| {
+                    library
+                        .playlists
+                        .values()
+                        .map(|playlist| playlist.path.clone())
+                }),
             ),
         )
     }

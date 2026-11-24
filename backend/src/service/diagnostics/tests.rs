@@ -693,10 +693,11 @@ fn edb_playlists_from_tracks(
         .enumerate()
         .map(|(idx, (name, tracks))| {
             (
-                name,
+                name.clone(),
                 ExportDbPlaylist {
                     playlist_id: i64::try_from(idx + 1).expect("playlist id"),
                     sort_order: i64::try_from(idx + 1).expect("sort order"),
+                    path: crate::pdb_reader::PlaylistPath::top_level(name),
                     tracks,
                 },
             )
@@ -1327,6 +1328,7 @@ fn parity_report_fails_when_playlist_sort_order_differs() {
             ExportDbPlaylist {
                 playlist_id: 10,
                 sort_order: 2,
+                path: crate::pdb_reader::PlaylistPath::top_level("First"),
                 tracks: vec![make_usb_track("1", "A", "Artist", "/Contents/Artist/A.mp3")],
             },
         ),
@@ -1335,6 +1337,7 @@ fn parity_report_fails_when_playlist_sort_order_differs() {
             ExportDbPlaylist {
                 playlist_id: 20,
                 sort_order: 1,
+                path: crate::pdb_reader::PlaylistPath::top_level("Second"),
                 tracks: vec![make_usb_track("2", "B", "Artist", "/Contents/Artist/B.mp3")],
             },
         ),
@@ -1401,6 +1404,7 @@ fn three_playlist_edb(ids_and_sort: [(i64, i64); 3]) -> HashMap<String, ExportDb
                 ExportDbPlaylist {
                     playlist_id,
                     sort_order,
+                    path: crate::pdb_reader::PlaylistPath::top_level(*name),
                     tracks: vec![make_usb_track(&(i + 1).to_string(), name, "Artist", &path)],
                 },
             )
@@ -1473,6 +1477,7 @@ fn parity_playlist_details_follow_playlist_sort_order_not_name() {
         ExportDbPlaylist {
             playlist_id: 10,
             sort_order: 1,
+            path: crate::pdb_reader::PlaylistPath::top_level("Zeta"),
             tracks: vec![make_usb_track(
                 "1",
                 "Track Z",
@@ -1486,6 +1491,7 @@ fn parity_playlist_details_follow_playlist_sort_order_not_name() {
         ExportDbPlaylist {
             playlist_id: 20,
             sort_order: 2,
+            path: crate::pdb_reader::PlaylistPath::top_level("Alpha"),
             tracks: vec![make_usb_track(
                 "2",
                 "Track A",

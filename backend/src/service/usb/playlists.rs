@@ -75,18 +75,23 @@ impl BackendService {
         let summary_text = tr::usb_playlists_summary(playlist_count, track_total).render();
         let warning_count = logging::count_warnings(&resolved.warnings);
         let order_edit = self.usb_order_edit_state(usb_root);
+        // The tree's order, each folder's items in the pending order.
+        let pending = self.pending_usb_playlist_order(usb_root);
+        let walked = super::playlist_tree::walk(&resolved.tree, &pending);
+        let position: HashMap<&str, usize> = walked
+            .iter()
+            .enumerate()
+            .map(|(index, (node, _))| (node.id.as_str(), index))
+            .collect();
         let mut items: Vec<UsbPlaylist> =
             resolved.items.iter().map(with_usb_playlist_texts).collect();
-        if let Some(order) = self.pending_usb_playlist_order(usb_root) {
-            crate::service::usb::order_edit::apply_pending_order(&mut items, &order, |p| {
-                p.id.clone()
-            });
-        }
+        items.sort_by_key(|item| position.get(item.id.as_str()).copied().unwrap_or(usize::MAX));
         for item in &mut items {
             item.order_edited = order_edit.edited_playlist_ids.contains(&item.id);
         }
         Ok(FetchUsbPlaylistsData {
             items,
+            tree: super::playlist_tree::tree_rows(&walked),
             order_edit,
             order_edit_blocked_text: Self::usb_order_edit_blocked_text(usb_root),
             stats: resolved.stats.clone(),
@@ -145,12 +150,12 @@ impl BackendService {
         push_usb_stage_timing("parse PDB", &mut stage_started);
 
         on_progress(30, 100, &tr::usb_progress_reading_edb().render());
-        let (edb_track_by_id, edb_playlists) = self
+        let (edb_track_by_id, edb_playlists, edb_folders) = self
             .staged_edb(&usb_root, None, &mut warnings)
             .map(|library| {
                 let library = library.resolved(&usb_root);
                 let playlists = (!library.playlists.is_empty()).then_some(library.playlists);
-                (library.tracks, playlists)
+                (library.tracks, playlists, library.folders)
             })
             .unwrap_or_default();
         let edb_playlist_tracks = edb_playlists.as_ref().map(|m| {
@@ -193,23 +198,16 @@ impl BackendService {
                 .cloned()
                 .collect::<Vec<_>>();
             leaves.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.name.cmp(&b.name)));
+            let tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
             for node in leaves {
-                let folder_name = parsed
-                    .playlist_tree
-                    .iter()
-                    .find(|p| p.id == node.parent_id)
-                    .map(|p| p.name.clone())
-                    .unwrap_or_default();
-                let display_name = if folder_name.is_empty() {
-                    node.name.clone()
-                } else {
-                    format!("{folder_name} / {}", node.name)
-                };
+                // "Folder / Sub / Name": the eDB playlists are keyed the same way.
+                let path = tree.path(&node);
                 playlist_candidates.push(PlaylistCandidate {
                     pdb_id: Some(node.id),
                     short_name: node.name,
-                    display_name,
+                    display_name: path.display(),
                     sort_order: node.sort_order,
+                    path,
                 });
             }
         }
@@ -233,6 +231,7 @@ impl BackendService {
                         display_name: name.clone(),
                         // A reorder gives both databases one numbering.
                         sort_order: u32::try_from(playlist.sort_order).unwrap_or(0),
+                        path: playlist.path.clone(),
                     });
                 }
             }
@@ -249,6 +248,8 @@ impl BackendService {
         let mut playlist_entries_total = 0usize;
         let mut source_counts = HashMap::<&'static str, usize>::new();
         let mut empty_source_playlists = Vec::<String>::new();
+        // Each item's path and place, for the tree.
+        let mut placed = HashMap::<String, (crate::pdb_reader::PlaylistPath, u32)>::new();
         for candidate in playlist_candidates {
             let mut pdb_tracks = Vec::<UsbTrack>::new();
             if let Some(pdb_id) = candidate.pdb_id {
@@ -285,16 +286,20 @@ impl BackendService {
             playlist_entries_total += playlist_tracks.len();
 
             let (total_duration_ms, duration_unknown_count) = duration_totals(&playlist_tracks);
+            let id = candidate
+                .pdb_id
+                .map(|id| format!("usb-pl-{id}"))
+                .unwrap_or_else(|| {
+                    format!(
+                        "usb-pl-name-{}",
+                        canonicalize_playlist_name(&candidate.display_name)
+                    )
+                });
+            placed
+                .entry(id.clone())
+                .or_insert_with(|| (candidate.path.clone(), candidate.sort_order));
             items.push(UsbPlaylist {
-                id: candidate
-                    .pdb_id
-                    .map(|id| format!("usb-pl-{id}"))
-                    .unwrap_or_else(|| {
-                        format!(
-                            "usb-pl-name-{}",
-                            canonicalize_playlist_name(&candidate.display_name)
-                        )
-                    }),
+                id,
                 name: candidate.display_name.clone(),
                 source: source.to_string(),
                 track_count: playlist_tracks.len(),
@@ -380,8 +385,30 @@ impl BackendService {
             ));
         }
 
+        // The PDB's folders first: its places win, as its playlists' do.
+        let pdb_folders = parsed.into_iter().flat_map(|parsed| {
+            let tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
+            parsed
+                .playlist_tree
+                .iter()
+                .filter(|row| row.is_folder)
+                .map(|row| (tree.path(row), row.sort_order))
+                .collect::<Vec<_>>()
+        });
+        let edb_folders = edb_folders
+            .into_iter()
+            .map(|(path, sort_order)| (path, u32::try_from(sort_order).unwrap_or(0)));
+        let tree = super::playlist_tree::build_usb_tree(
+            pdb_folders.chain(edb_folders),
+            items.iter().filter_map(|item| {
+                placed
+                    .remove(&item.id)
+                    .map(|(path, sort_order)| (item.id.clone(), path, sort_order))
+            }),
+        );
         let resolved = Arc::new(CachedUsbPlaylists {
             items,
+            tree,
             stats,
             warnings,
         });
@@ -671,6 +698,8 @@ pub(crate) struct PlaylistCandidate {
     pub(crate) short_name: String,
     pub(crate) display_name: String,
     pub(crate) sort_order: u32,
+    /// Its folders and name.
+    pub(crate) path: crate::pdb_reader::PlaylistPath,
 }
 
 pub(crate) fn lookup_playlist_tracks<'a>(
@@ -679,19 +708,20 @@ pub(crate) fn lookup_playlist_tracks<'a>(
     short_name: &str,
     display_name: &str,
 ) -> Option<&'a Vec<UsbTrack>> {
+    // The path first: a bare name may be another folder's playlist.
     map.as_ref()
         .and_then(|m| {
-            m.get(short_name)
-                .or_else(|| m.get(short_name.trim()))
-                .or_else(|| m.get(display_name))
+            m.get(display_name)
                 .or_else(|| m.get(display_name.trim()))
-        })
-        .or_else(|| {
-            let key = canonicalize_playlist_name(short_name);
-            map_canonical.as_ref().and_then(|m| m.get(&key))
+                .or_else(|| m.get(short_name))
+                .or_else(|| m.get(short_name.trim()))
         })
         .or_else(|| {
             let key = canonicalize_playlist_name(display_name);
+            map_canonical.as_ref().and_then(|m| m.get(&key))
+        })
+        .or_else(|| {
+            let key = canonicalize_playlist_name(short_name);
             map_canonical.as_ref().and_then(|m| m.get(&key))
         })
 }

@@ -96,18 +96,15 @@
           <span class="nav-label" data-text="ui-sidebar-player-menu"></span>
         </button>
         <div class="nav-divider"></div>
-        <div class="nav-section-label" data-text="ui-sidebar-playlists"></div>
-        <div class="nav-playlist-actions">
-          <div class="hidden" id="importPlaylistItem">
-            <button data-action-group="library" class="nav-item nav-add-playlist" id="importPlaylistBtn" data-text-tooltip="ui-sidebar-import-playlist-tooltip" data-text-aria-label="ui-sidebar-import-playlist-aria-label">
-              <span class="nav-icon">&#8615;</span>
-              <span class="nav-label" data-text="ui-common-import"></span>
+        <div class="nav-section-head">
+          <div class="nav-section-label" data-text="ui-sidebar-playlists"></div>
+          <div class="nav-section-head-actions">
+            <button data-action-group="library" class="sidebar-collapse-btn hidden" id="importPlaylistBtn" data-text-tooltip="ui-sidebar-import-playlist-tooltip" data-text-aria-label="ui-sidebar-import-playlist-aria-label">&#8615;</button>
+            <button class="sidebar-collapse-btn" id="addPlaylistFolderBtn" data-text-tooltip="ui-sidebar-new-folder" data-text-aria-label="ui-sidebar-new-folder">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
             </button>
+            <button class="sidebar-collapse-btn" id="addPlaylistBtn" data-text-tooltip="ui-sidebar-new-playlist" data-text-aria-label="ui-sidebar-new-playlist">+</button>
           </div>
-          <button class="nav-item nav-add-playlist" id="addPlaylistBtn" data-text-tooltip="ui-sidebar-new-playlist" data-text-aria-label="ui-sidebar-new-playlist">
-            <span class="nav-icon">+</span>
-            <span class="nav-label" data-text="ui-sidebar-add-playlist"></span>
-          </button>
         </div>
         <ul class="nav-playlist-list" id="navPlaylistList">
           <!-- dynamic playlist items inserted here by JS; the new-playlist input goes first -->
@@ -1067,6 +1064,9 @@
   <template id="tplImportConflictRow">
     <li><div class="add-to-item import-conflict-item"><span class="add-to-name"></span><span class="muted add-to-note"></span></div></li>
   </template>
+  <template id="tplAddToFolderItem">
+    <li class="add-to-folder"><label class="add-to-item list-tree-indent"><input type="checkbox" /><span class="nav-folder-toggle is-open" aria-hidden="true"></span><span class="add-to-name"></span></label></li>
+  </template>
   <template id="tplAddToItem">
     <li><label class="add-to-item"><input type="checkbox" /><span class="add-to-name"></span><span class="muted add-to-note"></span></label></li>
   </template>
@@ -1079,6 +1079,19 @@
       <span class="nav-playlist-icon-btn nav-playlist-delete" data-text-tooltip="ui-playlist-delete-playlist" data-text-aria-label="ui-playlist-delete-playlist" role="button" tabindex="0">&times;</span>
     </button></li>
   </template>
+  <template id="tplNavFolderItem">
+    <li data-nav-playlist-li><button class="nav-playlist-item nav-folder-item">
+      <span class="drag-handle nav-playlist-hover-only" data-nav-playlist-drag-handle draggable="true" data-text-tooltip="ui-common-drag-to-reorder" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span>
+      <span class="nav-folder-toggle" aria-hidden="true"></span>
+      <span class="nav-playlist-name"></span>
+      <span class="nav-playlist-icon-btn nav-folder-add" data-text-tooltip="ui-sidebar-folder-new-playlist" data-text-aria-label="ui-sidebar-folder-new-playlist" role="button" tabindex="0">+</span>
+      <span class="nav-playlist-icon-btn nav-playlist-rename" data-text-tooltip="ui-sidebar-folder-rename" data-text-aria-label="ui-sidebar-folder-rename" role="button" tabindex="0">&#9998;</span>
+      <span class="nav-playlist-icon-btn nav-playlist-delete" data-text-tooltip="ui-sidebar-folder-delete" data-text-aria-label="ui-sidebar-folder-delete" role="button" tabindex="0">&times;</span>
+    </button></li>
+  </template>
+  <template id="tplNavNewFolder">
+    <li class="nav-new-input-wrap"><input class="nav-new-input" type="text" data-text-placeholder="ui-sidebar-folder-name-placeholder" /><button class="nav-new-cancel" type="button">&times;</button></li>
+  </template>
   <template id="tplNavNewPlaylist">
     <li class="nav-new-input-wrap"><input class="nav-new-input" type="text" data-text-placeholder="ui-playlist-name-placeholder" /><button class="nav-new-cancel" type="button">&times;</button></li>
   </template>
@@ -1088,6 +1101,9 @@
   <template id="tplMutedListItem"><li class="muted"></li></template>
   <template id="tplUsbPlaylistItem">
     <li><button><span class="drag-handle" data-usb-drag-handle draggable="true" data-text-tooltip="ui-common-drag-to-reorder" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span><span class="playlist-label"></span><span class="playlist-order-edited hidden" data-text-tooltip="ui-usb-playlists-order-edited" data-text-aria-label="ui-usb-playlists-order-edited">&#9679;</span><span class="playlist-remove" data-text-tooltip="ui-common-remove" data-text-aria-label="ui-common-remove">&times;</span></button></li>
+  </template>
+  <template id="tplUsbFolderItem">
+    <li class="usb-folder-li"><button type="button" class="usb-folder-item" tabindex="-1"><span class="drag-handle" data-usb-drag-handle draggable="true" data-text-tooltip="ui-common-drag-to-reorder" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span><span class="nav-folder-toggle is-open" aria-hidden="true"></span><span class="playlist-label"></span></button></li>
   </template>
   <template id="tplExportPlaylistsRow">
     <div class="track-grid-row export-playlists-row" role="row">
@@ -1099,6 +1115,12 @@
       <div class="track-grid-cell export-playlists-copy" role="cell"></div>
       <div class="track-grid-cell export-playlists-status" role="cell"></div>
       <div class="track-grid-cell export-playlists-last" role="cell"></div>
+    </div>
+  </template>
+  <template id="tplExportPlaylistsFolderRow">
+    <div class="track-grid-row export-playlists-folder" role="row">
+      <div class="track-grid-cell td-select" role="cell"><input type="checkbox" class="export-playlists-folder-check"></div>
+      <div class="track-grid-cell export-playlists-folder-name list-tree-indent" role="cell"><span class="nav-folder-toggle is-open" aria-hidden="true"></span><span class="export-playlists-folder-label"></span></div>
     </div>
   </template>
   <template id="tplHistoryItem"><li><button><span class="playlist-label"></span><span class="history-date muted"></span></button></li></template>

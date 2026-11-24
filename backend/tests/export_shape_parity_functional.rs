@@ -227,6 +227,7 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
 
     let created = backend.create_playlist(backend::models::CreatePlaylistRequest {
         name: "ShapeCompareExport".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.unwrap().data.playlist_id;
@@ -490,6 +491,7 @@ fn export_preserves_full_20_table_family() {
     // Create playlist and add track
     let created = backend.create_playlist(backend::models::CreatePlaylistRequest {
         name: "ShapeTest".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.unwrap().data.playlist_id;

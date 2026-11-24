@@ -36,12 +36,24 @@ pub struct EdbPlaylistWrite<'a> {
     /// The playlist's members become exactly the manifest's tracks, in its
     /// order; otherwise new tracks are appended.
     pub mirror_playlist_entries: bool,
-    /// The playlist row's id and `sequenceNo`, as the repair takes them from
-    /// the PDB. Without one the row is found by name and moved first, as an
-    /// export does.
-    pub identity: Option<(i64, i64)>,
+    /// The playlist row the repair writes. Without one the row is found by
+    /// name and moved first, as an export does.
+    pub identity: Option<&'a EdbPlaylistIdentity>,
     /// Where a row found by name goes in the playlist list.
     pub placement: PlaylistPlacement,
+    /// For a row found by name: the playlist's library folder path,
+    /// outermost first, as folder rows with id 0 (see
+    /// [`upsert_export_playlist_row_placed`]). None: a top-level library
+    /// playlist, matched by name in any folder.
+    pub folders: Option<&'a [crate::pdb_reader::PdbPlaylistTreeRow]>,
+}
+
+/// A playlist row's place as the repair takes it from the other database:
+/// its id, its `sequenceNo` and the folders above it, outermost first.
+pub struct EdbPlaylistIdentity {
+    pub playlist_id: i64,
+    pub sequence_no: i64,
+    pub folders: Vec<crate::pdb_reader::PdbPlaylistTreeRow>,
 }
 
 /// Write every one of `writes` into the eDB inside `tx`: playlist rows,
@@ -69,14 +81,19 @@ pub fn write_edb_playlists_in_tx(
             mirror_playlist_entries,
             identity,
             placement,
+            folders,
         } = *write;
         let export_date_added = normalize_export_date(Some(&manifest.generated_at))
             .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
         let playlist_id = match identity {
-            Some((id, sequence_no)) => {
-                replace_export_playlist_row_with_identity(tx, playlist, id, sequence_no)?
-            }
-            None => upsert_export_playlist_row_placed(tx, playlist, placement)?,
+            Some(identity) => replace_export_playlist_row_with_identity(
+                tx,
+                playlist,
+                identity.playlist_id,
+                identity.sequence_no,
+                &identity.folders,
+            )?,
+            None => upsert_export_playlist_row_placed(tx, playlist, placement, folders)?,
         };
         let sort_order = tx
             .query_row(

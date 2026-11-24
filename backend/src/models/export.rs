@@ -174,6 +174,8 @@ pub struct BatchExportRow {
 #[serde(rename_all = "camelCase")]
 pub struct BatchExportOverviewData {
     pub rows: Vec<BatchExportRow>,
+    /// The page's rows: `rows` by playlist id, under their folders.
+    pub tree: Vec<crate::models::PlaylistListRow>,
     /// The USB's name, for the page heading.
     pub usb_name: String,
     /// Forcing the track order means something only in additive mode (mirror rewrites it

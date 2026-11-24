@@ -53,6 +53,7 @@ fn adding_a_track_already_in_the_playlist_skips_it() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Dedupe Test".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist data")
@@ -140,6 +141,7 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Server-side selection".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist data")
@@ -260,6 +262,7 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
         backend
             .create_playlist(CreatePlaylistRequest {
                 name: name.to_string(),
+                folder_id: None,
             })
             .data
             .expect("playlist")
@@ -376,6 +379,7 @@ fn add_to_picker_resolves_track_candidates_once_for_every_playlist() {
             backend
                 .create_playlist(CreatePlaylistRequest {
                     name: name.to_string(),
+                    folder_id: None,
                 })
                 .data
                 .expect("playlist")
@@ -513,6 +517,7 @@ fn scan_merges_identical_tracks_already_in_the_library_into_the_one_in_more_play
         let id = backend
             .create_playlist(CreatePlaylistRequest {
                 name: name.to_string(),
+                folder_id: None,
             })
             .data
             .expect("playlist data")

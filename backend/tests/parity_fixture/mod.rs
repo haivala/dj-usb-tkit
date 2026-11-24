@@ -99,6 +99,7 @@ pub fn setup_clean_strict_parity_fixture_with_local_key(
     let playlist_name = "Clean Parity".to_string();
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.clone(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;

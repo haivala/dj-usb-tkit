@@ -97,18 +97,20 @@ pub(crate) fn without_tracks_never_on_usb(
     Ok((kept, left_out))
 }
 
-/// Create a local playlist holding `track_ids` in order; returns its id.
+/// Create a local playlist holding `track_ids` in order, first in `folder`
+/// (none: the top level); returns its id.
 pub(crate) fn insert_local_playlist(
     conn: &rusqlite::Connection,
     name: &str,
+    folder: Option<&str>,
     track_ids: &[String],
 ) -> BackendResult<String> {
     let id = Uuid::now_v7().to_string();
     let now = now();
-    // New playlists go to the top of the sidebar order (see `list_playlists`).
+    let sort_order = super::playlist_tree::first_sort_order(conn, folder)?;
     conn.execute(
-        "INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at, sort_order) VALUES (?1, ?2, 'local', NULL, NULL, NULL, ?3, ?3, (SELECT COALESCE(MIN(sort_order), 0) - 1 FROM playlists))",
-        params![id, name, now],
+        "INSERT INTO playlists (id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at, sort_order, folder_id) VALUES (?1, ?2, 'local', NULL, NULL, NULL, ?3, ?3, ?4, ?5)",
+        params![id, name, now, sort_order, folder],
     )?;
     for (index, track_id) in track_ids.iter().enumerate() {
         conn.execute(
@@ -186,13 +188,15 @@ pub(crate) fn annotate_imported_playlists(
 }
 
 /// Save an imported list's tracks: into the playlist an earlier import of
-/// `key` made (its tracks and order replaced, its name kept, its USB export
-/// status cleared), or into a new playlist named `name`. Returns the
-/// playlist, and whether it was an existing one.
+/// `key` made (its tracks and order replaced, its name and place kept, its
+/// USB export status cleared), or into a new playlist named `name` in the
+/// library folders `folders` (outermost first, found by name or made; none:
+/// the top level). Returns the playlist, and whether it was an existing one.
 pub(crate) fn save_imported_playlist(
     conn: &rusqlite::Connection,
     key: &str,
     name: &str,
+    folders: &[String],
     track_ids: &[String],
 ) -> BackendResult<(ImportedPlaylistRef, bool)> {
     if let Some(existing) = find_imported_playlist(conn, key)? {
@@ -213,7 +217,8 @@ pub(crate) fn save_imported_playlist(
         )?;
         return Ok((existing, true));
     }
-    let id = insert_local_playlist(conn, name, track_ids)?;
+    let folder = super::playlist_tree::ensure_folder_path(conn, folders)?;
+    let id = insert_local_playlist(conn, name, folder.as_deref(), track_ids)?;
     conn.execute(
         "UPDATE playlists SET import_source = ?1 WHERE id = ?2",
         params![key, id],
@@ -432,7 +437,11 @@ impl BackendService {
         }
 
         let conn = self.db.connect()?;
-        let id = insert_local_playlist(&conn, name, &[])?;
+        let folder = req.folder_id.as_deref();
+        if let Some(folder) = folder {
+            super::playlist_tree::ensure_folder_exists(&conn, folder)?;
+        }
+        let id = insert_local_playlist(&conn, name, folder, &[])?;
 
         Ok(CreatePlaylistData {
             playlist_id: id,
@@ -484,55 +493,14 @@ impl BackendService {
         })
     }
 
-    /// Saves the user's sidebar order. `ordered_playlist_ids` must name every
-    /// local playlist exactly once; the order is local only and never decides
-    /// anything on the USB.
-    pub fn reorder_playlists(
-        &self,
-        req: ReorderPlaylistsRequest,
-    ) -> BackendResult<ReorderPlaylistsData> {
-        let mut conn = self.db.connect()?;
-        let existing: HashSet<String> = conn
-            .prepare("SELECT id FROM playlists")?
-            .query_map([], |row| row.get(0))?
-            .collect::<Result<_, _>>()?;
-        let requested: HashSet<&str> = req
-            .ordered_playlist_ids
-            .iter()
-            .map(String::as_str)
-            .collect();
-        if requested.len() != req.ordered_playlist_ids.len()
-            || requested.len() != existing.len()
-            || !requested.iter().all(|id| existing.contains(*id))
-        {
-            return Err(BackendError::Internal(
-                "playlist order must list every playlist exactly once".to_string(),
-            ));
-        }
-
-        let tx = conn.transaction()?;
-        for (index, id) in req.ordered_playlist_ids.iter().enumerate() {
-            tx.execute(
-                "UPDATE playlists SET sort_order = ?1 WHERE id = ?2",
-                params![index as i64, id],
-            )?;
-        }
-        tx.commit()?;
-
-        Ok(ReorderPlaylistsData {
-            reordered: req.ordered_playlist_ids.len(),
-        })
-    }
-
-    /// Local playlists in sidebar order, top first: the user's saved order,
-    /// newest first for playlists that were never reordered.
+    /// Local playlists in sidebar tree order (see `playlist_tree`), with the
+    /// folders and the rows the sidebar draws.
     pub fn list_playlists(&self) -> BackendResult<ListPlaylistsData> {
         let conn = self.db.connect()?;
         let mut stmt = conn.prepare(
             r#"
             SELECT id, name, source, last_exported_at, last_exported_usb_root, last_exported_track_count, created_at, updated_at, import_source, last_exported_usb_name
             FROM playlists
-            ORDER BY sort_order IS NULL, sort_order ASC, created_at DESC, id DESC
             "#,
         )?;
 
@@ -563,6 +531,8 @@ impl BackendService {
                 delete_confirm_text,
                 export_status_text: String::new(),
                 export_status_tooltip: None,
+                folder_id: None,
+                folder_path: None,
             })
         })?;
 
@@ -571,7 +541,12 @@ impl BackendService {
             playlist.export_status_text = export_status_text(playlist);
             playlist.export_status_tooltip = export_status_tooltip(playlist);
         }
-        Ok(ListPlaylistsData { items })
+        let (items, folders, sidebar) = super::playlist_tree::arrange_playlists(&conn, items)?;
+        Ok(ListPlaylistsData {
+            items,
+            folders,
+            sidebar,
+        })
     }
 
     /// The playlist's tracks as local library rows, in playlist position order.
@@ -1181,8 +1156,10 @@ impl BackendService {
                     note_text,
                 }
             })
-            .collect();
-        Ok(GetPlaylistMembershipData { items })
+            .collect::<Vec<PlaylistMembership>>();
+        let ids: Vec<&str> = items.iter().map(|item| item.playlist_id.as_str()).collect();
+        let tree = super::playlist_tree::playlist_list_rows(&*self.db.connect()?, &ids)?;
+        Ok(GetPlaylistMembershipData { items, tree })
     }
 
     pub(super) fn resolve_add_track_candidate(
@@ -1405,9 +1382,14 @@ impl BackendService {
         let Some(name) = name else {
             return Ok(false);
         };
+        let folder_path = super::playlist_tree::playlist_folder_rows(&conn, playlist_id)?
+            .into_iter()
+            .map(|folder| folder.name)
+            .collect::<Vec<_>>()
+            .join(" / ");
         let same_name_exists_on_usb = self
             .usb_playlist_names(usb_root)
-            .contains(&super::export::normalize_playlist_name_for_compare(&name));
+            .contains(&name, Some(&folder_path));
         Ok(super::export::playlist_locks_reorder_on_export(
             prune_stale,
             same_name_exists_on_usb,

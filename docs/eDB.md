@@ -258,7 +258,7 @@ sort order so both database surfaces describe the same exported playlist.
 Outside of export, the user-triggered `commit_usb_order_edit` command (Edit
 order on the USB Playlists page, see `docs/PDB.md` "Playlist Reordering") writes
 every leaf playlist's position in the whole list to `playlist.sequenceNo`,
-matched by name, including playlists with no PDB row — a flat,
+matched by folder path and name, including playlists with no PDB row — a flat,
 non-parent-scoped order, unlike the per-parent order export assigns to a newly
 exported playlist. An edited playlist's track order goes to
 `playlist_content.sequenceNo`, renumbered from the playlist's lowest one, in the
@@ -290,8 +290,11 @@ Most shared fields are `must_match`. Current allowed-difference fields are
 
 **`playlist_id` collision avoidance must consider all rows, not just
 `attribute = 0`.** `replace_export_playlist_row_with_identity`
-(`backend/src/edb.rs:1028`) reassigns a colliding existing row before
-inserting a playlist at a specific target `playlist_id`. The `playlist_id`
+(`backend/src/edb.rs`) reassigns a colliding existing row before
+inserting a playlist at a specific target `playlist_id`; a relocated folder
+takes its children along (their `playlist_id_parent` follows). The row it
+replaces is the same-named playlist in the same folder only: same-named
+playlists in other folders are other playlists. The `playlist_id`
 UNIQUE constraint applies across the whole `playlist` table regardless of
 `attribute` — folders (`attribute != 0`) share the same id space as
 playlists (`attribute = 0`). Scoping the collision *check* or the

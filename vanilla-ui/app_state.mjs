@@ -73,11 +73,19 @@ export function createInitialState() {
       usbHistory: { ids: new Set(), rows: new Map() },
     },
     playlists: [],
+    // The library's playlist folders and the sidebar rows (PlaylistsState).
+    playlistFolders: [],
+    playlistSidebar: [],
+    // The sidebar folder last clicked: new playlists and folders go inside it.
+    // Opening a view clears it.
+    selectedPlaylistFolderId: null,
     currentPlaylistId: null,
     // A new playlist's create_playlist still running (promptNewPlaylist).
     playlistCreating: null,
     playlistTrackSearch: "",
     usbPlaylists: [],
+    // The USB view's list rows (fetch_usb_playlists' `tree`): folders and playlists.
+    usbPlaylistTree: [],
     // The backend's `UsbOrderEditState` (Edit order on the USB Playlists page),
     // why Edit order can't start on this stick (read-only), and the column sort
     // the pending order last took (see components/usb/order_edit.mjs).

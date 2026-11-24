@@ -137,6 +137,7 @@ fn stick() -> Stick {
     for (n, chunk) in ids.chunks(PER_PLAYLIST).enumerate() {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: format!("Gate {}", ["A", "B", "C"][n]),
+            folder_id: None,
         });
         let id = created.data.expect("playlist").data.playlist_id;
         let added =
@@ -321,6 +322,7 @@ fn run_every_write(rekordbox_shaped: bool) {
         usb_root: root.clone(),
         playlist_id: c.id.clone(),
         before_playlist_id: Some(a.id.clone()),
+        after_playlist_id: None,
     });
     assert!(moved.ok, "move playlist: {moved:?}");
     let moved = backend.move_usb_playlist_track(MoveUsbPlaylistTrackRequest {

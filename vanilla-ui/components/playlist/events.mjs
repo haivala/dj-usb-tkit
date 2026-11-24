@@ -5,7 +5,7 @@ import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
 import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
 import { convertTrackSelection } from "../shared/transcodes.mjs";
 import { bindTrackDragReorder } from "../shared/track_drag_reorder.mjs";
-import { bindListDragReorder } from "../shared/list_drag_reorder.mjs";
+import { bindTreeDragMove } from "../shared/tree_drag_move.mjs";
 
 export function bindPlaylistEvents(ctx) {
   const {
@@ -14,8 +14,12 @@ export function bindPlaylistEvents(ctx) {
     switchView,
     deletePlaylist,
     startPlaylistRename,
-    reorderPlaylists,
+    startPlaylistFolderRename,
+    deletePlaylistFolder,
+    togglePlaylistFolder,
+    movePlaylistTreeItem,
     promptNewPlaylist,
+    promptNewPlaylistFolder,
     importExternalPlaylist,
     playlistImportDialog,
     command,
@@ -35,7 +39,9 @@ export function bindPlaylistEvents(ctx) {
   playlistTracksCtl.attachScroll();
 
   el.navPlaylistList.addEventListener("mousedown", (event) => {
-    const iconBtn = event.target.closest("[data-delete-playlist], [data-rename-playlist]");
+    const iconBtn = event.target.closest(
+      "[data-delete-playlist], [data-rename-playlist], [data-delete-folder], [data-rename-folder], [data-folder-add]"
+    );
     if (!iconBtn) return;
     event.preventDefault();
     event.stopPropagation();
@@ -60,6 +66,22 @@ export function bindPlaylistEvents(ctx) {
     }
     // Clicks inside an open rename field (placing the caret) aren't selections.
     if (event.target.closest(".nav-rename-input")) return;
+    const folderAction = event.target.closest("[data-delete-folder], [data-rename-folder], [data-folder-add]");
+    if (folderAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      const { deleteFolder, renameFolder, folderAdd } = folderAction.dataset;
+      if (deleteFolder) deletePlaylistFolder(deleteFolder).catch(catchErr(emitStatus));
+      else if (renameFolder) startPlaylistFolderRename(renameFolder);
+      else promptNewPlaylist(folderAdd);
+      return;
+    }
+    // A folder row opens or closes.
+    const folderItem = event.target.closest(".nav-folder-item");
+    if (folderItem) {
+      togglePlaylistFolder(folderItem.dataset.folderId).catch(catchErr(emitStatus));
+      return;
+    }
     const item = event.target.closest(".nav-playlist-item");
     if (!item) return;
     // A new playlist's name still being typed is saved first (leaving the
@@ -73,22 +95,27 @@ export function bindPlaylistEvents(ctx) {
 
   el.navPlaylistList.addEventListener("dblclick", (event) => {
     if (event.target.closest(".nav-rename-input, [data-delete-playlist], [data-nav-playlist-drag-handle]")) return;
+    // A folder's double-click is two clicks: it opens and closes.
+    if (event.target.closest(".nav-folder-item")) return;
     const item = event.target.closest(".nav-playlist-item");
     if (!item) return;
     event.preventDefault();
     startPlaylistRename(item.dataset.playlistId);
   });
 
-  bindListDragReorder(el.navPlaylistList, {
+  bindTreeDragMove(el.navPlaylistList, {
     handleSelector: "[data-nav-playlist-drag-handle]",
     itemSelector: "li[data-nav-playlist-li]",
-    onMove: (fromIndex, toIndex) => {
-      reorderPlaylists(fromIndex, toIndex).catch(catchErr(emitStatus));
+    onMove: (item, target, placement) => {
+      movePlaylistTreeItem(item, target, placement).catch(catchErr(emitStatus));
     }
   });
 
   el.addPlaylistBtn.addEventListener("click", () => {
     promptNewPlaylist();
+  });
+  el.addPlaylistFolderBtn.addEventListener("click", () => {
+    promptNewPlaylistFolder();
   });
 
   el.importPlaylistBtn.addEventListener("click", () => {

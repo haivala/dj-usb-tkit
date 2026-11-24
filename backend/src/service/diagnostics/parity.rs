@@ -212,7 +212,14 @@ pub(crate) fn build_usb_parity_comparison(
         .cloned()
         .collect::<Vec<_>>();
     leaves.sort_by_key(|n| n.sort_order);
-    for leaf in &leaves {
+    // Playlists are matched across the databases by their path, so
+    // same-named playlists in different folders stay apart.
+    let tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
+    let leaf_paths = leaves
+        .iter()
+        .map(|leaf| tree.path(leaf))
+        .collect::<Vec<_>>();
+    for (leaf, leaf_path) in leaves.iter().zip(&leaf_paths) {
         let mut rows = parsed
             .playlist_entries
             .iter()
@@ -248,7 +255,7 @@ pub(crate) fn build_usb_parity_comparison(
             .len()
             .saturating_sub(unique_preserve_order(&track_keys).len());
         pdb_info_by_playlist.insert(
-            canonicalize_playlist_name(&leaf.name),
+            leaf_path.key(),
             PdbPlaylistInfo {
                 playlist_id: leaf.id,
                 sort_order: leaf.sort_order,
@@ -262,7 +269,7 @@ pub(crate) fn build_usb_parity_comparison(
     }
 
     let mut edb_info_by_playlist = HashMap::<String, EdbPlaylistInfo>::new();
-    for (name, playlist) in edb_playlists {
+    for playlist in edb_playlists.values() {
         let mut track_keys = Vec::<String>::new();
         let mut track_details_by_key = HashMap::<String, UsbTrack>::new();
         let mut meta_by_track_key = HashMap::<String, String>::new();
@@ -295,7 +302,7 @@ pub(crate) fn build_usb_parity_comparison(
         }
 
         edb_info_by_playlist.insert(
-            canonicalize_playlist_name(name),
+            playlist.path.key(),
             EdbPlaylistInfo {
                 playlist_id: u32::try_from(playlist.playlist_id).ok(),
                 sort_order: u32::try_from(playlist.sort_order).ok(),
@@ -321,7 +328,8 @@ pub(crate) fn build_usb_parity_comparison(
     // values separately per database, so only the order has to agree.
     let parent_by_key: HashMap<String, u32> = leaves
         .iter()
-        .map(|leaf| (canonicalize_playlist_name(&leaf.name), leaf.parent_id))
+        .zip(&leaf_paths)
+        .map(|(leaf, path)| (path.key(), leaf.parent_id))
         .collect();
     let shown_position = |sort_of: &dyn Fn(&str) -> Option<(u32, u32)>| {
         let mut by_folder = HashMap::<u32, Vec<(u32, u32, &str)>>::new();
@@ -359,14 +367,14 @@ pub(crate) fn build_usb_parity_comparison(
 
     let mut details = Vec::<UsbParityPlaylistDetail>::new();
     for key in all_keys.iter().cloned() {
-        let pdb_name = leaves
+        let pdb_name = leaf_paths
             .iter()
-            .find(|n| canonicalize_playlist_name(&n.name) == key)
-            .map(|n| n.name.clone());
+            .find(|path| path.key() == key)
+            .map(crate::pdb_reader::PlaylistPath::display);
         let edb_name = edb_playlists
-            .keys()
-            .find(|n| canonicalize_playlist_name(n) == key)
-            .cloned();
+            .values()
+            .find(|playlist| playlist.path.key() == key)
+            .map(|playlist| playlist.path.display());
 
         let display = pdb_name
             .clone()

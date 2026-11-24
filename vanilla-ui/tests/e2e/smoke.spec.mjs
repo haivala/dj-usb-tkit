@@ -140,13 +140,89 @@ test("shell and sidebar", async ({ page }) => {
     });
     await expect(names).toHaveText(["Alpha", "Charlie", "Bravo"]);
 
-    const reorderCalls = await page.evaluate(() =>
-      window.__calls.filter((c) => c.command === "reorder_playlists").map((c) => c.payload.request)
+    const moveCalls = await page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "move_playlist_tree_item").map((c) => c.payload.request)
     );
-    expect(reorderCalls).toEqual([{ orderedPlaylistIds: ["pl-1", "pl-3", "pl-2"] }]);
+    expect(moveCalls).toEqual([{
+      item: { kind: "playlist", id: "pl-1" },
+      target: { kind: "playlist", id: "pl-3" },
+      placement: "before"
+    }]);
 
     await createSidebarPlaylists(page, ["Delta"]);
     await expect(names).toHaveText(["Delta", "Alpha", "Charlie", "Bravo"]);
+
+    // A new folder goes on top; a playlist dropped on its middle goes inside it.
+    await page.locator("#addPlaylistFolderBtn").click();
+    const folderInput = page.locator("#navPlaylistList .nav-new-input");
+    await expect(folderInput).toHaveAttribute("placeholder", "Folder name");
+    await folderInput.fill("Sets");
+    await folderInput.press("Enter");
+    await expect(names).toHaveText(["Sets", "Delta", "Alpha", "Charlie", "Bravo"]);
+    const folder = page.locator("#navPlaylistList .nav-folder-item");
+    await expect(folder).toHaveClass(/expanded/);
+
+    const alpha = items.filter({ hasText: "Alpha" });
+    await alpha.hover();
+    const folderBox = await folder.boundingBox();
+    await alpha.locator("[data-nav-playlist-drag-handle]").dragTo(folder, {
+      targetPosition: { x: 40, y: folderBox.height / 2 }
+    });
+    await expect(names).toHaveText(["Sets", "Alpha", "Delta", "Charlie", "Bravo"]);
+    await expect(items.filter({ hasText: "Alpha" })).toHaveAttribute("data-depth", "1");
+
+    // The folder's + makes a playlist first in it.
+    await folder.hover();
+    await folder.locator("[data-folder-add]").click();
+    await page.locator("#navPlaylistList .nav-new-input").fill("Inner");
+    await page.locator("#navPlaylistList .nav-new-input").press("Enter");
+    await expect(names).toHaveText(["Sets", "Inner", "Alpha", "Delta", "Charlie", "Bravo"]);
+    await expect(items.filter({ hasText: "Inner" })).toHaveAttribute("data-depth", "1");
+    const created = await page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "create_playlist").map((c) => c.payload.request).at(-1)
+    );
+    expect(created).toEqual({ name: "Inner", folderId: "pf-5" });
+
+    // Clicking the folder closes and opens it.
+    await folder.click({ position: { x: 40, y: 8 } });
+    await expect(names).toHaveText(["Sets", "Delta", "Charlie", "Bravo"]);
+    await expect(folder).not.toHaveClass(/expanded/);
+    await folder.click({ position: { x: 40, y: 8 } });
+    await expect(names).toHaveText(["Sets", "Inner", "Alpha", "Delta", "Charlie", "Bravo"]);
+
+    // The clicked folder is selected: a new folder goes first in it.
+    await expect(folder).toHaveClass(/active/);
+    await page.locator("#addPlaylistFolderBtn").click();
+    await page.locator("#navPlaylistList .nav-new-input").fill("Sub");
+    await page.locator("#navPlaylistList .nav-new-input").press("Enter");
+    await expect(names).toHaveText(["Sets", "Sub", "Inner", "Alpha", "Delta", "Charlie", "Bravo"]);
+    await expect(items.filter({ hasText: "Sub" })).toHaveAttribute("data-depth", "1");
+    const createdFolder = await page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "create_playlist_folder").map((c) => c.payload.request).at(-1)
+    );
+    expect(createdFolder).toEqual({ name: "Sub", parentId: "pf-5" });
+
+    // So does a new playlist; it then opens, which clears the selection.
+    await page.locator("#addPlaylistBtn").click();
+    await page.locator("#navPlaylistList .nav-new-input").fill("Opener");
+    await page.locator("#navPlaylistList .nav-new-input").press("Enter");
+    await expect(names).toHaveText(["Sets", "Opener", "Sub", "Inner", "Alpha", "Delta", "Charlie", "Bravo"]);
+    await expect(items.filter({ hasText: "Opener" })).toHaveAttribute("data-depth", "1");
+    await expect(folder.first()).not.toHaveClass(/active/);
+
+    // Deleting the folder keeps what it held, moved up in its place.
+    await folder.first().locator("[data-delete-folder]").click();
+    await page.locator("#confirmOkBtn").click();
+    await expect(names).toHaveText(["Opener", "Sub", "Inner", "Alpha", "Delta", "Charlie", "Bravo"]);
+    await expect(page.locator("#navPlaylistList .nav-folder-item")).toHaveCount(1);
+    await expect(page.locator("#statusText")).toContainText("Folder deleted: Sets");
+
+    // Opening a view clears the selection: a new folder goes on top again.
+    await items.filter({ hasText: "Delta" }).click();
+    await page.locator("#addPlaylistFolderBtn").click();
+    await page.locator("#navPlaylistList .nav-new-input").fill("Top");
+    await page.locator("#navPlaylistList .nav-new-input").press("Enter");
+    await expect(names.first()).toHaveText("Top");
   }
 
   await page.reload();

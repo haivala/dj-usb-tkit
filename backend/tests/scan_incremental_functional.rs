@@ -251,6 +251,7 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     let playlist = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Crate".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist data");

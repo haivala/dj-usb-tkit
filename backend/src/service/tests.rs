@@ -696,6 +696,7 @@ fn add_tracks_to_playlist_rejects_empty_ids() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     let err = service
@@ -713,6 +714,7 @@ fn add_tracks_to_playlist_rejects_unknown_track() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     let err = service
@@ -764,6 +766,7 @@ fn playlist_tracks_with_their_analysis_files_gone_or_damaged_need_analysis() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service

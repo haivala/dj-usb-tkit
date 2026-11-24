@@ -75,25 +75,60 @@ export function createAddToDialogController(el, document) {
   const dialog = createDialogLifecycle(el.addToOverlay, { onClose: () => { request = null; } });
   const { close } = dialog;
 
+  // The boxes of a folder's playlists (its box's `playlistIds`, at any
+  // depth) that can still take the selection.
+  function folderBoxes(toggle) {
+    const ids = new Set(JSON.parse(toggle.dataset.playlistIds || "[]"));
+    return [...el.addToList.querySelectorAll("input[data-playlist]:not(:disabled)")].filter((box) => ids.has(box.value));
+  }
+
+  // A folder's box is ticked when all its playlists that can take the
+  // selection are, half-ticked when some are.
   function sync() {
+    for (const toggle of el.addToList.querySelectorAll("input[data-folder]")) {
+      const boxes = folderBoxes(toggle);
+      const ticked = boxes.filter((box) => box.checked).length;
+      toggle.disabled = boxes.length === 0;
+      toggle.checked = ticked > 0 && ticked === boxes.length;
+      toggle.indeterminate = ticked > 0 && ticked < boxes.length;
+    }
     el.addToApplyBtn.disabled = checked.size === 0;
     el.addToCreateBtn.disabled = !el.addToNewName.value.trim();
   }
 
+  // The backend's tree (`tree`): each folder's row, then its playlists,
+  // indented by depth as in the sidebar.
   function render(data) {
-    const items = data?.items || [];
-    const rows = items.map((item) => {
+    const byId = new Map((data?.items || []).map((item) => [item.playlistId, item]));
+    const rows = [];
+    for (const entry of data?.tree || []) {
+      if (entry.kind === "folder") {
+        const folder = cloneTemplate(document, "tplAddToFolderItem");
+        folder.querySelector(".add-to-item").style.setProperty("--list-depth", String(entry.depth));
+        folder.querySelector(".add-to-name").textContent = entry.name;
+        const toggle = folder.querySelector("input");
+        toggle.dataset.folder = entry.id;
+        toggle.dataset.playlistIds = JSON.stringify(entry.playlistIds || []);
+        toggle.setAttribute("aria-label", t("ui-playlist-import-group-select-all", { group: entry.name }));
+        rows.push(folder);
+        continue;
+      }
+      const item = byId.get(entry.id);
+      if (!item) continue;
       const row = cloneTemplate(document, "tplAddToItem");
+      row.querySelector(".add-to-item").classList.add("list-tree-indent");
+      row.querySelector(".add-to-item").style.setProperty("--list-depth", String(entry.depth));
       const box = row.querySelector("input");
       const all = item.state === "all";
       box.value = item.playlistId;
+      box.dataset.playlist = "";
       box.checked = all || checked.has(item.playlistId);
       box.disabled = all;
       box.indeterminate = item.state === "some" && !checked.has(item.playlistId);
       row.querySelector(".add-to-name").textContent = item.name;
       row.querySelector(".add-to-note").textContent = item.noteText || "";
-      return row;
-    });
+      rows.push(row);
+    }
     if (!rows.length) {
       const empty = cloneTemplate(document, "tplMutedListItem");
       empty.textContent = t("ui-add-to-empty");
@@ -121,15 +156,20 @@ export function createAddToDialogController(el, document) {
   el.addToList.addEventListener("change", (event) => {
     const box = event.target.closest?.("input[type='checkbox']");
     if (!box) return;
-    if (box.checked) checked.add(box.value);
-    else checked.delete(box.value);
+    const boxes = box.dataset.folder !== undefined ? folderBoxes(box) : [box];
+    for (const each of boxes) {
+      each.checked = box.checked;
+      each.indeterminate = false;
+      if (box.checked) checked.add(each.value);
+      else checked.delete(each.value);
+    }
     sync();
   });
   el.addToNewName.addEventListener("input", sync);
   el.addToCreateBtn.addEventListener("click", () => createNew());
   // In list order.
   el.addToApplyBtn.addEventListener("click", () => close(
-    [...el.addToList.querySelectorAll("input:checked:not(:disabled)")].map((box) => box.value),
+    [...el.addToList.querySelectorAll("input[data-playlist]:checked:not(:disabled)")].map((box) => box.value),
   ));
   el.addToCancelBtn.addEventListener("click", () => close(null));
   document.addEventListener("keydown", (event) => {

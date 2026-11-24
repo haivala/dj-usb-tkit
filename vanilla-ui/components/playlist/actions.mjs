@@ -1,7 +1,6 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
-import { moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { t, tCount } from "../../ui_texts.mjs";
@@ -45,60 +44,99 @@ export function renderPlaylistList(ctx) {
   // switches view, which re-renders); the rename re-renders when it closes.
   if (el.navPlaylistList.querySelector(".nav-rename-input")) return;
   el.navPlaylistList.querySelectorAll(".nav-playlist-item").forEach((item) => item.closest("li")?.remove());
-  el.navPlaylistList.querySelectorAll(".nav-new-input-wrap").forEach((wrap) => wrap.remove());
+  // A closing name field keeps its row until the click that closed it is done.
+  el.navPlaylistList.querySelectorAll(".nav-new-input-wrap:not(.closing)").forEach((wrap) => wrap.remove());
 
-  // list_playlists returns sidebar order, top first.
-  state.playlists.forEach((playlist) => {
-    const li = cloneTemplate(document, "tplNavPlaylistItem");
+  // The backend's rows: the tree top first, a collapsed folder's children left out.
+  const playlists = new Map(state.playlists.map((playlist) => [playlist.id, playlist]));
+  const folders = new Map((state.playlistFolders || []).map((folder) => [folder.id, folder]));
+  for (const row of state.playlistSidebar || []) {
+    const isFolder = row.kind === "folder";
+    const entry = isFolder ? folders.get(row.id) : playlists.get(row.id);
+    if (!entry) continue;
+    const li = cloneTemplate(document, isFolder ? "tplNavFolderItem" : "tplNavPlaylistItem");
+    li.dataset.treeKind = row.kind;
+    li.dataset.treeId = row.id;
+    li.dataset.depth = String(row.depth);
+    li.style.setProperty("--nav-depth", String(row.depth));
     const btn = li.firstElementChild;
-    btn.dataset.playlistId = playlist.id;
-    fillPlaylistSidebarItem(btn, playlist, state.playlistUsbExportStatusById?.get(playlist.id));
-    if (state.activeTab === playlist.id) btn.classList.add("active");
-    if (state.currentPlaylistId === playlist.id) {
-      btn.classList.add("playlist-active-mode");
-      btn.dataset.tooltip = t("ui-playlist-active-tooltip");
+    if (isFolder) {
+      fillPlaylistFolderSidebarItem(btn, entry);
+      if (state.selectedPlaylistFolderId === entry.id) btn.classList.add("active");
+    } else {
+      btn.dataset.playlistId = entry.id;
+      fillPlaylistSidebarItem(btn, entry, state.playlistUsbExportStatusById?.get(entry.id));
+      if (state.activeTab === entry.id) btn.classList.add("active");
+      if (state.currentPlaylistId === entry.id) {
+        btn.classList.add("playlist-active-mode");
+        btn.dataset.tooltip = t("ui-playlist-active-tooltip");
+      }
     }
     el.navPlaylistList.appendChild(li);
-  });
+  }
 }
 
-export function promptNewPlaylist(ctx) {
-  const { el, document, requestAnimationFrameFn, emitStatus } = ctx;
-  const existing = el.navPlaylistList.querySelector(".nav-new-input-wrap");
+function fillPlaylistFolderSidebarItem(item, folder) {
+  item.dataset.folderId = folder.id;
+  item.classList.toggle("expanded", !folder.collapsed);
+  item.setAttribute("aria-expanded", String(!folder.collapsed));
+  item.dataset.tooltip = folder.toggleTooltip;
+  item.querySelector(".nav-playlist-name").textContent = folder.name;
+  item.querySelector(".nav-folder-add").dataset.folderAdd = folder.id;
+  item.querySelector(".nav-playlist-rename").dataset.renameFolder = folder.id;
+  item.querySelector(".nav-playlist-delete").dataset.deleteFolder = folder.id;
+}
+
+// The inline name field (`template`) for a new playlist or folder, first in
+// `folderId` (none: the top of the list). `create(name)` saves it.
+function promptNewSidebarItem(ctx, { template, folderId, create }) {
+  const { el, document, requestAnimationFrameFn } = ctx;
+  const existing = el.navPlaylistList.querySelector(".nav-new-input-wrap:not(.closing)");
   if (existing) {
     existing.querySelector(".nav-new-input")?.focus();
     return;
   }
 
-  el.addPlaylistBtn.classList.add("hidden");
-
-  const wrap = cloneTemplate(document, "tplNavNewPlaylist");
+  const wrap = cloneTemplate(document, template);
   const input = wrap.querySelector(".nav-new-input");
   const cancel = wrap.querySelector(".nav-new-cancel");
-  el.navPlaylistList.prepend(wrap);
+  const folderLi = folderId
+    ? el.navPlaylistList.querySelector(`li[data-tree-kind="folder"][data-tree-id="${cssEscape(folderId)}"]`)
+    : null;
+  if (folderLi) {
+    wrap.style.setProperty("--nav-depth", String(Number(folderLi.dataset.depth || 0) + 1));
+    folderLi.after(wrap);
+  } else {
+    el.navPlaylistList.prepend(wrap);
+  }
+
+  // A press on another row closes the field (its blur). Its row stays, empty,
+  // until that click is done: removing it at once would move the rows up
+  // under the pointer, and the click would land on the next one.
+  let pressInList = false;
+  const notePress = (event) => {
+    pressInList = !wrap.contains(event.target);
+  };
+  el.navPlaylistList.addEventListener("pointerdown", notePress, true);
 
   let closed = false;
   const cleanup = () => {
     closed = true;
-    wrap.remove();
-    el.addPlaylistBtn.classList.remove("hidden");
+    el.navPlaylistList.removeEventListener("pointerdown", notePress, true);
+    if (!pressInList) {
+      wrap.remove();
+      return;
+    }
+    wrap.classList.add("closing");
+    const remove = () => wrap.remove();
+    document.defaultView.addEventListener("click", remove, { once: true });
+    document.defaultView.setTimeout(remove, 1000);
   };
 
   const submit = createSingleSubmit(() => {
     const name = input.value.trim();
     cleanup();
-    if (name) {
-      // Kept while saving, so a click on another playlist opens it only after.
-      const creating = createPlaylist(ctx, name)
-        .catch((err) => {
-          console.error(err);
-          emitStatus(err.message || String(err));
-        })
-        .finally(() => {
-          if (ctx.state.playlistCreating === creating) ctx.state.playlistCreating = null;
-        });
-      ctx.state.playlistCreating = creating;
-    }
+    if (name) create(name);
   });
 
   input.addEventListener("keydown", (event) => {
@@ -120,28 +158,72 @@ export function promptNewPlaylist(ctx) {
   requestAnimationFrameFn(() => input.focus());
 }
 
-export function startPlaylistRename(ctx, playlistId) {
-  const { state, el, document, requestAnimationFrameFn, command, emitStatus } = ctx;
-  const playlist = state.playlists.find((item) => item.id === playlistId);
-  if (!playlist) return;
+// The selected sidebar folder, while it still exists; else null.
+function selectedPlaylistFolderId(ctx) {
+  const { state } = ctx;
+  return (state.playlistFolders || []).some((f) => f.id === state.selectedPlaylistFolderId)
+    ? state.selectedPlaylistFolderId
+    : null;
+}
 
-  const item = el.navPlaylistList.querySelector(`.nav-playlist-item[data-playlist-id="${playlistId}"]`);
-  if (!item) return;
+// A new playlist, first in `folderId` (a folder's +), else in the selected
+// folder, else at the top.
+export function promptNewPlaylist(ctx, folderId = selectedPlaylistFolderId(ctx)) {
+  promptNewSidebarItem(ctx, {
+    template: "tplNavNewPlaylist",
+    folderId,
+    create: (name) => {
+      // Kept while saving, so a click on another playlist opens it only after.
+      const creating = createPlaylist(ctx, name, folderId)
+        .catch((err) => {
+          console.error(err);
+          ctx.emitStatus(err.message || String(err));
+        })
+        .finally(() => {
+          if (ctx.state.playlistCreating === creating) ctx.state.playlistCreating = null;
+        });
+      ctx.state.playlistCreating = creating;
+    }
+  });
+}
 
-  const originalName = playlist.name;
+// A new folder, first in the selected folder, else at the top.
+export function promptNewPlaylistFolder(ctx) {
+  const parentId = selectedPlaylistFolderId(ctx);
+  promptNewSidebarItem(ctx, {
+    template: "tplNavNewFolder",
+    folderId: parentId,
+    create: (name) => {
+      ctx.command("create_playlist_folder", parentId ? { name, parentId } : { name })
+        .then((data) => {
+          applyPlaylistsState(ctx, data);
+          ctx.emitStatus(data.statusText);
+        })
+        .catch((err) => {
+          console.error(err);
+          ctx.emitStatus(err?.message || String(err));
+        });
+    }
+  });
+}
+
+// Swaps the sidebar row `item` for a name field; `save(newName)` runs when
+// the name changed, then the list redraws and `after()` runs.
+function startSidebarRename(ctx, item, originalName, save, after = () => {}) {
+  const { document, requestAnimationFrameFn, emitStatus } = ctx;
   const input = cloneTemplate(document, "tplNavRenameInput");
   input.value = originalName;
   const itemContent = [...item.childNodes];
   item.replaceChildren(input);
 
   let finished = false;
-  const finish = async (save) => {
+  const finish = async (keep) => {
     if (finished) return;
     finished = true;
     const newName = input.value.trim();
-    if (save && newName && newName !== originalName) {
+    if (keep && newName && newName !== originalName) {
       try {
-        applyPlaylistsState(ctx, await command("rename_playlist", { playlistId, name: newName }));
+        await save(newName);
       } catch (err) {
         console.error("rename failed:", err);
         emitStatus(err?.message || String(err));
@@ -149,13 +231,7 @@ export function startPlaylistRename(ctx, playlistId) {
     }
     item.replaceChildren(...itemContent);
     renderPlaylistList(ctx);
-    const current = state.playlists.find((item) => item.id === playlistId) || playlist;
-    if (state.activeTab === playlistId) {
-      el.playlistPanelTitle.textContent = current.name;
-      renderPlaylistExportStatus(ctx, current);
-    }
-    // The badge and the selection bars' "+ Add to ‹name›".
-    if (getCurrentPlaylist(ctx)?.id === playlistId) ctx.updateModeText();
+    after();
   };
 
   input.addEventListener("keydown", (event) => {
@@ -168,6 +244,78 @@ export function startPlaylistRename(ctx, playlistId) {
     input.focus();
     input.select();
   });
+}
+
+export function startPlaylistRename(ctx, playlistId) {
+  const { state, el, command } = ctx;
+  const playlist = state.playlists.find((item) => item.id === playlistId);
+  if (!playlist) return;
+  const item = el.navPlaylistList.querySelector(`.nav-playlist-item[data-playlist-id="${cssEscape(playlistId)}"]`);
+  if (!item) return;
+
+  startSidebarRename(
+    ctx,
+    item,
+    playlist.name,
+    async (name) => applyPlaylistsState(ctx, await command("rename_playlist", { playlistId, name })),
+    () => {
+      const current = state.playlists.find((entry) => entry.id === playlistId) || playlist;
+      if (state.activeTab === playlistId) {
+        el.playlistPanelTitle.textContent = current.name;
+        renderPlaylistExportStatus(ctx, current);
+      }
+      // The badge and the selection bars' "+ Add to ‹name›".
+      if (getCurrentPlaylist(ctx)?.id === playlistId) ctx.updateModeText();
+    }
+  );
+}
+
+export function startPlaylistFolderRename(ctx, folderId) {
+  const { state, el, command } = ctx;
+  const folder = (state.playlistFolders || []).find((entry) => entry.id === folderId);
+  const item = el.navPlaylistList.querySelector(`.nav-folder-item[data-folder-id="${cssEscape(folderId)}"]`);
+  if (!folder || !item) return;
+  startSidebarRename(ctx, item, folder.name, async (name) =>
+    applyPlaylistsState(ctx, await command("rename_playlist_folder", { folderId, name }))
+  );
+}
+
+// Deletes the folder only: what it holds moves up one level (the backend's).
+export async function deletePlaylistFolder(ctx, folderId) {
+  const { state, openConfirmDialog, command, emitStatus } = ctx;
+  const folder = (state.playlistFolders || []).find((entry) => entry.id === folderId);
+  if (!folder) return;
+  const confirmed = await openConfirmDialog({
+    title: t("ui-sidebar-folder-delete-title"),
+    message: folder.deleteConfirmText,
+    confirmLabel: t("ui-common-delete")
+  });
+  if (!confirmed) return;
+  const data = await command("delete_playlist_folder", { folderId });
+  applyPlaylistsState(ctx, data);
+  emitStatus(data.statusText);
+}
+
+// A folder click: selects it (New folder goes inside it) and opens or closes it.
+export async function togglePlaylistFolder(ctx, folderId) {
+  const folder = (ctx.state.playlistFolders || []).find((entry) => entry.id === folderId);
+  if (!folder) return;
+  ctx.state.selectedPlaylistFolderId = folderId;
+  applyPlaylistsState(ctx, await ctx.command("set_playlist_folder_collapsed", {
+    folderId,
+    collapsed: !folder.collapsed
+  }));
+}
+
+// Sidebar drag: `item` goes before or after `target`, or inside the folder
+// `target`. The tree is the library's own; it never changes the USB.
+export async function movePlaylistTreeItem(ctx, item, target, placement) {
+  try {
+    applyPlaylistsState(ctx, await ctx.command("move_playlist_tree_item", { item, target, placement }));
+  } catch (err) {
+    ctx.emitStatus(err?.message || String(err));
+    await loadPlaylists(ctx);
+  }
 }
 
 // The export status line, the backend's: the playlist's PlaylistUsbExportStatus
@@ -193,22 +341,6 @@ export function renderOpenPlaylistExportStatus(ctx) {
   if (playlist) renderPlaylistExportStatus(ctx, playlist);
 }
 
-// Sidebar drag-reorder: moves the playlist locally, then saves the whole
-// order. The order is local only; it never changes anything on the USB.
-export async function reorderPlaylists(ctx, fromIndex, toIndex) {
-  const { state } = ctx;
-  state.playlists = moveArrayItem(state.playlists, fromIndex, toIndex);
-  renderPlaylistList(ctx);
-  try {
-    await ctx.command("reorder_playlists", {
-      orderedPlaylistIds: state.playlists.map((playlist) => playlist.id)
-    });
-  } catch (err) {
-    ctx.emitStatus(err?.message || String(err));
-    await loadPlaylists(ctx);
-  }
-}
-
 // The backend's rows replace every stored field (an unset one comes as null);
 // what a playlist's track list loaded onto it (its tracks, totals) is kept, so
 // a re-read after a change doesn't empty the open playlist.
@@ -226,6 +358,8 @@ export function applyPlaylistsState(ctx, data) {
     ...loaded.get(playlist.id),
     ...playlist,
   }));
+  ctx.state.playlistFolders = data.folders || [];
+  ctx.state.playlistSidebar = data.sidebar || [];
   // Draws the sidebar, the export button and the open playlist's status line.
   ctx.applyPlaylistUsbExportStatus(data.playlistUsbExportStatus);
   // The active playlist's name is known now (or changed): the header and the
@@ -290,7 +424,7 @@ export function updatePlaylistExportButtons(ctx) {
   if (state.activeTab === "export-playlists") ctx.renderExportPlaylistsControls();
 }
 
-export async function createPlaylist(ctx, name) {
+export async function createPlaylist(ctx, name, folderId = null) {
   const { state, withProgress, command, updateModeText, switchView, emitStatus } = ctx;
   if (!name) {
     emitStatus(t("ui-playlist-name-required"));
@@ -304,7 +438,7 @@ export async function createPlaylist(ctx, name) {
   };
   const created = await withProgress(texts, async (progress) => {
     progress(35, t("ui-playlist-create-saving"));
-    const playlist = await command("create_playlist", { name });
+    const playlist = await command("create_playlist", folderId ? { name, folderId } : { name });
     applyPlaylistsState(ctx, playlist);
     // The new playlist becomes the active one.
     state.currentPlaylistId = playlist.playlistId;

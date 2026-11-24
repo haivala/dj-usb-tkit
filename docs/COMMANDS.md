@@ -347,22 +347,36 @@ aren't lost.
 ### Playlists
 
 Every command that changes playlists (`create_playlist`, `rename_playlist`, `delete_playlist`,
+the folder commands below,
 `remove_tracks_from_playlist`, `reorder_playlist_tracks`, the `add_*_to_playlist(s)` commands,
 `import_external_playlists`, `export_to_usb`, `export_to_usb_with_progress`,
 `set_usb_device_name`, `restore_usb_backup`, and `select_usb`, `set_export_sync_mode`,
 `fetch_usb_playlists`, `run_usb_diagnostics` and `repair_usb_diagnostics`, which change or re-read
 the export status) also answers with the whole playlist state, the same fields
-`list_playlists` returns, next to its own: `playlists` and `playlistUsbExportStatus`. The UI
+`list_playlists` returns, next to its own: `playlists`, `folders`, `sidebar` and
+`playlistUsbExportStatus`. The UI
 applies them as they come and never asks for the list again after a change.
 
-- `create_playlist` → `{ playlistId, name, statusText }`
+- `create_playlist` — `{ name, folderId? }`, first in the folder (or at the top) →
+  `{ playlistId, name, statusText }`
 - `rename_playlist`
-- `reorder_playlists` — `{ orderedPlaylistIds }`, every local playlist once, top first; saves the
-  sidebar order (local only, it never changes anything on the USB). `list_playlists` returns that
-  order, with playlists never reordered newest first
+- `create_playlist_folder` — `{ name, parentId? }` → `{ folderId, name, statusText }`
+- `rename_playlist_folder` — `{ folderId, name }`
+- `delete_playlist_folder` — `{ folderId }` → `{ folderId, deleted, statusText }`; deletes the
+  folder only, what it held moves up one level in its place
+- `set_playlist_folder_collapsed` — `{ folderId, collapsed }`
+- `move_playlist_tree_item` — `{ item, target, placement }`: `item` and `target` are
+  `{ kind: "folder" | "playlist", id }`, `placement` is `before`, `after` or `inside` (a
+  folder, at its end; the folder opens). A folder can't go inside itself or what it holds. The
+  tree is local only; it never changes anything on the USB
 - `delete_playlist` → `{ playlistId, deleted, statusText }`
-- `list_playlists` → `{ playlists, playlistUsbExportStatus }`. `playlistUsbExportStatus` is each
-  playlist's `PlaylistUsbExportStatus` (`sameNameExistsOnUsb`, `locksReorder` with its
+- `list_playlists` → `{ playlists, folders, sidebar, playlistUsbExportStatus }`. `playlists` are
+  in tree order, depth-first (items never moved newest first), each with `folderId` and
+  `folderPath` ("Sets / Friday"). `folders` are the `PlaylistFolder`s (`collapsed`,
+  `deleteConfirmText`, `toggleTooltip`); `sidebar` is what the sidebar draws, top first:
+  `{ kind, id, depth }`, a collapsed folder's children left out. `playlistUsbExportStatus` is each
+  playlist's `PlaylistUsbExportStatus` (`sameNameExistsOnUsb`: a top-level playlist's name in any
+  USB folder, a playlist in folders at its whole folder path, as export matches them; `locksReorder` with its
   `reorderLockTooltip`, the sidebar's `markLabel`, and `exportStatusText`, the export line with
   "On this USB." in front when it is) against the selected USB and the current export sync-mode
   setting, reading only the staged PDB/eDB (no USB access). The UI calls it at startup and when
@@ -397,7 +411,10 @@ applies them as they come and never asks for the list again after a change.
 - `get_playlist_membership` — `{ trackIds }`, one entry per selected track (its local id, or
   `null` for a track with no local row yet); every local playlist in sidebar order with how
   many of them it holds (`contained`), `state`: `none`, `some` or `all`, and `noteText`
-  ("Already in", "1 of 2 in", or empty)
+  ("Already in", "1 of 2 in", or empty); `tree` is the dialog's rows, every folder open:
+  `PlaylistListRow`s `{ kind, id, depth, name, playlistIds }`, a folder with its name and its
+  playlists at any depth (a folder holding none left out), a playlist naming its item by id.
+  `get_batch_export_overview` carries the same `tree` for its `rows`
 - `remove_tracks_from_playlist` → `{ playlistId, removed, statusText }`
 - `reorder_playlist_tracks`
 
@@ -426,7 +443,11 @@ applies them as they come and never asks for the list again after a change.
 - `list_usb_backups`
 - `restore_usb_backup`
 - `delete_usb_backup`
-- `fetch_usb_playlists`
+- `fetch_usb_playlists` — `items` in the tree's order, and `tree`: what the USB Playlists list
+  draws, top first, every folder open: `UsbPlaylistTreeRow`s `{ kind, id, parentId, depth, name }`,
+  a folder (`usb-f-…`, its path) or a playlist (an item's id), with its own name. Each folder's
+  items, folders and playlists together, are in the stick's order (the PDB's places first, the
+  eDB's for what only it holds), or the pending one during Edit order.
 - `fetch_usb_histories`
 - `fetch_usb_playlist_tracks`
 - `fetch_usb_history_tracks`
@@ -455,8 +476,10 @@ applies them as they come and never asks for the list again after a change.
   `changed`, `editedPlaylistIds`, `editingText`), each playlist's `orderEdited`, and
   `orderEditBlockedText` (why Edit order can't start, e.g. a read-only USB). Selecting another
   USB ends the edit.
-- `move_usb_playlist` — `{ usbRoot, playlistId, beforePlaylistId }`, moves a playlist to just
-  before another one (`null`: to the end) in the pending order.
+- `move_usb_playlist` — `{ usbRoot, playlistId, beforePlaylistId?, afterPlaylistId? }`, moves a
+  playlist or a folder (with what it holds) to just before or after another item of its own
+  folder (neither: to the folder's end) in the pending order, and answers with the new `tree`.
+  An item of another folder is refused.
 - `move_usb_playlist_track` — `{ usbRoot, playlistId, moveTrackId, beforeTrackId }`, the same
   for one track of a playlist. A history list (`usb-h-…`) is refused.
 - `sort_usb_playlist_tracks` — `{ usbRoot, playlistId, sortBy, sortDir }`, makes a column sort

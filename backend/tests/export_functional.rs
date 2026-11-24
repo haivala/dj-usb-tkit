@@ -424,6 +424,7 @@ fn export_to_usb_normalizes_extensible_pcm_wav_and_leaves_extensible_other_untou
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Wav Extensible Export".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -568,6 +569,7 @@ fn export_to_usb_preserves_flac_wav_and_aif_media_paths_in_edb_and_pdb() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Format Path Coverage".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -701,6 +703,7 @@ fn playlist_export_space_counts_only_tracks_the_usb_pdb_lacks() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Space Check".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist data")
@@ -804,6 +807,7 @@ fn playlist_of_fixture_wavs(
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Similar Names".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist data")
@@ -1047,6 +1051,7 @@ fn export_to_usb_does_not_change_player_menu_in_edb_or_pdb() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Menu Export Guard".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -1148,6 +1153,7 @@ fn export_to_usb_many_playlists_pdb_growth_does_not_change_player_menu_in_edb_or
     for i in 0..10usize {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: format!("Growth Playlist {i}"),
+            folder_id: None,
         });
         assert!(created.ok, "create playlist {i} failed: {created:?}");
         let pid = created.data.expect("playlist data").data.playlist_id;
@@ -1283,6 +1289,7 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
 
     let created_first = backend.create_playlist(CreatePlaylistRequest {
         name: "Tombstone Seed".to_string(),
+        folder_id: None,
     });
     assert!(
         created_first.ok,
@@ -1359,6 +1366,7 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
 
     let created_second = backend.create_playlist(CreatePlaylistRequest {
         name: "Tombstone Append".to_string(),
+        folder_id: None,
     });
     assert!(
         created_second.ok,
@@ -1498,6 +1506,7 @@ fn export_edb_and_pdb_media_and_analysis_paths_match_exactly() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Path Parity".to_string(),
+        folder_id: None,
     });
     assert!(created.ok);
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -1655,6 +1664,7 @@ fn export_edb_and_pdb_artwork_paths_both_resolve_when_artwork_enabled() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Artwork Parity".to_string(),
+        folder_id: None,
     });
     assert!(created.ok);
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -1782,6 +1792,7 @@ fn export_to_usb_rejects_when_playlist_tracks_are_missing_analysis() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Unanalyzed Export Block".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -1869,6 +1880,7 @@ fn export_to_usb_skips_missing_source_files_and_reports_warning() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Missing Source Coverage".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -1992,6 +2004,7 @@ fn export_to_usb_leaves_formats_players_dont_play_off_the_usb() {
     let export = |track_ids: Vec<String>, name: &str| {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: name.to_string(),
+            folder_id: None,
         });
         let playlist_id = created.data.expect("playlist data").data.playlist_id;
         let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
@@ -2101,6 +2114,7 @@ fn playlist_with_tracks(
 ) -> (String, AddTracksToPlaylistData) {
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: name.to_string(),
+        folder_id: None,
     });
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
     let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
@@ -2407,6 +2421,7 @@ fn export_truncated_name_twins_in_two_runs(first_in_edb_only: bool) {
     for (playlist_name, file_name) in [("First", &first_name), ("Second", &second_name)] {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: playlist_name.to_string(),
+            folder_id: None,
         });
         let playlist_id = created.data.expect("playlist data").data.playlist_id;
         let track_ids = vec![id_of(file_name)];
@@ -2661,6 +2676,7 @@ fn export_to_usb_blocks_mirror_prune_when_source_files_are_missing() {
     let playlist_name = "Mirror Missing Source Guard";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -2800,6 +2816,7 @@ fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_o
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "No Art Roundtrip Source".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create source playlist failed: {created:?}");
     let source_playlist_id = created.data.expect("source playlist data").data.playlist_id;
@@ -2900,6 +2917,7 @@ fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_o
 
     let target = backend.create_playlist(CreatePlaylistRequest {
         name: "No Art Roundtrip Target".to_string(),
+        folder_id: None,
     });
     assert!(target.ok, "create target playlist failed: {target:?}");
     let target_playlist_id = target.data.expect("target playlist data").data.playlist_id;
@@ -3030,6 +3048,7 @@ fn export_to_usb_option_matrix_controls_artwork_analysis_and_prune_behavior() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Option Matrix".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3218,6 +3237,7 @@ fn export_to_usb_reexport_is_idempotent_for_media_and_assets() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Idempotency".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3392,6 +3412,7 @@ fn export_to_usb_reuses_existing_usb_assets_for_usb_origin_tracks() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "USB Origin Reuse".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3546,6 +3567,7 @@ fn export_to_usb_does_not_use_post_write_parity_merge() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Testi".to_string(),
+        folder_id: None,
     });
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
@@ -3692,6 +3714,7 @@ fn first_export_after_initialize_usb_writes_export_pdb_without_skip_warning() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Fresh Init Export".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3792,6 +3815,7 @@ fn repeated_same_playlist_export_keeps_pdb_and_db_membership_stable() {
     let playlist_name = "Stable Export";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -3964,6 +3988,7 @@ fn export_sync_mode_additive_preserves_existing_playlist_entries() {
     let playlist_name = "Sync Mode Coverage";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -4129,6 +4154,7 @@ fn export_sync_mode_mirror_new_playlist_does_not_prune_existing_playlists() {
     let playlist_a_name = "Playlist A";
     let created_a = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_a_name.to_string(),
+        folder_id: None,
     });
     assert!(created_a.ok, "create A failed: {created_a:?}");
     let playlist_a_id = created_a.data.expect("playlist A data").data.playlist_id;
@@ -4170,6 +4196,7 @@ fn export_sync_mode_mirror_new_playlist_does_not_prune_existing_playlists() {
     let playlist_b_name = "Playlist B";
     let created_b = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_b_name.to_string(),
+        folder_id: None,
     });
     assert!(created_b.ok, "create B failed: {created_b:?}");
     let playlist_b_id = created_b.data.expect("playlist B data").data.playlist_id;
@@ -4269,6 +4296,7 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
     let exported_name = "On USB Already";
     let exported = backend.create_playlist(CreatePlaylistRequest {
         name: exported_name.to_string(),
+        folder_id: None,
     });
     assert!(exported.ok, "create exported playlist failed: {exported:?}");
     let exported_id = exported
@@ -4309,6 +4337,7 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
     let never_exported_name = "Never On USB";
     let never_exported = backend.create_playlist(CreatePlaylistRequest {
         name: never_exported_name.to_string(),
+        folder_id: None,
     });
     assert!(
         never_exported.ok,
@@ -4502,6 +4531,7 @@ fn export_saves_the_sort_it_is_given_unless_the_order_is_locked_on_the_usb() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Sorted Set".to_string(),
+            folder_id: None,
         })
         .data
         .expect("create data")
@@ -4692,6 +4722,7 @@ fn export_writes_engine_library_and_keeps_history_on_re_export() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "Engine Test".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist data")
@@ -4914,6 +4945,7 @@ fn export_backup_creates_timestamped_files_when_enabled() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Backup Test".to_string(),
+        folder_id: None,
     });
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
@@ -5075,6 +5107,7 @@ fn export_backup_skipped_when_disabled() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "No Backup".to_string(),
+        folder_id: None,
     });
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
@@ -5359,6 +5392,7 @@ fn usb_order_edit_persists_order_and_keeps_parity() {
     for (i, id) in all_ids.iter().take(3).enumerate() {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: format!("Reorder Playlist {i}"),
+            folder_id: None,
         });
         assert!(created.ok, "create playlist {i} failed: {created:?}");
         let pid = created.data.expect("playlist data").data.playlist_id;
@@ -5434,6 +5468,7 @@ fn usb_order_edit_persists_order_and_keeps_parity() {
                 usb_root: Some(usb.to_string_lossy().to_string()),
                 playlist_id: id.clone(),
                 before_playlist_id: None,
+                after_playlist_id: None,
             }),
             "move playlist",
         );
@@ -5903,6 +5938,7 @@ fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs
     for i in 0..10usize {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: format!("Growth Playlist {i}"),
+            folder_id: None,
         });
         assert!(created.ok, "create growth playlist {i} failed: {created:?}");
         let pid = created.data.expect("playlist data").data.playlist_id;
@@ -5941,6 +5977,7 @@ fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs
     // --- Create & additively export the target playlist against the now-grown PDB. ---
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Target Playlist".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create target playlist failed: {created:?}");
     let target_playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -6431,6 +6468,7 @@ fn export_mirror_reexport_keeps_reused_analysis_and_artwork_files() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Keepers".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -6617,6 +6655,7 @@ fn export_mirror_prune_keeps_history_protected_track_full_shape() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Shape Keepers".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -6979,6 +7018,7 @@ fn export_mirror_prune_keeps_dropped_track_rows_when_shared_by_another_playlist(
     let make_playlist = |name: &str, track_ids: Vec<String>| -> String {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: name.to_string(),
+            folder_id: None,
         });
         assert!(created.ok, "create playlist {name} failed: {created:?}");
         let pid = created.data.expect("playlist data").data.playlist_id;
@@ -7182,6 +7222,7 @@ fn mirror_reexport_after_swapping_colliding_tracks_keeps_their_files() {
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: playlist_name.to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist data")
@@ -7279,6 +7320,7 @@ fn add_usb_row_to_new_playlist(backend: &BackendCommands, usb: &Path, name: &str
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: name.to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist")
@@ -7398,6 +7440,7 @@ fn track_added_from_a_usb_row_exports_to_its_own_stick_and_to_another() {
     let source_list = first
         .create_playlist(CreatePlaylistRequest {
             name: "On the stick".to_string(),
+            folder_id: None,
         })
         .data
         .expect("playlist")
@@ -7578,6 +7621,7 @@ fn batch_export_setup(
         let playlist_id = backend
             .create_playlist(CreatePlaylistRequest {
                 name: name.to_string(),
+                folder_id: None,
             })
             .data
             .expect("playlist data")
@@ -8093,4 +8137,277 @@ fn batch_export_overview_offers_analysis_for_the_playlists_waiting_for_it() {
         false,
     );
     assert!(exported.ok, "batch export failed: {exported:?}");
+}
+
+/// A library folder `name` in `parent`, and its id.
+fn library_folder(backend: &BackendCommands, name: &str, parent: Option<&str>) -> String {
+    let created = backend.create_playlist_folder(backend::models::CreatePlaylistFolderRequest {
+        name: name.to_string(),
+        parent_id: parent.map(str::to_string),
+    });
+    assert!(created.ok, "create folder failed: {created:?}");
+    created.data.expect("folder data").data.folder_id
+}
+
+/// Puts the library playlist `playlist_id` at the end of `folder_id`.
+fn move_into_folder(backend: &BackendCommands, playlist_id: &str, folder_id: &str) {
+    use backend::models::{PlaylistTreeItem, PlaylistTreeKind, PlaylistTreePlacement};
+    let moved = backend.move_playlist_tree_item(backend::models::MovePlaylistTreeItemRequest {
+        item: PlaylistTreeItem {
+            kind: PlaylistTreeKind::Playlist,
+            id: playlist_id.to_string(),
+        },
+        target: PlaylistTreeItem {
+            kind: PlaylistTreeKind::Folder,
+            id: folder_id.to_string(),
+        },
+        placement: PlaylistTreePlacement::Inside,
+    });
+    assert!(moved.ok, "move failed: {moved:?}");
+}
+
+/// The stick's playlists as the USB view lists them, with their folder
+/// paths, and each one's track file names.
+fn usb_playlists_with_tracks(backend: &BackendCommands, usb: &Path) -> Vec<(String, Vec<String>)> {
+    usb_playlist_ids(backend, usb, "")
+        .into_iter()
+        .map(|(id, name)| {
+            let mut files: Vec<String> = usb_view_rows(backend, usb, &id)
+                .into_iter()
+                .map(|(file, _)| file)
+                .collect();
+            files.sort();
+            (name, files)
+        })
+        .collect()
+}
+
+#[test]
+fn export_puts_library_folders_on_the_stick_and_keeps_same_named_playlists_apart() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let (backend, ids, track_ids) = batch_export_setup(
+        root.path(),
+        &usb,
+        &[("Warm", &["One"]), ("Peak", &["Two"]), ("Top", &["Three"])],
+    );
+    // Sets / Warm, Sets / Peak; Other / Warm (another playlist of that name); Top.
+    let sets = library_folder(&backend, "Sets", None);
+    move_into_folder(&backend, &ids["Warm"], &sets);
+    move_into_folder(&backend, &ids["Peak"], &sets);
+    let other = library_folder(&backend, "Other", None);
+    let (other_warm, _) = playlist_with_tracks(&backend, "Warm", vec![track_ids["Two"].clone()]);
+    move_into_folder(&backend, &other_warm, &other);
+    // The library's order: Other first (newest), then Sets, then Top.
+    let library = backend.list_playlists().data.expect("playlists");
+    let library_order: Vec<String> = library
+        .playlists
+        .iter()
+        .map(|p| match &p.folder_path {
+            Some(path) => format!("{path} / {}", p.name),
+            None => p.name.clone(),
+        })
+        .collect();
+    assert_eq!(library_order, ["Other / Warm", "Sets / Warm", "Sets / Peak", "Top"]);
+
+    // The Export playlists page and the Add to dialog list them under their
+    // folders, every folder open, indented as in the sidebar; a folder
+    // holding no playlist is left out, and a folder's box ticks all of its.
+    library_folder(&backend, "Empty", Some(&sets));
+    let lines = |tree: &[backend::models::PlaylistListRow], name_of: &dyn Fn(&str) -> String| {
+        tree.iter()
+            .map(|row| {
+                let name = match row.kind {
+                    backend::models::PlaylistTreeKind::Folder => {
+                        format!("{} ({})", row.name, row.playlist_ids.len())
+                    }
+                    backend::models::PlaylistTreeKind::Playlist => name_of(&row.id),
+                };
+                format!("{}{name}", "  ".repeat(row.depth))
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = ["Other (1)", "  Warm", "Sets (2)", "  Warm", "  Peak", "Top"];
+    let overview = backend
+        .get_batch_export_overview(backend::models::GetBatchExportOverviewRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("overview data");
+    let name_of = |id: &str| {
+        overview.rows.iter().find(|row| row.playlist_id == id).expect("row").name.clone()
+    };
+    assert_eq!(lines(&overview.tree, &name_of), expected);
+    let membership = backend
+        .get_playlist_membership(backend::models::GetPlaylistMembershipRequest {
+            track_ids: vec![Some(track_ids["One"].clone())],
+        })
+        .data
+        .expect("membership data");
+    let name_of = |id: &str| {
+        membership.items.iter().find(|item| item.playlist_id == id).expect("item").name.clone()
+    };
+    assert_eq!(lines(&membership.tree, &name_of), expected);
+
+    let all = library.playlists.iter().map(|p| p.id.clone()).collect();
+    let exported = export_batch(&backend, &usb, all, true, false);
+    assert!(exported.ok, "batch export failed: {exported:?}");
+
+    // Both databases agree, in the library's order, each Warm with its own track.
+    assert_eq!(usb_playlist_names_in_order(&backend, &usb), library_order);
+    let wav = |title: &str| format!("Batch Artist - {title}.wav");
+    assert_eq!(
+        usb_playlists_with_tracks(&backend, &usb),
+        [
+            ("Other / Warm".to_string(), vec![wav("Two")]),
+            ("Sets / Warm".to_string(), vec![wav("One")]),
+            ("Sets / Peak".to_string(), vec![wav("Two")]),
+            ("Top".to_string(), vec![wav("Three")]),
+        ]
+    );
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    let report = diagnostics.data.expect("diagnostics data").data;
+    assert!(
+        matches!(report.overall_status, backend::models::DiagStatus::Pass),
+        "{report:#?}"
+    );
+    // Every library playlist shows as on the stick, by its folder path.
+    let selected = backend.select_usb(SelectUsbRequest {
+        path: usb.to_string_lossy().to_string(),
+    });
+    assert!(selected.data.expect("select data").data.usb.valid);
+    let state = backend.list_playlists().data.expect("playlists");
+    assert!(
+        state.playlist_usb_export_status.iter().all(|s| s.same_name_exists_on_usb),
+        "{:?}",
+        state.playlist_usb_export_status
+    );
+
+    // Moved into a folder after its export, Top is new there; its old
+    // top-level copy stays on the stick.
+    move_into_folder(&backend, &ids["Top"], &other);
+    let state = backend.list_playlists().data.expect("playlists");
+    let top = state
+        .playlist_usb_export_status
+        .iter()
+        .find(|s| s.playlist_id == ids["Top"])
+        .expect("Top status");
+    assert!(!top.same_name_exists_on_usb);
+    export_one(&backend, &usb, &ids["Top"]);
+    let names: Vec<String> = usb_playlist_ids(&backend, &usb, "")
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect();
+    assert!(names.contains(&"Other / Top".to_string()), "{names:?}");
+    assert!(names.contains(&"Top".to_string()), "{names:?}");
+}
+
+/// The USB view's playlist list, indented by depth.
+fn usb_tree_lines(backend: &BackendCommands, usb: &Path) -> Vec<String> {
+    let fetched = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(fetched.ok, "fetch usb playlists failed: {fetched:?}");
+    fetched
+        .data
+        .expect("usb playlist data")
+        .data
+        .tree
+        .into_iter()
+        .map(|row| format!("{}{}", "  ".repeat(row.depth), row.name))
+        .collect()
+}
+
+/// The id of the USB view's row named `name` at `depth`.
+fn usb_tree_id(backend: &BackendCommands, usb: &Path, name: &str, depth: usize) -> String {
+    backend
+        .fetch_usb_playlists(FetchUsbPlaylistsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("usb playlist data")
+        .data
+        .tree
+        .into_iter()
+        .find(|row| row.name == name && row.depth == depth)
+        .unwrap_or_else(|| panic!("no row {name} at depth {depth}"))
+        .id
+}
+
+#[test]
+fn edit_order_moves_folders_and_playlists_within_their_folder_in_both_databases() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let (backend, ids, _) = batch_export_setup(
+        root.path(),
+        &usb,
+        &[("Warm", &["One"]), ("Peak", &["Two"]), ("Top", &["Three"])],
+    );
+    let sets = library_folder(&backend, "Sets", None);
+    let inner = library_folder(&backend, "Inner", Some(&sets));
+    move_into_folder(&backend, &ids["Warm"], &sets);
+    move_into_folder(&backend, &ids["Peak"], &inner);
+    let all = backend
+        .list_playlists()
+        .data
+        .expect("playlists")
+        .playlists
+        .iter()
+        .map(|p| p.id.clone())
+        .collect();
+    let exported = export_batch(&backend, &usb, all, true, false);
+    assert!(exported.ok, "batch export failed: {exported:?}");
+    // The USB view lists the stick's folders as a tree, in the stick's order.
+    assert_eq!(
+        usb_tree_lines(&backend, &usb),
+        ["Sets", "  Inner", "    Peak", "  Warm", "Top"]
+    );
+
+    let usb_root = Some(usb.to_string_lossy().to_string());
+    let order = || UsbOrderEditRequest {
+        usb_root: usb_root.clone(),
+    };
+    let mv = |item: &str, before: Option<&str>, after: Option<&str>| {
+        backend.move_usb_playlist(MoveUsbPlaylistRequest {
+            usb_root: usb_root.clone(),
+            playlist_id: item.to_string(),
+            before_playlist_id: before.map(str::to_string),
+            after_playlist_id: after.map(str::to_string),
+        })
+    };
+    assert!(backend.begin_usb_order_edit(order()).ok, "begin order edit");
+    let sets_id = usb_tree_id(&backend, &usb, "Sets", 0);
+    let inner_id = usb_tree_id(&backend, &usb, "Inner", 1);
+    let warm_id = usb_tree_id(&backend, &usb, "Warm", 1);
+    let top_id = usb_tree_id(&backend, &usb, "Top", 0);
+    // A folder moves with what it holds; a playlist only among its folder's items.
+    assert!(mv(&top_id, Some(&sets_id), None).ok, "move Top first");
+    assert!(mv(&inner_id, None, Some(&warm_id)).ok, "move Inner after Warm");
+    let refused = mv(&top_id, Some(&warm_id), None);
+    assert!(!refused.ok, "moved into another folder: {refused:?}");
+    assert_eq!(
+        refused.error.expect("error").message,
+        "Items move only within their own folder"
+    );
+    let expected = ["Top", "Sets", "  Warm", "  Inner", "    Peak"];
+    assert_eq!(usb_tree_lines(&backend, &usb), expected, "pending order shown");
+
+    let committed = backend.commit_usb_order_edit(order());
+    assert!(committed.ok, "commit order edit: {committed:?}");
+    assert_eq!(usb_tree_lines(&backend, &usb), expected, "saved order read back");
+    // Both databases hold it (the save checks moved folders' places too).
+    assert_eq!(
+        usb_playlist_names_in_order(&backend, &usb),
+        ["Top", "Sets / Warm", "Sets / Inner / Peak"]
+    );
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: usb_root.clone(),
+    });
+    let report = diagnostics.data.expect("diagnostics data").data;
+    assert!(
+        matches!(report.overall_status, backend::models::DiagStatus::Pass),
+        "{report:#?}"
+    );
 }

@@ -76,6 +76,8 @@ impl LibraryDb {
 /// The playlists as the sidebar lists them.
 struct ListedPlaylists {
     items: Vec<Playlist>,
+    folders: Vec<PlaylistFolder>,
+    sidebar: Vec<PlaylistSidebarRow>,
 }
 
 struct Service {
@@ -107,7 +109,6 @@ impl Service {
         set_source_folder_enabled(SetSourceFolderEnabledRequest) -> LibrarySourcesData;
         relocate_source_root(RelocateSourceRootRequest) -> RelocateSourceRootData;
         materialize_source_track(MaterializeSourceTrackRequest) -> MaterializeSourceTrackData;
-        reorder_playlists(ReorderPlaylistsRequest) -> ReorderPlaylistsData;
         resolve_track_identity(ResolveTrackIdentityRequest) -> ResolveTrackIdentityData;
         remove_source_folder(RemoveSourceFolderRequest) -> RemoveSourceFolderData;
         get_selection_duration(GetSelectionDurationRequest) -> GetSelectionDurationData;
@@ -116,6 +117,11 @@ impl Service {
 
     playlist_commands! {
         create_playlist(CreatePlaylistRequest) -> CreatePlaylistData;
+        create_playlist_folder(CreatePlaylistFolderRequest) -> CreatePlaylistFolderData;
+        rename_playlist_folder(RenamePlaylistFolderRequest) -> RenamePlaylistFolderData;
+        delete_playlist_folder(DeletePlaylistFolderRequest) -> DeletePlaylistFolderData;
+        set_playlist_folder_collapsed(SetPlaylistFolderCollapsedRequest) -> SetPlaylistFolderCollapsedData;
+        move_playlist_tree_item(MovePlaylistTreeItemRequest) -> MovePlaylistTreeItemData;
         reorder_playlist_tracks(ReorderPlaylistTracksRequest) -> ReorderPlaylistTracksData;
         rename_playlist(RenamePlaylistRequest) -> RenamePlaylistData;
         delete_playlist(DeletePlaylistRequest) -> DeletePlaylistData;
@@ -138,6 +144,8 @@ impl Service {
     fn list_playlists(&self) -> BackendResult<ListedPlaylists> {
         result(self.backend.list_playlists()).map(|state| ListedPlaylists {
             items: state.playlists,
+            folders: state.folders,
+            sidebar: state.sidebar,
         })
     }
 
@@ -259,13 +267,49 @@ fn list_playlists_names_the_drive_as_it_was_called_at_export() {
     assert_eq!(names, vec![None, None, Some("Club Stick".to_string())]);
 }
 
+fn tree_item(kind: PlaylistTreeKind, id: &str) -> PlaylistTreeItem {
+    PlaylistTreeItem {
+        kind,
+        id: id.to_string(),
+    }
+}
+
+/// The sidebar as "  name" lines, two spaces per folder level, folders ending in "/".
+fn sidebar_lines(listed: &ListedPlaylists) -> Vec<String> {
+    listed
+        .sidebar
+        .iter()
+        .map(|row| {
+            let name = match row.kind {
+                PlaylistTreeKind::Folder => {
+                    let folder = listed
+                        .folders
+                        .iter()
+                        .find(|f| f.id == row.id)
+                        .expect("folder");
+                    format!("{}/", folder.name)
+                }
+                PlaylistTreeKind::Playlist => listed
+                    .items
+                    .iter()
+                    .find(|p| p.id == row.id)
+                    .expect("playlist")
+                    .name
+                    .clone(),
+            };
+            format!("{}{name}", "  ".repeat(row.depth))
+        })
+        .collect()
+}
+
 #[test]
-fn reorder_playlists_saves_sidebar_order_and_new_playlists_go_on_top() {
+fn moving_playlists_saves_sidebar_order_and_new_playlists_go_on_top() {
     let (_dir, service) = test_service();
     let create = |name: &str| {
         service
             .create_playlist(CreatePlaylistRequest {
                 name: name.to_string(),
+                folder_id: None,
             })
             .expect("create playlist")
             .playlist_id
@@ -284,31 +328,254 @@ fn reorder_playlists_saves_sidebar_order_and_new_playlists_go_on_top() {
     let c = create("C");
     assert_eq!(listed_names(), ["C", "B", "A"]);
 
-    let saved = service
-        .reorder_playlists(ReorderPlaylistsRequest {
-            ordered_playlist_ids: vec![a.clone(), c.clone(), b.clone()],
-        })
-        .expect("reorder");
-    assert_eq!(saved.reordered, 3);
+    let playlist = |id: &str| tree_item(PlaylistTreeKind::Playlist, id);
+    for (item, target) in [(&a, &c), (&b, &c)] {
+        service
+            .move_playlist_tree_item(MovePlaylistTreeItemRequest {
+                item: playlist(item),
+                target: playlist(target),
+                placement: if item == &a {
+                    PlaylistTreePlacement::Before
+                } else {
+                    PlaylistTreePlacement::After
+                },
+            })
+            .expect("move");
+    }
     assert_eq!(listed_names(), ["A", "C", "B"]);
 
     create("D");
     assert_eq!(listed_names(), ["D", "A", "C", "B"]);
 
-    // Missing, duplicate or unknown ids change nothing.
-    for ids in [
-        vec![a.clone(), c.clone(), b.clone()],
-        vec![a.clone(), a.clone(), c.clone(), b.clone()],
-        vec![a.clone(), c.clone(), b.clone(), "nope".to_string()],
+    // Unknown items and a playlist as a folder change nothing.
+    for (item, target, placement) in [
+        (
+            playlist("nope"),
+            playlist(&a),
+            PlaylistTreePlacement::Before,
+        ),
+        (
+            playlist(&a),
+            playlist("nope"),
+            PlaylistTreePlacement::Before,
+        ),
+        (playlist(&a), playlist(&b), PlaylistTreePlacement::Inside),
     ] {
-        let err = service
-            .reorder_playlists(ReorderPlaylistsRequest {
-                ordered_playlist_ids: ids,
-            })
-            .unwrap_err();
-        assert!(matches!(err, BackendError::Internal(_)));
+        assert!(
+            service
+                .move_playlist_tree_item(MovePlaylistTreeItemRequest {
+                    item,
+                    target,
+                    placement,
+                })
+                .is_err()
+        );
     }
     assert_eq!(listed_names(), ["D", "A", "C", "B"]);
+}
+
+#[test]
+fn playlist_folders_nest_collapse_and_give_their_playlists_a_path() {
+    let (_dir, service) = test_service();
+    let folder = |name: &str, parent: Option<&str>| {
+        service
+            .create_playlist_folder(CreatePlaylistFolderRequest {
+                name: name.to_string(),
+                parent_id: parent.map(str::to_string),
+            })
+            .expect("create folder")
+            .folder_id
+    };
+    let playlist = |name: &str, folder: Option<&str>| {
+        service
+            .create_playlist(CreatePlaylistRequest {
+                name: name.to_string(),
+                folder_id: folder.map(str::to_string),
+            })
+            .expect("create playlist")
+            .playlist_id
+    };
+    playlist("Loose", None);
+    let sets = folder("Sets", None);
+    let friday = folder("Friday", Some(&sets));
+    playlist("Warmup", Some(&friday));
+    playlist("Peak", Some(&friday));
+    playlist("Closing", Some(&sets));
+
+    let listed = service.list_playlists().expect("list");
+    assert_eq!(
+        sidebar_lines(&listed),
+        [
+            "Sets/",
+            "  Closing",
+            "  Friday/",
+            "    Peak",
+            "    Warmup",
+            "Loose"
+        ]
+    );
+    let paths: Vec<(String, Option<String>)> = listed
+        .items
+        .iter()
+        .map(|p| (p.name.clone(), p.folder_path.clone()))
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            ("Closing".to_string(), Some("Sets".to_string())),
+            ("Peak".to_string(), Some("Sets / Friday".to_string())),
+            ("Warmup".to_string(), Some("Sets / Friday".to_string())),
+            ("Loose".to_string(), None),
+        ]
+    );
+
+    // A collapsed folder hides what it holds from the sidebar only.
+    service
+        .set_playlist_folder_collapsed(SetPlaylistFolderCollapsedRequest {
+            folder_id: friday.clone(),
+            collapsed: true,
+        })
+        .expect("collapse");
+    let listed = service.list_playlists().expect("list");
+    assert_eq!(
+        sidebar_lines(&listed),
+        ["Sets/", "  Closing", "  Friday/", "Loose"]
+    );
+    assert_eq!(listed.items.len(), 4);
+    assert!(listed.folders.iter().any(|f| f.id == friday && f.collapsed));
+
+    // Dropping into a folder puts the item at its end and opens it.
+    let loose = listed
+        .items
+        .iter()
+        .find(|p| p.name == "Loose")
+        .unwrap()
+        .id
+        .clone();
+    service
+        .move_playlist_tree_item(MovePlaylistTreeItemRequest {
+            item: tree_item(PlaylistTreeKind::Playlist, &loose),
+            target: tree_item(PlaylistTreeKind::Folder, &friday),
+            placement: PlaylistTreePlacement::Inside,
+        })
+        .expect("move into folder");
+    assert_eq!(
+        sidebar_lines(&service.list_playlists().expect("list")),
+        [
+            "Sets/",
+            "  Closing",
+            "  Friday/",
+            "    Peak",
+            "    Warmup",
+            "    Loose"
+        ]
+    );
+
+    // A folder can't go inside itself or what it holds.
+    for target in [&sets, &friday] {
+        assert!(
+            service
+                .move_playlist_tree_item(MovePlaylistTreeItemRequest {
+                    item: tree_item(PlaylistTreeKind::Folder, &sets),
+                    target: tree_item(PlaylistTreeKind::Folder, target),
+                    placement: PlaylistTreePlacement::Inside,
+                })
+                .is_err()
+        );
+    }
+
+    service
+        .rename_playlist_folder(RenamePlaylistFolderRequest {
+            folder_id: friday.clone(),
+            name: "Saturday".to_string(),
+        })
+        .expect("rename");
+    let listed = service.list_playlists().expect("list");
+    assert_eq!(
+        listed
+            .items
+            .iter()
+            .find(|p| p.name == "Peak")
+            .unwrap()
+            .folder_path
+            .as_deref(),
+        Some("Sets / Saturday")
+    );
+}
+
+#[test]
+fn deleting_a_folder_moves_what_it_holds_up_in_its_place() {
+    let (_dir, service) = test_service();
+    let create_folder = |name: &str, parent: Option<&str>| {
+        service
+            .create_playlist_folder(CreatePlaylistFolderRequest {
+                name: name.to_string(),
+                parent_id: parent.map(str::to_string),
+            })
+            .expect("create folder")
+            .folder_id
+    };
+    let create = |name: &str, folder: Option<&str>| {
+        service
+            .create_playlist(CreatePlaylistRequest {
+                name: name.to_string(),
+                folder_id: folder.map(str::to_string),
+            })
+            .expect("create playlist");
+    };
+    create("Last", None);
+    let middle = create_folder("Middle", None);
+    create("Inner B", Some(&middle));
+    create("Inner A", Some(&middle));
+    create_folder("Sub", Some(&middle));
+    create("First", None);
+    let empty = create_folder("Empty", None);
+
+    let listed = service.list_playlists().expect("list");
+    assert_eq!(
+        sidebar_lines(&listed),
+        [
+            "Empty/",
+            "First",
+            "Middle/",
+            "  Sub/",
+            "  Inner A",
+            "  Inner B",
+            "Last"
+        ]
+    );
+    let confirm = |id: &str| {
+        listed
+            .folders
+            .iter()
+            .find(|f| f.id == id)
+            .unwrap()
+            .delete_confirm_text
+            .clone()
+    };
+    assert_eq!(confirm(&empty), "Delete the folder \"Empty\"?");
+    assert_eq!(
+        confirm(&middle),
+        "Delete the folder \"Middle\"?\n\nWhat it holds moves up one level. No playlist is deleted."
+    );
+
+    let deleted = service
+        .delete_playlist_folder(DeletePlaylistFolderRequest {
+            folder_id: middle.clone(),
+        })
+        .expect("delete folder");
+    assert!(deleted.deleted);
+    assert_eq!(deleted.status_text, "Folder deleted: Middle");
+    let listed = service.list_playlists().expect("list");
+    assert_eq!(
+        sidebar_lines(&listed),
+        ["Empty/", "First", "Sub/", "Inner A", "Inner B", "Last"]
+    );
+    assert_eq!(
+        listed.items.len(),
+        4,
+        "no playlist is deleted with a folder"
+    );
 }
 
 #[test]
@@ -317,6 +584,7 @@ fn create_playlist_rejects_empty_name() {
     let err = service
         .create_playlist(CreatePlaylistRequest {
             name: "   ".to_string(),
+            folder_id: None,
         })
         .unwrap_err();
     assert!(matches!(err, BackendError::Validation(_)));
@@ -328,6 +596,7 @@ fn playlist_create_rename_delete_roundtrip() {
     let created = service
         .create_playlist(CreatePlaylistRequest {
             name: "  My Playlist  ".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     assert_eq!(created.name, "My Playlist");
@@ -375,6 +644,7 @@ fn add_track_candidates_to_playlist_materializes_local_source_rows() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
 
@@ -432,6 +702,7 @@ fn add_track_candidates_to_playlist_does_not_fuzzy_resolve_usb_origin_rows() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
 
@@ -501,6 +772,7 @@ fn add_tracks_to_playlist_dedupe_skip_counts_skipped_and_get_playlist_tracks_ord
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
 
@@ -578,6 +850,7 @@ fn get_playlist_tracks_list_totals_ignore_search() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -644,6 +917,7 @@ fn get_playlist_tracks_computes_total_duration_server_side() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -691,6 +965,7 @@ fn get_selection_duration_sums_only_the_ticked_playlist_tracks() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -732,6 +1007,7 @@ fn get_playlist_tracks_paginates_filters_and_sorts_server_side() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     let pid = playlist.playlist_id.clone();
@@ -870,6 +1146,7 @@ fn remove_tracks_from_playlist_recompacts_positions() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -942,6 +1219,7 @@ fn reorder_playlist_tracks_applies_arbitrary_new_order() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -994,6 +1272,7 @@ fn reorder_playlist_tracks_sort_commit_mode_orders_the_whole_playlist() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -1043,6 +1322,7 @@ fn reorder_playlist_tracks_single_move_mode_repositions_one_track() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -1125,6 +1405,7 @@ fn reorder_playlist_tracks_rejects_mismatched_track_set() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -1450,6 +1731,7 @@ fn track_rows_derive_format_ext_from_path_when_the_column_is_null() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -1699,6 +1981,7 @@ fn get_library_sources_folds_a_folder_added_through_a_symlink_into_its_parent() 
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service
@@ -2280,6 +2563,7 @@ fn playlist_tracks_say_where_their_file_is_and_whether_its_usb_is_selected() {
     let playlist = service
         .create_playlist(CreatePlaylistRequest {
             name: "PL".to_string(),
+            folder_id: None,
         })
         .expect("create playlist");
     service

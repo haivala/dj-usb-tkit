@@ -90,7 +90,8 @@ export function createAppContext(env) {
     pausePlaybackFromUi resumePlaybackFromUi moveActiveWaveform stopPlaybackFromUi stopPlaybackIfActive
     resolveLocalTrackIdAsync isTrackCurrentlyPlaying playTrackFromOrigin handlePlaybackEvent
     registerBackendJobEvents unregisterBackendJobEvents`);
-  bindActions(playlist, `renderPlaylistList promptNewPlaylist startPlaylistRename reorderPlaylists loadPlaylists applyPlaylistsState
+  bindActions(playlist, `renderPlaylistList promptNewPlaylist promptNewPlaylistFolder startPlaylistRename
+    startPlaylistFolderRename deletePlaylistFolder togglePlaylistFolder movePlaylistTreeItem loadPlaylists applyPlaylistsState
     commitActivePlaylistSort updatePlaylistExportButtons createPlaylist deletePlaylist
     addTracksToCurrentPlaylist addLibrarySelectionToCurrentPlaylist populatePlaylistPanel
     getCurrentPlaylist isPlaylistSortActive clearPlaylistTrackSort renderCurrentPlaylistTracksFromState

@@ -15,12 +15,27 @@ Transport state is pushed through backend events, so the UI reflects start/progr
 
 In the sidebar, hovering a playlist shows a drag handle on its left and a pencil next to the
 delete button. Drag the handle to reorder the playlists; click the pencil, or double-click the
-name, to rename one. New playlists appear at the top. The sidebar order is the app's own: it does
-not change the playlist order on the USB, which is set in USB → Playlists. Drag the sidebar's
+name, to rename one. New playlists appear at the top.
+
+The Playlists heading holds three small buttons: Import (↧, only when a rekordbox or Mixxx
+library is found), New folder and New playlist (+). New folder and New playlist create inside the selected
+folder (the folder last clicked; opening any view clears the selection), else at the top. Drag a playlist or a folder onto
+the middle of a folder to put it inside (at the end; the folder opens), or onto the top or
+bottom edge of a row to put it before or after that row. Folders nest as deep as you like.
+Clicking a folder opens or closes it, and the app remembers which are closed. Hovering a folder
+shows a + that makes a new playlist first in it, and a pencil to rename it. Deleting a folder
+deletes only the folder: what it held moves up one level, in its place, and no playlist is
+deleted.
+
+The sidebar order is the app's own: it doesn't change the USB, whose playlist order is set in
+USB → Playlists. Folders do go on the USB: a playlist in folders is exported into the same
+folders there (see `docs/USB_EXPORT.md`), and the Add to… dialog and the Export playlists page
+list the playlists in the sidebar's tree, every folder open and indented as in the sidebar; a
+folder's box ticks all its playlists. Drag the sidebar's
 right edge to make it wider or narrower, and double-click the edge to reset the width.
 
 Playlists can also be imported from a rekordbox or Mixxx library with the
-**Import** button under **New** in the sidebar: tick as many as you like. Each
+Import button (↧) on the sidebar's Playlists heading: tick as many as you like. Each
 becomes an ordinary local playlist; see `docs/EXTERNAL_LIBRARIES.md`.
 
 ### Track list columns
@@ -67,11 +82,18 @@ Playlist state is modeled as local entities with ordered mapping rows. In practi
 
 The playlist command layer is intentionally CRUD-oriented:
 
-- `create_playlist`, `rename_playlist`, `delete_playlist` change container metadata
-- `reorder_playlists` saves the sidebar order to `playlists.sort_order`; new playlists get
-  a value below the current minimum so they land on top
-- `list_playlists` reads container metadata in sidebar order (playlists never reordered
-  come newest first); `get_playlist_tracks` reads ordered
+- `create_playlist`, `rename_playlist`, `delete_playlist` change container metadata;
+  `create_playlist` takes an optional `folderId`
+- `create_playlist_folder`, `rename_playlist_folder`, `delete_playlist_folder` and
+  `set_playlist_folder_collapsed` change the folders (`playlist_folders`); deleting one moves
+  what it holds up one level, in its place
+- `move_playlist_tree_item` moves a folder or a playlist before or after another item, or to
+  the end of a folder. Folders (`playlist_folders.parent_id`) and playlists
+  (`playlists.folder_id`) share one order per parent, `sort_order` on both tables; new items
+  get a value below their parent's lowest so they land on top
+- `list_playlists` reads container metadata in tree order, depth-first (items never moved
+  come newest first), with the folders and the sidebar rows (`sidebar`: kind, id, depth;
+  a collapsed folder's children left out); `get_playlist_tracks` reads ordered
   membership, paginated/searched/sorted server-side (see the "Paginated track
   lists" envelope in `docs/COMMANDS.md`; `limit: 0` returns the whole playlist).
   The whole-playlist `totalDurationMs` is computed over the filtered set, not the

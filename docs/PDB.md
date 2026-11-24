@@ -897,20 +897,21 @@ playlists, and the tracks in each of them, in a new order: the backend holds
 the pending order (`begin_usb_order_edit`, `move_usb_playlist`,
 `move_usb_playlist_track`, `sort_usb_playlist_tracks`) and
 `commit_usb_order_edit` writes it, after one backup, in one pass per
-database, each saved to the USB once. Unlike the
-export-time placement above, every playlist gets its position in the whole
-requested list — it does not scope by parent/folder, matching how
-`fetch_usb_playlists` already sorts and displays the flat playlist list.
+database, each saved to the USB once. The list is the stick's tree, and an
+item moves only among its own folder's items: as rekordbox numbers them,
+each moved folder's items, folders and playlists together, get the places
+0..n in its new order.
 
-That one numbering goes to both databases: `t07.sort_order` for each playlist
-with a PDB row, through the same in-place byte patcher strict-repair order
-restoration uses (`patch_playlist_tree_sort_orders_in_place`), and eDB
-`playlist.sequenceNo` for each playlist with an eDB row, matched by name as the
-list read pairs them (`write_edb_playlist_order`). A playlist in only one
-database is reordered there. Because eDB-only playlists hold positions too,
-`t07.sort_order` can have gaps when the list includes them; a list without them
-stays consecutive. `fetch_usb_playlists` sorts PDB rows by `t07.sort_order` and
-eDB-only rows by `sequenceNo` together.
+Those places go to both databases: `t07.sort_order` for each item with a PDB
+row, through the same in-place byte patcher strict-repair order restoration
+uses (`patch_playlist_tree_sort_orders_in_place`), and eDB
+`playlist.sequenceNo` for each item with an eDB row, matched by folder path
+and name as the list read pairs them (`write_edb_playlist_order`). An item in
+only one database is reordered there. Before anything is written back, the
+staged copies are checked to agree: each moved playlist's place, by the parity
+report, and each moved folder's `sort_order` against its `sequenceNo`.
+`fetch_usb_playlists` orders each folder's items by the PDB's places, and the
+eDB's for the items only it holds.
 
 A playlist's track order is its t08 entries' `entry_index`. The commit patches
 those in place (`patch_t08_entry_indices_in_place`), renumbered from the

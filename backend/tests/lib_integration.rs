@@ -80,6 +80,7 @@ fn add_usb_track_to_new_playlist(
 ) -> Option<String> {
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: format!("Added {}", track.title),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let root = usb_root.to_string_lossy().to_string();
@@ -526,6 +527,7 @@ fn milestone_one_flow_works() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Test Playlist".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -680,6 +682,7 @@ fn playlist_tracks_persist_across_backend_restart() {
 
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: "Persisted Playlist".to_string(),
+            folder_id: None,
         });
         assert!(created.ok, "create failed: {created:?}");
         let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -938,6 +941,7 @@ fn export_to_usb_writes_canonical_outputs() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Export Test".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -1083,6 +1087,7 @@ fn export_to_usb_copies_anlz_bundle_for_fixture_mp3() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "ANLZ Test".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -1212,6 +1217,7 @@ fn export_to_usb_prunes_stale_owned_assets_when_enabled() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Prune Test".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -1350,6 +1356,7 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
 
     let created_a = backend.create_playlist(CreatePlaylistRequest {
         name: "Mirror A".to_string(),
+        folder_id: None,
     });
     assert!(created_a.ok, "create playlist A failed: {created_a:?}");
     let playlist_a_id = created_a.data.expect("playlist A data").data.playlist_id;
@@ -1368,6 +1375,7 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
 
     let created_b = backend.create_playlist(CreatePlaylistRequest {
         name: "Mirror B".to_string(),
+        folder_id: None,
     });
     assert!(created_b.ok, "create playlist B failed: {created_b:?}");
     let playlist_b_id = created_b.data.expect("playlist B data").data.playlist_id;
@@ -1551,6 +1559,7 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
 
     let created_a = backend.create_playlist(CreatePlaylistRequest {
         name: "Mirror Art A".to_string(),
+        folder_id: None,
     });
     assert!(created_a.ok, "create playlist A failed: {created_a:?}");
     let playlist_a_id = created_a.data.expect("playlist A data").data.playlist_id;
@@ -1569,6 +1578,7 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
 
     let created_b = backend.create_playlist(CreatePlaylistRequest {
         name: "Mirror Art B".to_string(),
+        folder_id: None,
     });
     assert!(created_b.ok, "create playlist B failed: {created_b:?}");
     let playlist_b_id = created_b.data.expect("playlist B data").data.playlist_id;
@@ -1720,6 +1730,7 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
 
     let created_a = backend.create_playlist(CreatePlaylistRequest {
         name: "Mirror Analysis A".to_string(),
+        folder_id: None,
     });
     assert!(created_a.ok, "create playlist A failed: {created_a:?}");
     let playlist_a_id = created_a.data.expect("playlist A data").data.playlist_id;
@@ -1738,6 +1749,7 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
 
     let created_b = backend.create_playlist(CreatePlaylistRequest {
         name: "Mirror Analysis B".to_string(),
+        folder_id: None,
     });
     assert!(created_b.ok, "create playlist B failed: {created_b:?}");
     let playlist_b_id = created_b.data.expect("playlist B data").data.playlist_id;
@@ -1867,6 +1879,7 @@ fn export_to_usb_preserves_existing_export_db_metadata_when_local_track_is_thin(
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Thin Meta Export".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -2089,6 +2102,7 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Testi".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -5288,6 +5302,7 @@ fn export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "USB Test Playlist".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("create playlist data").data.playlist_id;
@@ -5573,6 +5588,7 @@ fn export_to_usb_produces_identical_content_and_pdb_rows_across_two_runs() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "DeterminismCheck".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("create playlist data").data.playlist_id;
@@ -5824,6 +5840,7 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Dedup Roundtrip Playlist".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
@@ -5972,6 +5989,7 @@ fn export_to_usb_records_usb_device_export_history() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Export History Playlist".to_string(),
+        folder_id: None,
     });
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
@@ -6077,6 +6095,7 @@ fn adding_usb_track_creates_placeholder_when_no_local_match() {
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Placeholder Case Playlist".to_string(),
+        folder_id: None,
     });
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
@@ -6597,6 +6616,7 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Fingerprint Fallback".to_string(),
+        folder_id: None,
     });
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;

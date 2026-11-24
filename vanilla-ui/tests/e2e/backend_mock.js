@@ -112,7 +112,9 @@
   // `trackColumns`: the column layout (set_track_columns keeps what it gets; an empty one is the default).
   const TRACK_COLUMNS = ["album", "genre", "year", "bpm", "key", "length", "format"];
   const defaultTrackColumns = () => ({ order: TRACK_COLUMNS.slice(), hidden: ["genre"] });
-  const store = { tracks: [], playlists: [], playlistTracks: new Map(), created: 0, trackColumns: defaultTrackColumns() };
+  const store = {
+    tracks: [], playlists: [], folders: [], playlistTracks: new Map(), created: 0, trackColumns: defaultTrackColumns()
+  };
   const trackColumnCatalog = () => [
     ...["drag", "select", "cover", "waveform"].map((id) => ({ id, labelKey: null, sortable: false, locked: true })),
     { id: "track", labelKey: "ui-track-table-track", sortable: true, locked: true },
@@ -125,6 +127,70 @@
     source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, ...playlist
   });
   const playlistName = (id) => store.playlists.find((p) => p.id === id)?.name;
+
+  // The sidebar tree as the backend keeps it (service/playlist_tree.rs): folders
+  // (`parentId`) and playlists (`folderId`) share one order per parent
+  // (`rank`; none: after the ranked ones, in store order).
+  const treeNodes = () => [
+    ...store.folders.map((f) => ({ kind: "folder", id: f.id, parent: f.parentId || null, row: f })),
+    ...store.playlists.map((p) => ({ kind: "playlist", id: p.id, parent: p.folderId || null, row: p }))
+  ];
+  const treeChildren = (parent) => treeNodes()
+    .map((node, index) => ({ node, index }))
+    .filter(({ node }) => node.parent === parent)
+    .sort((a, b) => (a.node.row.rank ?? Infinity) - (b.node.row.rank ?? Infinity) || a.index - b.index)
+    .map(({ node }) => node);
+  const treeWalk = (parent, depth, descend, out = []) => {
+    for (const node of treeChildren(parent)) {
+      out.push({ node, depth });
+      if (node.kind === "folder" && descend(node.row)) treeWalk(node.id, depth + 1, descend, out);
+    }
+    return out;
+  };
+  const firstRank = (parent) => Math.min(0, ...treeChildren(parent).map((n) => n.row.rank ?? 0)) - 1;
+  const setChildren = (parent, nodes) => nodes.forEach((node, index) => {
+    node.row.rank = index;
+    if (node.kind === "folder") node.row.parentId = parent;
+    else node.row.folderId = parent;
+  });
+  const folderPath = (folderId) => {
+    const names = [];
+    for (let id = folderId; id; id = store.folders.find((f) => f.id === id)?.parentId) {
+      names.unshift(store.folders.find((f) => f.id === id)?.name);
+    }
+    return names.length ? names.join(" / ") : null;
+  };
+  const playlistsState = () => {
+    const ordered = treeWalk(null, 0, () => true).filter(({ node }) => node.kind === "playlist");
+    return {
+      playlists: ordered.map(({ node }) => playlistRow({
+        ...node.row, folderId: node.row.folderId || null, folderPath: folderPath(node.row.folderId)
+      })),
+      folders: store.folders.map((f) => ({
+        id: f.id, name: f.name, parentId: f.parentId || null, collapsed: !!f.collapsed,
+        deleteConfirmText: `Delete the folder "${f.name}"?`,
+        toggleTooltip: f.collapsed ? "Expand" : "Collapse"
+      })),
+      sidebar: treeWalk(null, 0, (f) => !f.collapsed).map(({ node, depth }) => ({ kind: node.kind, id: node.id, depth })),
+      playlistUsbExportStatus: []
+    };
+  };
+  // The Add to dialog's and the Export page's rows (playlist_list_rows): the
+  // tree with every folder open, a folder listing its playlists at any depth,
+  // folders holding none left out.
+  const listTree = () => {
+    const rows = treeWalk(null, 0, () => true).map(({ node, depth }) => ({
+      kind: node.kind, id: node.id, depth, name: node.kind === "folder" ? node.row.name : "", playlistIds: []
+    }));
+    rows.forEach((row, index) => {
+      if (row.kind !== "folder") return;
+      for (const next of rows.slice(index + 1)) {
+        if (next.depth <= row.depth) break;
+        if (next.kind === "playlist") row.playlistIds.push(next.id);
+      }
+    });
+    return rows.filter((row) => row.kind === "playlist" || row.playlistIds.length > 0);
+  };
   const tracksText = (n) => `${n} ${n === 1 ? "track" : "tracks"}`;
   // Adds library tracks (by id) to a playlist, skipping ones already in it.
   const addToPlaylist = (playlistId, ids) => {
@@ -157,7 +223,7 @@
         return ok({ layout: store.trackColumns });
       }
       case "list_playlists":
-        return ok({ playlists: store.playlists.map(playlistRow), playlistUsbExportStatus: [] });
+        return ok(playlistsState());
       case "get_playlist_tracks": {
         const all = store.playlistTracks.get(r.playlistId) || [];
         const unanalyzed = searchRows(all, r.query).filter((t) => !t.analysisReady).length;
@@ -176,8 +242,9 @@
         const name = String(r.name || "Untitled");
         store.created += 1;
         const playlistId = `pl-${store.created}`;
-        // New playlists go to the top of the sidebar order.
-        store.playlists.unshift({ id: playlistId, name });
+        // New playlists go to the top of their folder.
+        const folderId = r.folderId || null;
+        store.playlists.unshift({ id: playlistId, name, folderId, rank: firstRank(folderId) });
         store.playlistTracks.set(playlistId, []);
         return ok({ playlistId, name, statusText: `Playlist created: ${name}` });
       }
@@ -193,10 +260,47 @@
         store.playlists = store.playlists.filter((p) => p.id !== r.playlistId);
         return ok({ playlistId: r.playlistId, deleted: name !== undefined, statusText: `Playlist deleted: ${name}` });
       }
-      case "reorder_playlists": {
-        const ids = r.orderedPlaylistIds || [];
-        store.playlists = ids.map((id) => store.playlists.find((p) => p.id === id)).filter(Boolean);
-        return ok({ reordered: ids.length });
+      case "create_playlist_folder": {
+        const name = String(r.name || "").trim();
+        store.created += 1;
+        const folderId = `pf-${store.created}`;
+        const parentId = r.parentId || null;
+        store.folders.push({ id: folderId, name, parentId, collapsed: false, rank: firstRank(parentId) });
+        return ok({ folderId, name, statusText: `Folder created: ${name}` });
+      }
+      case "rename_playlist_folder": {
+        const folder = store.folders.find((f) => f.id === r.folderId);
+        if (folder) folder.name = String(r.name || "").trim();
+        return ok({ folderId: r.folderId, name: folder?.name });
+      }
+      case "set_playlist_folder_collapsed": {
+        const folder = store.folders.find((f) => f.id === r.folderId);
+        if (folder) folder.collapsed = !!r.collapsed;
+        return ok({ folderId: r.folderId, collapsed: !!r.collapsed });
+      }
+      case "delete_playlist_folder": {
+        const folder = store.folders.find((f) => f.id === r.folderId);
+        if (!folder) return { ok: false, error: { code: "NOT_FOUND", message: "folder not found" } };
+        const parent = folder.parentId || null;
+        const siblings = treeChildren(parent).flatMap((node) => (node.id === folder.id ? treeChildren(folder.id) : [node]));
+        setChildren(parent, siblings);
+        store.folders = store.folders.filter((f) => f.id !== folder.id);
+        return ok({ folderId: folder.id, deleted: true, statusText: `Folder deleted: ${folder.name}` });
+      }
+      case "move_playlist_tree_item": {
+        const same = (a, b) => a.kind === b.kind && a.id === b.id;
+        const node = treeNodes().find((n) => same(n, r.item));
+        const target = treeNodes().find((n) => same(n, r.target));
+        if (!node || !target) return { ok: false, error: { code: "NOT_FOUND", message: "not found" } };
+        const parent = r.placement === "inside" ? target.id : target.parent;
+        const siblings = treeChildren(parent).filter((n) => !same(n, node));
+        const at = r.placement === "inside"
+          ? siblings.length
+          : siblings.findIndex((n) => same(n, target)) + (r.placement === "after" ? 1 : 0);
+        siblings.splice(at, 0, node);
+        setChildren(parent, siblings);
+        if (r.placement === "inside") target.row.collapsed = false;
+        return ok({ item: r.item });
       }
       case "reorder_playlist_tracks": {
         const reordered = applyReorder(store.playlistTracks.get(r.playlistId) || [], r);
@@ -213,14 +317,15 @@
       }
       case "get_playlist_membership": {
         const ids = r.trackIds || [];
-        const items = store.playlists.map((p) => {
+        // In sidebar order, with each one's folder path.
+        const items = playlistsState().playlists.map((p) => {
           const held = (store.playlistTracks.get(p.id) || []).map((t) => t.id);
           const contained = ids.filter((id) => id && held.includes(id)).length;
           const state = contained === 0 ? "none" : contained >= ids.length ? "all" : "some";
           const noteText = { none: "", all: "Already in", some: `${contained} of ${ids.length} in` }[state];
           return { playlistId: p.id, name: p.name, contained, state, noteText };
         });
-        return ok({ items });
+        return ok({ items, tree: listTree() });
       }
       case "add_library_selection_to_playlist": {
         // `allMatching`: every track the library search matches.
@@ -354,6 +459,8 @@
         playlistUsbExportStatus: [],
         orderEdit: backend.orderEditState(),
         orderEditBlockedText: null,
+        // A spec's own playlists without the tree: each at the top level, in its order.
+        tree: items.map((item) => ({ kind: "playlist", id: item.id, parentId: "", depth: 0, name: item.name })),
         ...overrides,
         items
       };
@@ -598,6 +705,9 @@
   // The builders that fill out a spec's own answer to each command.
   const noBackups = { summaryText: "", emptyText: "", items: [] };
   const SHAPES = {
+    list_playlists: (data) => withSidebar(data),
+    get_batch_export_overview: (data) => withListTree(data, data.rows, "playlistId"),
+    get_playlist_membership: (data) => withListTree(data, data.items, "playlistId"),
     get_library_sources: (data) => backend.librarySources([], data),
     fetch_usb_playlists: backend.usbPlaylists,
     fetch_usb_histories: backend.usbHistories,
@@ -631,6 +741,22 @@
     prune_usb_device: (data) => ({ pruned: true, devices: [], ...data })
   };
 
+  // A spec's own playlists without the tree: each at the top level, in its order.
+  function withSidebar(data) {
+    if (!data || typeof data !== "object" || !Array.isArray(data.playlists) || data.sidebar) return data;
+    return {
+      folders: [],
+      sidebar: data.playlists.map((p) => ({ kind: "playlist", id: p.id, depth: 0 })),
+      ...data
+    };
+  }
+
+  // A spec's own rows without `tree`: each at the top level, in its order.
+  function withListTree(data, rows, key) {
+    if (!data || typeof data !== "object" || data.tree || !Array.isArray(rows)) return data;
+    return { tree: rows.map((row) => ({ kind: "playlist", id: row[key], depth: 0, name: "", playlistIds: [] })), ...data };
+  }
+
   // Every string the backend answered with: data and response text, which the test-language
   // check (`uiTextCheck` in coverage-fixture.mjs) doesn't count as the UI's own text.
   const answerStrings = new Set();
@@ -647,6 +773,8 @@
   // answers. A spec's answer that leaves them out gets its own list_playlists'.
   const PLAYLIST_CHANGES = new Set([
     "create_playlist", "rename_playlist", "delete_playlist", "remove_tracks_from_playlist",
+    "create_playlist_folder", "rename_playlist_folder", "delete_playlist_folder",
+    "set_playlist_folder_collapsed", "move_playlist_tree_item",
     "reorder_playlist_tracks", "add_track_candidates_to_playlist", "add_track_candidates_to_playlists",
     "add_library_selection_to_playlist", "add_library_selection_to_playlists",
     "import_external_playlists", "export_to_usb", "export_playlists_to_usb", "set_usb_device_name", "select_usb",
@@ -662,9 +790,10 @@
 
   async function withPlaylists(invoke, command, raw) {
     if (!PLAYLIST_CHANGES.has(command) || !raw?.ok || !raw.data || typeof raw.data !== "object") return raw;
-    if ("playlists" in raw.data && !raw.data[FILLED]) return raw;
+    if ("playlists" in raw.data && !raw.data[FILLED]) return { ...raw, data: withSidebar(raw.data) };
     const listed = await invoke("list_playlists", {});
     if (!listed?.ok) return raw;
+    listed.data = withSidebar(listed.data);
     // A spec's own export status (its answer without playlists) stays: it is
     // what that spec tests. A re-fill takes the outer spec's list as a whole.
     const data = raw.data[FILLED]

@@ -63,8 +63,8 @@ force a clean resync when that's what's wanted instead.
 
 ## Reordering playlists directly on the USB
 
-The USB Playlists panel's Edit order puts the playlists on an
-already-exported USB, and the tracks in them, in a new order by drag-and-drop
+The USB Playlists panel's Edit order puts the playlists and folders on an
+already-exported USB (each within its own folder), and the tracks in them, in a new order by drag-and-drop
 or a column sort; Save order writes it (`commit_usb_order_edit`). The playlist
 order goes to `t07.sort_order` in PDB, in place, and to eDB
 `playlist.sequenceNo`; the track order to the PDB's t08 `entry_index` and the

@@ -96,11 +96,29 @@ export function renderExportPlaylistsPage(ctx) {
     delete el.exportPlaylistsList.dataset.loading;
     el.exportPlaylistsList.removeAttribute("aria-busy");
   }
-  el.exportPlaylistsList.replaceChildren(...rows.map((row, index) => {
+  // The backend's tree (`tree`): each folder's row, then its playlists,
+  // indented by depth as in the sidebar; a folder's box ticks its playlists.
+  const byId = new Map(rows.map((row) => [row.playlistId, row]));
+  const items = [];
+  let index = 0;
+  for (const entry of overview?.tree || []) {
+    if (entry.kind === "folder") {
+      const heading = cloneTemplate(document, "tplExportPlaylistsFolderRow");
+      heading.style.setProperty("--list-depth", String(entry.depth));
+      heading.querySelector(".export-playlists-folder-label").textContent = entry.name;
+      const toggle = heading.querySelector(".export-playlists-folder-check");
+      toggle.dataset.playlistIds = JSON.stringify(entry.playlistIds || []);
+      toggle.setAttribute("aria-label", t("ui-playlist-import-group-select-all", { group: entry.name }));
+      items.push(heading);
+      continue;
+    }
+    const row = byId.get(entry.id);
+    if (!row) continue;
     const item = cloneTemplate(document, "tplExportPlaylistsRow");
+    item.style.setProperty("--list-depth", String(entry.depth));
     item.dataset.playlistId = row.playlistId;
     item.dataset.status = row.status;
-    item.classList.toggle("is-alt", index % 2 === 1);
+    item.classList.toggle("is-alt", index++ % 2 === 1);
     item.classList.toggle("is-disabled", !!row.disabledReason && !row.needsAnalysis);
     const check = item.querySelector(".export-playlists-check");
     check.value = row.playlistId;
@@ -118,8 +136,9 @@ export function renderExportPlaylistsPage(ctx) {
     for (const [selector, text] of Object.entries(cells)) item.querySelector(selector).textContent = text;
     item.querySelector(".export-playlists-name").dataset.tooltip = row.name;
     if (row.disabledReason) item.dataset.tooltip = row.disabledReason;
-    return item;
-  }));
+    items.push(item);
+  }
+  el.exportPlaylistsList.replaceChildren(...items);
   el.exportPlaylistsForceTrackOrder.checked = false;
   el.exportPlaylistsForceOrder.checked = false;
   renderExportPlaylistsControls(ctx);
@@ -144,6 +163,14 @@ export function renderExportPlaylistsControls(ctx) {
   el.exportPlaylistsSelectAll.checked = everything;
   el.exportPlaylistsSelectAll.indeterminate = count > 0 && !everything;
   el.exportPlaylistsSelectAll.disabled = total === 0;
+  // Each folder row's box: ticked with all its playlists, half-ticked with some.
+  for (const toggle of el.exportPlaylistsList.querySelectorAll(".export-playlists-folder-check")) {
+    const boxes = folderChecks(ctx, toggle);
+    const ticked = boxes.filter((box) => selected.has(box.value)).length;
+    toggle.disabled = boxes.length === 0;
+    toggle.checked = ticked > 0 && ticked === boxes.length;
+    toggle.indeterminate = ticked > 0 && ticked < boxes.length;
+  }
   el.exportPlaylistsSelectChangedBtn.disabled = total === 0;
 
   el.exportPlaylistsForceOrder.disabled = !everything;
@@ -195,6 +222,14 @@ export function refreshExportPlaylistsSpace(ctx) {
   }, 250);
 }
 
+// The boxes of a folder's playlists (its box's `playlistIds`, at any depth)
+// that can be ticked.
+function folderChecks(ctx, toggle) {
+  const ids = new Set(JSON.parse(toggle.dataset.playlistIds || "[]"));
+  return [...ctx.el.exportPlaylistsList.querySelectorAll(".export-playlists-check:not(:disabled)")]
+    .filter((box) => ids.has(box.value));
+}
+
 function setSelection(ctx, playlistIds) {
   const current = page(ctx);
   current.selected = new Set(playlistIds);
@@ -212,17 +247,22 @@ export function selectExportPlaylists(ctx, which) {
   else setSelection(ctx, rows.filter((row) => row.status !== "onStick").map((row) => row.playlistId));
 }
 
+// A playlist's box, or a folder row's (all the folder's playlists).
 export function toggleExportPlaylist(ctx, check) {
   const current = page(ctx);
-  if (check.checked) current.selected.add(check.value);
-  else current.selected.delete(check.value);
+  const checks = check.classList.contains("export-playlists-folder-check") ? folderChecks(ctx, check) : [check];
+  for (const each of checks) {
+    each.checked = check.checked;
+    if (check.checked) current.selected.add(each.value);
+    else current.selected.delete(each.value);
+  }
   refreshExportPlaylistsSpace(ctx);
 }
 
 // A click anywhere on a row ticks or unticks it, like its box.
 export function clickExportPlaylistRow(ctx, target) {
   if (target.closest("input")) return;
-  const check = target.closest(".export-playlists-row")?.querySelector(".export-playlists-check");
+  const check = target.closest(".export-playlists-row, .export-playlists-folder")?.querySelector("input[type='checkbox']");
   if (!check || check.disabled) return;
   check.checked = !check.checked;
   toggleExportPlaylist(ctx, check);

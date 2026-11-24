@@ -3578,8 +3578,7 @@ fn write_edb_playlist_updates_alias_matched_content_path_in_place() {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
+            placement: PlaylistPlacement::MoveToFront, folders: None }],
     )
     .expect("write initial eDB content path");
     session.commit().expect("write initial eDB content path");
@@ -3592,8 +3591,7 @@ fn write_edb_playlist_updates_alias_matched_content_path_in_place() {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
+            placement: PlaylistPlacement::MoveToFront, folders: None }],
     )
     .expect("rewrite eDB content path");
     session.commit().expect("rewrite eDB content path");
@@ -3652,8 +3650,7 @@ fn write_edb_playlist_sets_device_name_from_drive_name() {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
+            placement: PlaylistPlacement::MoveToFront, folders: None }],
     )
     .expect("export");
     session.commit().expect("export");
@@ -3668,8 +3665,7 @@ fn write_edb_playlist_sets_device_name_from_drive_name() {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
+            placement: PlaylistPlacement::MoveToFront, folders: None }],
     )
     .expect("export");
     session.commit().expect("export");
@@ -3686,8 +3682,7 @@ fn write_edb_playlist_sets_device_name_from_drive_name() {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
+            placement: PlaylistPlacement::MoveToFront, folders: None }],
     )
     .expect("export");
     session.commit().expect("export");
@@ -3743,8 +3738,7 @@ fn write_edb_playlist_matches_rekordbox_reexport_bookkeeping() {
                 manifest: &manifest,
                 mirror_playlist_entries: true,
                 identity: None,
-                placement: PlaylistPlacement::MoveToFront,
-            }],
+                placement: PlaylistPlacement::MoveToFront, folders: None }],
         )
         .expect("export");
         session.commit().expect("export");
@@ -4603,9 +4597,11 @@ fn pdb_writer_keeps_dictionary_rows_that_differ_only_in_case() {
                 playlist_id: None,
                 sort_order: None,
                 placement: PlaylistPlacement::AsGiven,
+                folders: None,
             }],
             None,
             false,
+            &[],
         )
         .expect("build");
         assert_eq!(
@@ -5330,8 +5326,7 @@ fn write_edb_sets_per_track_key_and_analysis_fields() {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
+            placement: PlaylistPlacement::MoveToFront, folders: None }],
     )
     .expect("db write failed");
     session.commit().expect("db write failed");
@@ -5504,8 +5499,7 @@ fn write_edb_updates_existing_content_analysis_path() {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
+            placement: PlaylistPlacement::MoveToFront, folders: None }],
     )
     .expect("db write failed");
     session.commit().expect("db write failed");

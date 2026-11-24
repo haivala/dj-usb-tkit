@@ -442,8 +442,13 @@ pub struct PlaylistUsbExportStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchUsbPlaylistsData {
-    /// In the pending order while an order edit is on.
+    /// In the pending order while an order edit is on, in the tree's order
+    /// (each folder's playlists after it).
     pub items: Vec<UsbPlaylist>,
+    /// The list the USB view draws, top first: the stick's folders and
+    /// playlists (`items` by id), every folder open.
+    #[serde(default)]
+    pub tree: Vec<UsbPlaylistTreeRow>,
     /// The order edit's state for this USB.
     #[serde(default)]
     pub order_edit: UsbOrderEditState,
@@ -512,9 +517,30 @@ pub struct UsbOrderEditRequest {
 pub struct MoveUsbPlaylistRequest {
     #[serde(default)]
     pub usb_root: Option<String>,
+    /// A playlist's or a folder's id (`UsbPlaylistTreeRow::id`).
     pub playlist_id: String,
+    /// The item (in the same folder) it goes before; none: the folder's end.
     #[serde(default)]
     pub before_playlist_id: Option<String>,
+    /// Instead: the item (in the same folder) it goes after.
+    #[serde(default)]
+    pub after_playlist_id: Option<String>,
+}
+
+/// One row of the USB view's playlist list: a folder or a playlist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbPlaylistTreeRow {
+    pub kind: crate::models::PlaylistTreeKind,
+    /// A playlist's `UsbPlaylist::id`, or a folder's (`usb-f-…`).
+    pub id: String,
+    /// The folder it is in (`usb-f-…`); empty at the top level. Edit order
+    /// moves an item only among the items of its folder.
+    pub parent_id: String,
+    /// Folders above it: 0 at the top level.
+    pub depth: usize,
+    /// Its own name, without the folders.
+    pub name: String,
 }
 
 /// Moves one row (`UsbTrack::id`) of a USB playlist to just before
@@ -565,6 +591,9 @@ pub struct UsbOrderEditState {
 #[serde(rename_all = "camelCase")]
 pub struct UsbOrderEditData {
     pub order_edit: UsbOrderEditState,
+    /// After a playlist move: the USB view's list in the new pending order.
+    #[serde(default)]
+    pub tree: Option<Vec<UsbPlaylistTreeRow>>,
     /// The status line after the command; empty for a move or a sort.
     #[serde(default)]
     pub status_text: String,

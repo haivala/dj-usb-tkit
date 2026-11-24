@@ -231,7 +231,7 @@ export function renderSourceChips(ctx) {
     }
   });
 
-  el.importPlaylistItem.classList.toggle("hidden", !state.externalRekordboxDbPath && !state.externalMixxxDbPath);
+  el.importPlaylistBtn.classList.toggle("hidden", !state.externalRekordboxDbPath && !state.externalMixxxDbPath);
   ctx.updateAnalyzeLibraryButtonLabel();
   el.sourceFilterIndicator.classList.toggle("active", state.librarySources.filtering);
 }

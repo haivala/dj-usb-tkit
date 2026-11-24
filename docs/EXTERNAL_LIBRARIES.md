@@ -116,7 +116,7 @@ tracks that are missing any of those, keeping what the library brought along.
 
 ### Importing a playlist
 
-The **Import** button under **New** in the sidebar's Playlists section appears
+The Import button (↧) on the sidebar's Playlists heading appears
 when either library is found. It opens a checklist with a column per library:
 
 - **rekordbox playlists**, in rekordbox's order. A playlist inside a folder
@@ -135,7 +135,10 @@ in that group; it shows half-ticked when only some are. Each
 ticked list becomes a new playlist with the same name and track order (Mixxx
 crates have no order, so their tracks are sorted by artist and title). Its
 tracks are imported into the library the same way as with the chip's ↻, and
-its library's chip is turned on. The lists are imported one after another, in
+its library's chip is turned on. A rekordbox playlist inside folders goes into
+the same folders in the sidebar, found by name or made (a history session goes
+to the top level: rekordbox files it by year and month); importing it again
+updates it wherever it is now. The lists are imported one after another, in
 the checklist's order; one that fails doesn't stop the rest, and the status
 line names it. When they are done, the first imported playlist opens. A track
 listed twice in a list is added to its playlist once.

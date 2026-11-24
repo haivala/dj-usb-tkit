@@ -20,6 +20,9 @@ pub(super) struct StrictParityUpgradeApplyResult {
     pub(super) merged_playlists: usize,
     pub(super) edb_playlists_written: usize,
     pub(super) duplicate_entries_removed: usize,
+    /// Top-level eDB copies of playlists in folders, removed (see
+    /// [`flattened_edb_copies`]).
+    pub(super) flattened_copies_removed: usize,
     pub(super) edb_rows_inserted: usize,
     pub(super) edb_rows_updated: usize,
     pub(super) pdb_tracks_inserted: usize,
@@ -85,46 +88,16 @@ pub(crate) fn playlist_requires_strict_upgrade(detail: &UsbParityPlaylistDetail)
         || !detail.sort_order_match
 }
 
-pub(super) fn sorted_edb_playlist_names(
-    edb_playlists: Option<&HashMap<String, ExportDbPlaylist>>,
-) -> Vec<String> {
-    let Some(edb_playlists) = edb_playlists else {
-        return Vec::new();
-    };
-    let mut names = edb_playlists
-        .iter()
-        .map(|(name, playlist)| {
-            (
-                name.clone(),
-                playlist.sort_order,
-                playlist.playlist_id,
-                canonicalize_playlist_name(name),
-            )
-        })
-        .collect::<Vec<_>>();
-    names.sort_by(|a, b| {
-        a.1.cmp(&b.1)
-            .then_with(|| a.2.cmp(&b.2))
-            .then_with(|| a.3.cmp(&b.3))
-            .then_with(|| a.0.cmp(&b.0))
-    });
-    names.into_iter().map(|(name, _, _, _)| name).collect()
-}
-
-pub(super) fn strict_repair_ordered_playlist_names(
+/// The order the repair merges playlists in, by path key
+/// ([`PlaylistPath::key`]): the PDB's playlists by sort order, then those
+/// only the eDB has, by the eDB's.
+///
+/// [`PlaylistPath::key`]: crate::pdb_reader::PlaylistPath::key
+pub(super) fn strict_repair_ordered_playlist_keys(
     parsed: &crate::pdb_reader::ParsedPdb,
     edb_playlists: Option<&HashMap<String, ExportDbPlaylist>>,
 ) -> Vec<String> {
-    let sorted_edb_names = sorted_edb_playlist_names(edb_playlists);
-    let edb_name_set = sorted_edb_names.iter().cloned().collect::<HashSet<_>>();
-    let mut edb_names_by_canon = HashMap::<String, Vec<String>>::new();
-    for name in &sorted_edb_names {
-        edb_names_by_canon
-            .entry(canonicalize_playlist_name(name))
-            .or_default()
-            .push(name.clone());
-    }
-
+    let tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
     let mut pdb_leaves = parsed
         .playlist_tree
         .iter()
@@ -136,42 +109,22 @@ pub(super) fn strict_repair_ordered_playlist_names(
             .then_with(|| a.id.cmp(&b.id))
             .then_with(|| a.name.cmp(&b.name))
     });
-
-    let mut out = Vec::<String>::new();
-    let mut seen_canon = HashSet::<String>::new();
-    let mut consumed_edb_names = HashSet::<String>::new();
-    for leaf in pdb_leaves {
-        let canon = canonicalize_playlist_name(&leaf.name);
-        if !seen_canon.insert(canon.clone()) {
-            continue;
-        }
-        let chosen = if edb_name_set.contains(&leaf.name) {
-            leaf.name.clone()
-        } else {
-            edb_names_by_canon
-                .get(&canon)
-                .and_then(|names| {
-                    names
-                        .iter()
-                        .find(|name| !consumed_edb_names.contains(*name))
-                        .cloned()
-                })
-                .unwrap_or_else(|| leaf.name.clone())
-        };
-        if edb_name_set.contains(&chosen) {
-            consumed_edb_names.insert(chosen.clone());
-        }
-        out.push(chosen);
-    }
-
-    for name in sorted_edb_names {
-        let canon = canonicalize_playlist_name(&name);
-        if seen_canon.insert(canon) {
-            out.push(name);
-        }
-    }
-
-    out
+    let mut edb = edb_playlists
+        .map(|playlists| playlists.values().collect::<Vec<_>>())
+        .unwrap_or_default();
+    edb.sort_by(|a, b| {
+        a.sort_order
+            .cmp(&b.sort_order)
+            .then_with(|| a.playlist_id.cmp(&b.playlist_id))
+            .then_with(|| a.path.display().cmp(&b.path.display()))
+    });
+    let mut seen = HashSet::<String>::new();
+    pdb_leaves
+        .into_iter()
+        .map(|leaf| tree.path(leaf).key())
+        .chain(edb.into_iter().map(|playlist| playlist.path.key()))
+        .filter(|key| seen.insert(key.clone()))
+        .collect()
 }
 
 /// Patches the PDB playlists' `sort_order` (playlist_tree, t07) in `bytes`:
@@ -197,42 +150,57 @@ pub(crate) fn restore_pdb_playlist_sort_orders(
 }
 
 /// Writes a USB playlist order to the eDB, in the caller's transaction.
-/// `order_by_name` is keyed by canonical playlist name, because the USB
-/// playlist list pairs eDB rows with PDB rows by name, and a playlist may have
-/// a row in only one database. Returns the rows updated.
+/// `order_by_name` is keyed by playlist path key ([`PlaylistPath::key`]),
+/// because the USB playlist list pairs eDB rows with PDB rows by path, and a
+/// playlist may have a row in only one database; `folder_order` by the USB
+/// view's folder id (`playlist_tree::folder_id`), also a path. Returns the
+/// rows updated.
+///
+/// [`PlaylistPath::key`]: crate::pdb_reader::PlaylistPath::key
 pub(crate) fn write_edb_playlist_order(
     tx: &rusqlite::Transaction<'_>,
     order_by_name: &HashMap<String, u32>,
+    folder_order: &HashMap<String, u32>,
 ) -> BackendResult<usize> {
-    if order_by_name.is_empty() || !table_exists(tx, "playlist") {
+    if (order_by_name.is_empty() && folder_order.is_empty()) || !table_exists(tx, "playlist") {
         return Ok(0);
     }
+    let rows = crate::edb::read_edb_playlist_tree(tx)?;
+    let tree = crate::pdb_reader::PlaylistTree::new(&rows);
     let mut updated = 0usize;
-    for (playlist_id, name) in edb_playlist_names(tx)? {
-        if let Some(position) = order_by_name.get(&canonicalize_playlist_name(&name)) {
+    for row in &rows {
+        let path = tree.path(row);
+        let position = if row.is_folder {
+            let mut segments = path.folders;
+            segments.push(path.name);
+            folder_order.get(&crate::service::usb::playlist_tree::folder_id(&segments))
+        } else {
+            order_by_name.get(&path.key())
+        };
+        if let Some(position) = position {
             updated += tx.execute(
-                "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 AND attribute = 0 \
+                "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 \
                  AND sequenceNo IS NOT ?1",
-                params![i64::from(*position), playlist_id],
+                params![i64::from(*position), i64::from(row.id)],
             )?;
         }
     }
     Ok(updated)
 }
 
-/// The eDB's playlists (not folders): `(playlist_id, name)`.
-fn edb_playlist_names(tx: &rusqlite::Transaction<'_>) -> BackendResult<Vec<(i64, String)>> {
-    let mut stmt = tx.prepare("SELECT playlist_id, name FROM playlist WHERE attribute = 0")?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
+/// The eDB's playlists (not folders): `(playlist_id, path key)`.
+fn edb_playlist_keys(tx: &rusqlite::Transaction<'_>) -> BackendResult<Vec<(i64, String)>> {
+    let rows = crate::edb::read_edb_playlist_tree(tx)?;
+    let tree = crate::pdb_reader::PlaylistTree::new(&rows);
+    Ok(rows
+        .iter()
+        .filter(|row| !row.is_folder)
+        .map(|row| (i64::from(row.id), tree.path(row).key()))
+        .collect())
 }
 
 /// Writes a USB playlist's track order to the eDB, in the caller's
-/// transaction: each eDB playlist whose canonical name is in `names` gets its
+/// transaction: each eDB playlist whose path key is in `names` gets its
 /// own `playlist_content` rows put in `order` (`order_rows` with the content's
 /// path as the key), renumbered from the playlist's lowest `sequenceNo`.
 /// Matching by path, not by row id, is what lets one pending order (keyed by
@@ -251,8 +219,8 @@ pub(crate) fn write_edb_playlist_track_order(
         return Ok(0);
     }
     let mut updated = 0usize;
-    for (playlist_id, name) in edb_playlist_names(tx)? {
-        if !names.contains(&canonicalize_playlist_name(&name)) {
+    for (playlist_id, key) in edb_playlist_keys(tx)? {
+        if !names.contains(&key) {
             continue;
         }
         // (rowid, sequenceNo, path), in the eDB's current order.
@@ -299,11 +267,57 @@ pub(super) fn strict_parity_summary(result: &StrictParityUpgradeApplyResult) -> 
         result.pdb_playlists_inserted,
         result.duplicate_entries_removed,
     );
+    let summary = match result.flattened_copies_removed {
+        0 => summary,
+        count => tr::repair_strict_parity_flattened_copies(count, summary),
+    };
     match result.rebuilt_database {
         Some(staging::DbKind::Pdb) => tr::repair_strict_parity_rebuilt_pdb(summary),
         Some(staging::DbKind::Edb) => tr::repair_strict_parity_rebuilt_edb(summary),
         None => summary,
     }
+}
+
+/// The eDB's top-level playlists that are flattened copies of PDB playlists
+/// in folders, as earlier app versions' repair wrote them (it put every
+/// playlist at the top level and merged same-named ones): an eDB playlist at
+/// the top level that the PDB doesn't have there, while the PDB has
+/// playlists of its name inside folders that the eDB doesn't have. Keyed by
+/// path key; the PDB's playlists, in their folders, replace them.
+// TODO(1.0.0): only earlier app versions wrote these; remove with the other
+// old-writer repairs.
+pub(super) fn flattened_edb_copies(
+    parsed: &crate::pdb_reader::ParsedPdb,
+    edb_playlists: Option<&HashMap<String, ExportDbPlaylist>>,
+) -> HashMap<String, String> {
+    let Some(edb_playlists) = edb_playlists else {
+        return HashMap::new();
+    };
+    let edb_keys: HashSet<String> = edb_playlists
+        .values()
+        .map(|playlist| playlist.path.key())
+        .collect();
+    let tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
+    let mut pdb_keys = HashSet::<String>::new();
+    let mut names_only_in_pdb_folders = HashSet::<String>::new();
+    for leaf in parsed.playlist_tree.iter().filter(|row| !row.is_folder) {
+        let path = tree.path(leaf);
+        let key = path.key();
+        if !path.folders.is_empty() && !edb_keys.contains(&key) {
+            names_only_in_pdb_folders.insert(canonicalize_playlist_name(&path.name));
+        }
+        pdb_keys.insert(key);
+    }
+    edb_playlists
+        .values()
+        .filter(|playlist| {
+            playlist.path.folders.is_empty()
+                && !pdb_keys.contains(&playlist.path.key())
+                && names_only_in_pdb_folders
+                    .contains(&canonicalize_playlist_name(&playlist.path.name))
+        })
+        .map(|playlist| (playlist.path.key(), playlist.path.name.clone()))
+        .collect()
 }
 
 /// The first non-empty of the eDB's and the PDB's text.
@@ -520,26 +534,37 @@ pub(super) fn merged_manifest_track(
     }
 }
 
-/// A playlist the repair merged: its PDB identity and its members in order
-/// (the eDB's first, then members only the PDB has).
+/// A playlist the repair merged: its PDB identity, its folders and its
+/// members in order (the eDB's first, then members only the PDB has).
 pub(super) struct MergedPlaylist {
+    /// Its own name, without folders.
     name: String,
     /// The PDB playlist row it is written into, when the PDB has it.
     pdb_row_id: Option<u32>,
     playlist_id: u32,
     sort_order: u32,
+    /// The folders it sits in, outermost first: the PDB's, or the eDB's
+    /// for a playlist only the eDB has.
+    folders: Vec<crate::pdb_reader::PdbPlaylistTreeRow>,
     tracks: Vec<ExportManifestTrack>,
 }
 
-/// Merge both databases' playlists (all of them, or those whose canonical
-/// name is in `target_playlist_names`): membership is the union, PDB-only
-/// members are kept, and PDB playlist ids and sort orders are preserved.
+/// Merge both databases' playlists (all of them, or those whose path key is
+/// in `target_keys`), matched by path ([`PlaylistPath::key`]) so same-named
+/// playlists in different folders stay apart: membership is the union,
+/// PDB-only members are kept, and PDB playlist ids, sort orders and folders
+/// are preserved. `edb_tree` is the eDB's playlist tree, for the folders of
+/// a playlist only the eDB has.
+///
+/// [`PlaylistPath::key`]: crate::pdb_reader::PlaylistPath::key
 pub(super) fn merge_strict_parity_playlists(
     usb_root: &std::path::Path,
     parsed: &crate::pdb_reader::ParsedPdb,
     edb_playlists: Option<&HashMap<String, ExportDbPlaylist>>,
+    edb_tree: &[crate::pdb_reader::PdbPlaylistTreeRow],
     edb_rows: &HashMap<i64, EdbContentFields>,
-    target_playlist_names: Option<&HashSet<String>>,
+    target_keys: Option<&HashSet<String>>,
+    flattened: &HashMap<String, String>,
 ) -> Vec<MergedPlaylist> {
     let artist_name = |t: &crate::pdb_reader::PdbTrackRow| {
         parsed
@@ -587,10 +612,12 @@ pub(super) fn merge_strict_parity_playlists(
     struct PdbPlaylistInfo {
         playlist_id: u32,
         sort_order: u32,
+        name: String,
+        folders: Vec<crate::pdb_reader::PdbPlaylistTreeRow>,
         entries: Vec<crate::pdb_reader::PdbPlaylistEntryRow>,
     }
-    let mut pdb_playlists_by_exact: HashMap<String, PdbPlaylistInfo> = HashMap::new();
-    let mut pdb_canon_to_exact: HashMap<String, Vec<String>> = HashMap::new();
+    let pdb_tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
+    let mut pdb_playlists_by_key: HashMap<String, PdbPlaylistInfo> = HashMap::new();
     for leaf in parsed.playlist_tree.iter().filter(|r| !r.is_folder) {
         let mut entries: Vec<_> = parsed
             .playlist_entries
@@ -599,28 +626,51 @@ pub(super) fn merge_strict_parity_playlists(
             .cloned()
             .collect();
         entries.sort_by_key(|e| e.entry_index);
-        // Several rows of the same name: prefer better track coverage, then
-        // the lower sort order.
+        // Several rows of the same name in one folder: prefer better track
+        // coverage, then the lower sort order.
         let candidate = PdbPlaylistInfo {
             playlist_id: leaf.id,
             sort_order: leaf.sort_order,
+            name: leaf.name.clone(),
+            folders: pdb_tree
+                .folders(leaf.parent_id)
+                .into_iter()
+                .cloned()
+                .collect(),
             entries,
         };
-        let replace = pdb_playlists_by_exact
-            .get(&leaf.name)
-            .is_none_or(|existing| {
-                candidate.entries.len() > existing.entries.len()
-                    || (candidate.entries.len() == existing.entries.len()
-                        && candidate.sort_order < existing.sort_order)
-            });
+        let key = pdb_tree.path(leaf).key();
+        let replace = pdb_playlists_by_key.get(&key).is_none_or(|existing| {
+            candidate.entries.len() > existing.entries.len()
+                || (candidate.entries.len() == existing.entries.len()
+                    && candidate.sort_order < existing.sort_order)
+        });
         if replace {
-            pdb_playlists_by_exact.insert(leaf.name.clone(), candidate);
+            pdb_playlists_by_key.insert(key, candidate);
         }
-        pdb_canon_to_exact
-            .entry(canonicalize_playlist_name(&leaf.name))
-            .or_default()
-            .push(leaf.name.clone());
     }
+    let edb_by_key: HashMap<String, &ExportDbPlaylist> = edb_playlists
+        .map(|playlists| {
+            playlists
+                .values()
+                .map(|playlist| (playlist.path.key(), playlist))
+                .collect()
+        })
+        .unwrap_or_default();
+    let edb_tree_index = crate::pdb_reader::PlaylistTree::new(edb_tree);
+    let edb_folders_of = |playlist: &ExportDbPlaylist| {
+        edb_tree
+            .iter()
+            .find(|row| !row.is_folder && i64::from(row.id) == playlist.playlist_id)
+            .map(|row| {
+                edb_tree_index
+                    .folders(row.parent_id)
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
 
     let pdb_tree_ids: HashSet<u32> = parsed.playlist_tree.iter().map(|r| r.id).collect();
     let mut next_playlist_id = pdb_tree_ids.iter().max().copied().unwrap_or(0) + 1;
@@ -633,35 +683,28 @@ pub(super) fn merge_strict_parity_playlists(
         + 1;
     let has_existing_pdb_order = parsed.playlist_tree.iter().any(|r| !r.is_folder);
     let mut used_playlist_ids = pdb_tree_ids.clone();
-    let mut consumed_pdb_ids: HashSet<u32> = HashSet::new();
     let mut merged = Vec::<MergedPlaylist>::new();
 
-    for playlist_name in &strict_repair_ordered_playlist_names(parsed, edb_playlists) {
-        let canon = canonicalize_playlist_name(playlist_name);
-        if target_playlist_names.is_some_and(|targets| !targets.contains(&canon)) {
+    for key in &strict_repair_ordered_playlist_keys(parsed, edb_playlists) {
+        if target_keys.is_some_and(|targets| !targets.contains(key)) {
             continue;
         }
-        let edb_pl = edb_playlists.and_then(|pls| pls.get(playlist_name));
-        // Exact name first, then the canonical name; each PDB playlist is
-        // merged once.
-        let pdb_pl = pdb_playlists_by_exact
-            .get(playlist_name)
-            .filter(|p| !consumed_pdb_ids.contains(&p.playlist_id))
-            .or_else(|| {
-                pdb_canon_to_exact.get(&canon).and_then(|names| {
-                    names
-                        .iter()
-                        .filter_map(|n| pdb_playlists_by_exact.get(n))
-                        .find(|p| !consumed_pdb_ids.contains(&p.playlist_id))
-                })
-            });
-        let (pdb_row_id, playlist_id, sort_order) = match (edb_pl, pdb_pl) {
-            // PDB ids and sort orders are kept: the PDB order is what players
-            // show, and eDB and PDB orders may legitimately differ.
-            (_, Some(pdb)) => {
-                consumed_pdb_ids.insert(pdb.playlist_id);
-                (Some(pdb.playlist_id), pdb.playlist_id, pdb.sort_order)
-            }
+        if flattened.contains_key(key) {
+            continue;
+        }
+        let edb_pl = edb_by_key.get(key).copied();
+        let pdb_pl = pdb_playlists_by_key.get(key);
+        let (pdb_row_id, playlist_id, sort_order, name, folders) = match (edb_pl, pdb_pl) {
+            // PDB ids, sort orders and folders are kept: the PDB order is
+            // what players show, and eDB and PDB orders may legitimately
+            // differ.
+            (_, Some(pdb)) => (
+                Some(pdb.playlist_id),
+                pdb.playlist_id,
+                pdb.sort_order,
+                pdb.name.clone(),
+                pdb.folders.clone(),
+            ),
             (Some(edb), None) => {
                 let id = u32::try_from(edb.playlist_id)
                     .ok()
@@ -680,7 +723,7 @@ pub(super) fn merge_strict_parity_playlists(
                         next_sort_order - 1
                     }
                 };
-                (None, id, sort)
+                (None, id, sort, edb.path.name.clone(), edb_folders_of(edb))
             }
             (None, None) => continue,
         };
@@ -756,10 +799,11 @@ pub(super) fn merge_strict_parity_playlists(
         }
 
         merged.push(MergedPlaylist {
-            name: playlist_name.clone(),
+            name,
             pdb_row_id,
             playlist_id,
             sort_order,
+            folders,
             tracks,
         });
     }
@@ -860,17 +904,29 @@ fn collect_merge_write(
     .map(|library| library.playlists)
     .filter(|playlists| !playlists.is_empty());
     let edb_rows = read_edb_content_fields(conn)?;
+    let edb_tree = crate::edb::read_edb_playlist_tree(conn)?;
+    // Without a parent column the eDB has no folders to have flattened.
+    let flattened = if load_table_columns(conn, "playlist")?
+        .iter()
+        .any(|c| c == "playlist_id_parent")
+    {
+        flattened_edb_copies(&parsed, edb_playlists.as_ref())
+    } else {
+        HashMap::new()
+    };
 
     // ── Merge ─────────────────────────────────────────────────────────
     let merged = merge_strict_parity_playlists(
         usb_root,
         &parsed,
         edb_playlists.as_ref(),
+        &edb_tree,
         &edb_rows,
         target_playlist_names,
+        &flattened,
     );
     result.merged_playlists = merged.len();
-    if merged.is_empty() {
+    if merged.is_empty() && flattened.is_empty() {
         return Ok(result);
     }
     let inputs: Vec<(ExportPlaylistData, ExportManifest)> = merged
@@ -900,16 +956,23 @@ fn collect_merge_write(
             (playlist, manifest)
         })
         .collect();
-    let edb_writes: Vec<EdbPlaylistWrite<'_>> = merged
+    let identities: Vec<crate::service::export_helpers::EdbPlaylistIdentity> = merged
         .iter()
-        .zip(&inputs)
-        .map(|(mpl, (playlist, manifest))| EdbPlaylistWrite {
+        .map(|mpl| crate::service::export_helpers::EdbPlaylistIdentity {
+            playlist_id: i64::from(mpl.playlist_id),
+            sequence_no: i64::from(mpl.sort_order),
+            folders: mpl.folders.clone(),
+        })
+        .collect();
+    let edb_writes: Vec<EdbPlaylistWrite<'_>> = inputs
+        .iter()
+        .zip(&identities)
+        .map(|((playlist, manifest), identity)| EdbPlaylistWrite {
             playlist,
             manifest,
             mirror_playlist_entries: true,
-            identity: Some((i64::from(mpl.playlist_id), i64::from(mpl.sort_order))),
-            placement: PlaylistPlacement::AsGiven,
-        })
+            identity: Some(identity),
+            placement: PlaylistPlacement::AsGiven, folders: None })
         .collect();
     let pdb_writes: Vec<PdbPlaylistWrite<'_>> = merged
         .iter()
@@ -922,14 +985,58 @@ fn collect_merge_write(
             playlist_id: Some(mpl.playlist_id),
             sort_order: Some(mpl.sort_order),
             placement: PlaylistPlacement::AsGiven,
+            folders: Some(&mpl.folders),
         })
         .collect();
 
     // ── Write once, all or nothing ────────────────────────────────────
     let tx = conn.transaction()?;
+    // The flattened copies go; the PDB's playlists in folders replace them.
+    for name in flattened.values() {
+        tx.execute(
+            "DELETE FROM playlist_content WHERE playlist_id IN (SELECT playlist_id FROM playlist \
+             WHERE attribute = 0 AND COALESCE(playlist_id_parent, 0) = 0 AND name = ?1)",
+            rusqlite::params![name],
+        )?;
+        result.flattened_copies_removed += tx.execute(
+            "DELETE FROM playlist WHERE attribute = 0 AND COALESCE(playlist_id_parent, 0) = 0 \
+             AND name = ?1",
+            rusqlite::params![name],
+        )?;
+    }
+    // Every PDB folder in the eDB, empty ones too.
+    let pdb_tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
+    for folder in parsed.playlist_tree.iter().filter(|row| row.is_folder) {
+        let mut path = pdb_tree
+            .folders(folder.parent_id)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        path.push(folder.clone());
+        crate::edb::ensure_edb_folder_path(&tx, &path, crate::edb::PlaylistPlacement::AsGiven)?;
+    }
     let edb_results = write_edb_playlists_in_tx(&tx, &edb_writes)?;
+    // The writers take the PDB's sort orders; the eDB numbers each folder
+    // 0..n, as rekordbox does. The order stays the PDB's.
+    crate::edb::renumber_edb_playlist_siblings(&tx)?;
     let t19_property = t19_property_from_conn(&tx);
-    let build = build_pdb_for_playlists(usb_root, &pdb_writes, t19_property, true)?;
+    // Every eDB folder in the PDB, empty ones too.
+    let edb_tree_index = crate::pdb_reader::PlaylistTree::new(&edb_tree);
+    let edb_folder_paths = edb_tree
+        .iter()
+        .filter(|row| row.is_folder)
+        .map(|folder| {
+            let mut path = edb_tree_index
+                .folders(folder.parent_id)
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            path.push(folder.clone());
+            path
+        })
+        .collect::<Vec<_>>();
+    let build =
+        build_pdb_for_playlists(usb_root, &pdb_writes, t19_property, true, &edb_folder_paths)?;
 
     result.edb_playlists_written = edb_results.len();
     result.edb_rows_inserted = edb_results.iter().map(|r| r.inserted_content).sum();

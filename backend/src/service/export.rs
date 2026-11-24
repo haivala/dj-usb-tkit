@@ -702,6 +702,9 @@ impl ExportLayout {
 /// One playlist of an export run, from its load to its record.
 struct PlaylistRun {
     playlist: ExportPlaylistData,
+    /// Its library folders, outermost first (see
+    /// `playlist_tree::playlist_folder_rows`); empty at the top level.
+    folders: Vec<crate::pdb_reader::PdbPlaylistTreeRow>,
     /// The playlist's `updated_at` before its tracks were read: an edit
     /// during the export changes it, and then the playlist isn't marked
     /// exported.
@@ -721,11 +724,13 @@ struct PlaylistRun {
 impl PlaylistRun {
     fn new(
         playlist: ExportPlaylistData,
+        folders: Vec<crate::pdb_reader::PdbPlaylistTreeRow>,
         updated_at: Option<String>,
         unplayable_tracks: Vec<ExportTrackData>,
     ) -> Self {
         Self {
             playlist,
+            folders,
             updated_at,
             unplayable_tracks,
             exported_tracks: 0,
@@ -983,32 +988,69 @@ pub(crate) fn playlist_locks_reorder_on_export(
     !prune_stale && same_name_exists_on_usb
 }
 
-/// The set of playlist names present on the connected USB, for matching against
-/// local playlist names in `compute_playlist_usb_export_status`: every PDB
-/// playlist-tree leaf by its **bare** leaf name (never folder-prefixed -- local
-/// playlist names are bare), unioned with eDB-only playlist names, each
-/// normalized via `normalize_playlist_name_for_compare`.
-///
-/// Single source for `fetch_usb_playlists` and `run_usb_diagnostics` -- they
-/// previously built this set independently and disagreed on folder-nested
-/// playlists (one used `"folder / leaf"`, the other bare `leaf`).
-pub(crate) fn usb_playlist_names_for_export_compare(
-    parsed: Option<&crate::pdb_reader::ParsedPdb>,
-    edb_playlist_names: impl IntoIterator<Item = String>,
-) -> HashSet<String> {
-    let mut names = HashSet::new();
-    if let Some(parsed) = parsed {
-        for node in &parsed.playlist_tree {
-            if node.is_folder {
-                continue;
-            }
-            names.insert(normalize_playlist_name_for_compare(&node.name));
+/// The playlists on the connected USB, for the export status: what the
+/// export would write into. A top-level library playlist is matched by its
+/// bare name in any folder (as export matches it), one in library folders by
+/// its whole folder path. Both normalized via
+/// `normalize_playlist_name_for_compare`.
+#[derive(Debug, Default)]
+pub(crate) struct UsbPlaylistNames {
+    names: HashSet<String>,
+    paths: HashSet<String>,
+}
+
+impl UsbPlaylistNames {
+    /// Whether the library playlist `name` in `folder_path` ("Sets / Friday",
+    /// none at the top level) is on the USB.
+    pub(crate) fn contains(&self, name: &str, folder_path: Option<&str>) -> bool {
+        match folder_path.filter(|path| !path.is_empty()) {
+            None => self.names.contains(&normalize_playlist_name_for_compare(name)),
+            Some(path) => self
+                .paths
+                .contains(&normalize_playlist_name_for_compare(&format!("{path} / {name}"))),
         }
     }
-    for name in edb_playlist_names {
-        names.insert(normalize_playlist_name_for_compare(&name));
+}
+
+#[cfg(test)]
+impl UsbPlaylistNames {
+    /// A USB holding top-level playlists named `names`.
+    fn top_level(names: &[&str]) -> Self {
+        usb_playlist_names_for_export_compare(
+            None,
+            names
+                .iter()
+                .map(|name| crate::pdb_reader::PlaylistPath::top_level(name.to_string())),
+        )
     }
-    names
+}
+
+/// [`UsbPlaylistNames`] from the PDB's playlist tree and the eDB's playlists
+/// (`edb_playlist_paths`). Single source for `fetch_usb_playlists` and
+/// `run_usb_diagnostics`.
+pub(crate) fn usb_playlist_names_for_export_compare(
+    parsed: Option<&crate::pdb_reader::ParsedPdb>,
+    edb_playlist_paths: impl IntoIterator<Item = crate::pdb_reader::PlaylistPath>,
+) -> UsbPlaylistNames {
+    let mut found = UsbPlaylistNames::default();
+    let mut add = |path: crate::pdb_reader::PlaylistPath| {
+        found
+            .names
+            .insert(normalize_playlist_name_for_compare(&path.name));
+        found
+            .paths
+            .insert(normalize_playlist_name_for_compare(&path.display()));
+    };
+    if let Some(parsed) = parsed {
+        let tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
+        for node in parsed.playlist_tree.iter().filter(|node| !node.is_folder) {
+            add(tree.path(node));
+        }
+    }
+    for path in edb_playlist_paths {
+        add(path);
+    }
+    found
 }
 
 /// The trailing directory name of a USB root path (the "USB_TRY" in
@@ -1066,7 +1108,7 @@ fn export_button_title(locks_reorder: bool, playlist_name: &str) -> String {
 /// label (see `usb_drive_label`).
 pub(crate) fn compute_playlist_usb_export_status(
     local_playlists: &[Playlist],
-    usb_playlist_names: &HashSet<String>,
+    usb_playlist_names: &UsbPlaylistNames,
     prune_stale: bool,
     usb_root: Option<&str>,
 ) -> Vec<PlaylistUsbExportStatus> {
@@ -1075,7 +1117,7 @@ pub(crate) fn compute_playlist_usb_export_status(
         .iter()
         .map(|playlist| {
             let same_name_exists_on_usb =
-                usb_playlist_names.contains(&normalize_playlist_name_for_compare(&playlist.name));
+                usb_playlist_names.contains(&playlist.name, playlist.folder_path.as_deref());
             let locks_reorder =
                 playlist_locks_reorder_on_export(prune_stale, same_name_exists_on_usb);
             let (export_button_text, export_button_title) = if usb_root.is_some() {
@@ -1175,7 +1217,9 @@ impl BackendService {
         let unanalyzed_count = self
             .collect_playlists_unanalyzed_track_ids(&conn, &playlist_ids, "")?
             .len();
+        let tree = super::playlist_tree::playlist_list_rows(&conn, &playlist_ids)?;
         Ok(BatchExportOverviewData {
+            tree,
             unanalyzed_count,
             analyze_missing_label: tr::playlist_analyze_missing(unanalyzed_count).render(),
             analyze_missing_tooltip: tr::batch_export_analyze_missing_tooltip().render(),
@@ -1241,7 +1285,7 @@ impl BackendService {
             }
             .render();
             let on_stick =
-                usb_playlist_names.contains(&normalize_playlist_name_for_compare(&playlist.name));
+                usb_playlist_names.contains(&playlist.name, playlist.folder_path.as_deref());
             let status = if !on_stick {
                 BatchExportStatus::New
             } else if playlist.last_exported_at.is_some()
@@ -1390,7 +1434,8 @@ impl BackendService {
     /// `list_playlists` answers, and every command that changes the playlists.
     pub fn playlists_state(&self) -> BackendResult<crate::models::PlaylistsState> {
         let usb_root = self.selected_usb_root();
-        let playlists = self.list_playlists()?.items;
+        let listed = self.list_playlists()?;
+        let playlists = listed.items;
         let conn = self.db.connect()?;
         let prune_stale = export_prune_stale_setting(&conn)?;
         let usb_playlist_names = usb_root
@@ -1408,6 +1453,8 @@ impl BackendService {
         );
         Ok(crate::models::PlaylistsState {
             playlists,
+            folders: listed.folders,
+            sidebar: listed.sidebar,
             playlist_usb_export_status,
         })
     }
@@ -1620,7 +1667,14 @@ impl BackendService {
             if playlist.tracks.is_empty() {
                 return Err(BackendError::Validation(tr::export_error_none_playable()));
             }
-            runs.push(PlaylistRun::new(playlist, updated_at, unplayable_tracks));
+            let folders =
+                super::playlist_tree::playlist_folder_rows(&*self.db.connect()?, playlist_id)?;
+            runs.push(PlaylistRun::new(
+                playlist,
+                folders,
+                updated_at,
+                unplayable_tracks,
+            ));
         }
 
         let blocking_missing_roots = {
@@ -2204,9 +2258,32 @@ impl BackendService {
                     mirror_playlist_entries,
                     identity: None,
                     placement: layout.placement,
+                    // A top-level library playlist keeps matching by name in any folder.
+                    folders: (!run.folders.is_empty()).then_some(run.folders.as_slice()),
                 })
                 .collect::<Vec<_>>();
             let edb_results = write_edb_playlists_in(session, &edb_writes)?;
+            // The PDB puts each playlist in the folders the eDB has now, with
+            // their ids, so both databases number them alike.
+            let pdb_folders: Vec<Option<Vec<crate::pdb_reader::PdbPlaylistTreeRow>>> = {
+                let tree_rows = match session.edb()? {
+                    Some(conn) => crate::edb::read_edb_playlist_tree(conn)?,
+                    None => Vec::new(),
+                };
+                let tree = crate::pdb_reader::PlaylistTree::new(&tree_rows);
+                runs.iter()
+                    .zip(&edb_results)
+                    .map(|(run, written)| {
+                        (!run.folders.is_empty()).then(|| {
+                            tree_rows
+                                .iter()
+                                .find(|row| i64::from(row.id) == written.playlist_id)
+                                .map(|row| tree.folders(row.parent_id).into_iter().cloned().collect())
+                                .unwrap_or_else(|| run.folders.clone())
+                        })
+                    })
+                    .collect()
+            };
             for (run, written) in runs.iter().zip(&edb_results) {
                 // Always keep exportExt.pdb byte-stable in normal export.
                 // Strict integrity checks can fail when exportExt header/count
@@ -2216,7 +2293,7 @@ impl BackendService {
                     &run.playlist,
                     &run.manifest,
                     true,
-                    session.edb()?.map(|conn| &*conn),
+                    session.edb()?.map(|conn| (&*conn, written.playlist_id)),
                     false,
                 )?;
                 warnings.extend(verify_warnings);
@@ -2232,7 +2309,8 @@ impl BackendService {
             let pdb_writes = runs
                 .iter()
                 .zip(&edb_results)
-                .map(|(run, written)| PdbPlaylistWrite {
+                .zip(&pdb_folders)
+                .map(|((run, written), folders)| PdbPlaylistWrite {
                     playlist: &run.playlist,
                     manifest: &run.manifest,
                     mirror_playlist_entries,
@@ -2240,6 +2318,7 @@ impl BackendService {
                     playlist_id: u32::try_from(written.playlist_id).ok(),
                     sort_order: u32::try_from(written.sort_order).ok(),
                     placement: layout.placement,
+                    folders: folders.as_deref(),
                 })
                 .collect::<Vec<_>>();
             let WriteExportPdbResult {
@@ -2458,7 +2537,7 @@ impl BackendService {
         playlist: &ExportPlaylistData,
         manifest: &ExportManifest,
         verify_db: bool,
-        edb_conn: Option<&rusqlite::Connection>,
+        edb_conn: Option<(&rusqlite::Connection, i64)>,
         verify_pdb: bool,
     ) -> BackendResult<Vec<WarningEntry>> {
         let mut warnings = Vec::<WarningEntry>::new();
@@ -2503,7 +2582,13 @@ impl BackendService {
 
         if verify_db {
             match edb_conn {
-                Some(conn) => verify_edb_content_with_conn(usb_root, conn, playlist, manifest)?,
+                Some((conn, playlist_id)) => verify_edb_content_with_conn(
+                    usb_root,
+                    conn,
+                    playlist,
+                    Some(playlist_id),
+                    manifest,
+                )?,
                 None => verify_edb_content(usb_root, playlist, manifest)?,
             }
         }
@@ -2943,7 +3028,7 @@ mod tests {
         insufficient_space_error, normalize_playlist_name_for_compare,
         playlist_locks_reorder_on_export, refused_formats_error,
         resolve_collision_free_media_target, usb_drive_label,
-        usb_playlist_names_for_export_compare, usb_root_last_segment,
+        UsbPlaylistNames, usb_playlist_names_for_export_compare, usb_root_last_segment,
         validate_export_manifest_after_prune, validate_export_manifest_before_db_write,
     };
     use crate::error::BackendError;
@@ -3560,6 +3645,7 @@ mod tests {
             let playlist = service
                 .create_playlist(CreatePlaylistRequest {
                     name: "Failure Test".into(),
+                    folder_id: None,
                 })
                 .unwrap();
             service
@@ -3791,6 +3877,7 @@ mod tests {
         let playlist = service
             .create_playlist(CreatePlaylistRequest {
                 name: "Export Me".to_string(),
+                folder_id: None,
             })
             .expect("create playlist");
         service
@@ -4497,6 +4584,7 @@ mod tests {
         let playlist = service
             .create_playlist(CreatePlaylistRequest {
                 name: "Empty".to_string(),
+                folder_id: None,
             })
             .expect("create playlist");
         let err = service
@@ -4536,6 +4624,7 @@ mod tests {
         let playlist = service
             .create_playlist(CreatePlaylistRequest {
                 name: "Set".to_string(),
+                folder_id: None,
             })
             .expect("create playlist");
         service
@@ -4611,6 +4700,7 @@ mod tests {
         service
             .create_playlist(CreatePlaylistRequest {
                 name: "Set A".to_string(),
+                folder_id: None,
             })
             .expect("create playlist");
 
@@ -4653,33 +4743,34 @@ mod tests {
     }
 
     #[test]
-    fn usb_playlist_names_for_export_compare_uses_bare_leaf_names_and_merges_edb() {
+    fn usb_playlist_names_match_top_level_by_name_anywhere_and_folders_by_path() {
         let parsed = ParsedPdb {
             playlist_tree: vec![
                 tree_row(1, 0, true, "My Folder"),
-                tree_row(2, 1, false, "  Nested Set  "),
+                tree_row(2, 1, false, "Nested Set"),
                 tree_row(3, 0, false, "Top Level"),
             ],
             ..Default::default()
         };
-
+        let edb_path = |folders: &[&str], name: &str| crate::pdb_reader::PlaylistPath {
+            folders: folders.iter().map(|f| f.to_string()).collect(),
+            name: name.to_string(),
+        };
         let names = usb_playlist_names_for_export_compare(
             Some(&parsed),
-            ["Only In eDB".to_string(), "top level".to_string()],
+            [edb_path(&["Sets"], "Only In eDB")],
         );
 
-        // folder row excluded; leaf name is bare (not "My Folder / Nested Set")
-        // and normalized (trim + lowercase); eDB names merged and de-duped.
-        assert!(names.contains("nested set"));
-        assert!(names.contains("top level"));
-        assert!(names.contains("only in edb"));
-        assert!(!names.contains("my folder"));
-        assert_eq!(names.len(), 3);
-
-        // No PDB -> just the eDB names.
-        let edb_only = usb_playlist_names_for_export_compare(None, ["A".to_string()]);
-        assert_eq!(edb_only.len(), 1);
-        assert!(edb_only.contains("a"));
+        // A top-level library playlist matches by name in any folder.
+        assert!(names.contains("  nested SET ", None));
+        assert!(names.contains("Top Level", None));
+        assert!(names.contains("Only In eDB", None));
+        assert!(!names.contains("My Folder", None));
+        // One in library folders matches its whole path only.
+        assert!(names.contains("Nested Set", Some("My Folder")));
+        assert!(!names.contains("Nested Set", Some("Other")));
+        assert!(!names.contains("Top Level", Some("My Folder")));
+        assert!(names.contains("Only In eDB", Some("sets")));
     }
 
     fn make_playlist(id: &str, name: &str) -> Playlist {
@@ -4697,6 +4788,8 @@ mod tests {
             delete_confirm_text: String::new(),
             export_status_text: String::new(),
             export_status_tooltip: None,
+            folder_id: None,
+            folder_path: None,
         }
     }
 
@@ -4709,7 +4802,7 @@ mod tests {
         assert_eq!(usb_drive_label(&root).as_deref(), Some("CLUB_STICK"));
         let status = compute_playlist_usb_export_status(
             &[make_playlist("p1", "Set")],
-            &std::collections::HashSet::new(),
+            &UsbPlaylistNames::default(),
             true,
             Some(&root),
         );
@@ -4727,7 +4820,7 @@ mod tests {
         let local_playlists = vec![make_playlist("p1", "My Set")];
         let status = compute_playlist_usb_export_status(
             &local_playlists,
-            &std::collections::HashSet::new(),
+            &UsbPlaylistNames::default(),
             false,
             None,
         );
@@ -4747,10 +4840,7 @@ mod tests {
         };
         let playlists = vec![exported, make_playlist("p2", "Brand New")];
         let mark = |usb_names: &[&str], usb_root: Option<&str>| -> Vec<Option<String>> {
-            let names = usb_names
-                .iter()
-                .map(|name| normalize_playlist_name_for_compare(name))
-                .collect();
+            let names = UsbPlaylistNames::top_level(usb_names);
             compute_playlist_usb_export_status(&playlists, &names, true, usb_root)
                 .into_iter()
                 .map(|status| status.mark_label)
@@ -4807,7 +4897,7 @@ mod tests {
 
         let playlists = vec![exported, fresh];
         let lines = |usb_root: Option<&str>| -> Vec<String> {
-            let names = [normalize_playlist_name_for_compare("Brand New")].into();
+            let names = UsbPlaylistNames::top_level(&["Brand New"]);
             compute_playlist_usb_export_status(&playlists, &names, true, usb_root)
                 .into_iter()
                 .map(|status| status.export_status_text)
@@ -4835,10 +4925,7 @@ mod tests {
             make_playlist("p1", "My Set"),
             make_playlist("p2", "Brand New"),
         ];
-        let usb_names: std::collections::HashSet<String> =
-            [normalize_playlist_name_for_compare("My Set")]
-                .into_iter()
-                .collect();
+        let usb_names = UsbPlaylistNames::top_level(&["My Set"]);
 
         let additive = compute_playlist_usb_export_status(
             &local_playlists,

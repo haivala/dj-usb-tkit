@@ -894,12 +894,23 @@ body.sidebar-resizing {
    pencil takes the exported-✓ slot, so names and × never move. */
 .nav-playlist-item {
   position: relative;
-  padding-left: 18px;
+  /* Each folder level indents its rows (--nav-depth, set per row). */
+  padding-left: calc(18px + var(--nav-depth, 0) * 14px);
+}
+
+/* A selected row's 3px left border is 2px wider than the usual 1px: the
+   padding and the handle give those 2px back, so nothing in the row moves. */
+.nav-playlist-item.active {
+  padding-left: calc(16px + var(--nav-depth, 0) * 14px);
+}
+
+.nav-playlist-item.active .drag-handle {
+  margin-left: -2px;
 }
 
 .nav-playlist-item .drag-handle {
   position: absolute;
-  left: 0;
+  left: calc(var(--nav-depth, 0) * 14px);
   top: 0;
   bottom: 0;
   width: 16px;
@@ -939,11 +950,87 @@ body.sidebar-resizing {
   width: 100%;
 }
 
-.nav-playlist-actions {
+/* A folder row: arrow, name, then +, rename and × at the right edge. The +
+   and pencil show on hover like a playlist's pencil. */
+.nav-folder-item .nav-playlist-name {
+  flex: 1 1 auto;
+}
+
+/* The arrow is drawn, not a font glyph, in a fixed square that turns about
+   its centre: it stays in place when the folder opens, like an accordion's. */
+.nav-folder-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  color: var(--muted);
+  transform-origin: 50% 50%;
+  transition: transform 120ms ease;
+}
+
+.nav-folder-toggle::before {
+  content: '';
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+.nav-folder-item.expanded .nav-folder-toggle,
+.nav-folder-toggle.is-open {
+  transform: rotate(90deg);
+}
+
+.nav-folder-add {
+  display: none;
+}
+
+.nav-folder-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  box-shadow: none;
+}
+
+.nav-folder-item:hover .nav-folder-add,
+.nav-folder-item:focus-within .nav-folder-add {
+  display: inline-flex;
+}
+
+.nav-folder-item .nav-playlist-rename {
+  margin-left: 0;
+}
+
+/* Where a dragged sidebar or USB-list row would land. */
+.nav-playlist-list li.drop-before > .nav-playlist-item,
+.list li.drop-before > button {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.nav-playlist-list li.drop-after > .nav-playlist-item,
+.list li.drop-after > button {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.nav-playlist-list li.drop-inside > .nav-playlist-item {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+/* "Playlists" with Import, New folder and New playlist at its right, the
+   same square buttons as the collapse button in the header above (whose
+   right edge they line up with: 10px there, 8px nav inset + 2px here). */
+.nav-section-head {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin-top: 4px;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 2px;
+}
+
+.nav-section-head-actions {
+  display: flex;
+  gap: 4px;
 }
 
 .nav-add-playlist:hover {
@@ -952,11 +1039,17 @@ body.sidebar-resizing {
 }
 
 /* Inline new playlist input in sidebar */
+.nav-new-input-wrap.closing {
+  visibility: hidden;
+}
+
 .nav-new-input-wrap {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
+  /* Inside a folder it sits at the folder's children's depth. */
+  padding-left: calc(8px + var(--nav-depth, 0) * 14px);
 }
 
 .nav-new-input {
@@ -2756,6 +2849,23 @@ input[type="checkbox"]:disabled {
   visibility: visible;
 }
 
+/* The USB playlists' tree: each folder level indents its rows by the
+   sidebar's step (--nav-depth, set per row); a folder shows the sidebar's
+   arrow, open, and opens nothing itself. */
+.list-compact li > button {
+  padding-left: calc(10px + var(--nav-depth, 0) * 14px);
+}
+
+.list li button.usb-folder-item {
+  cursor: default;
+  gap: 6px;
+}
+
+.list li button.usb-folder-item:hover {
+  background: transparent;
+  color: var(--ink-secondary);
+}
+
 /* USB playlists: drag handles only during Edit order, and no removing then. */
 .list:not(.is-order-editing) [data-usb-drag-handle],
 .list.is-order-editing .playlist-remove {
@@ -3025,6 +3135,46 @@ ul[data-loaded]:empty::before {
 
 .export-playlists-name {
   font-weight: 500;
+}
+
+/* The playlist tree in the Export playlists page and the Add to… dialog:
+   each folder level indents its rows by the sidebar's step (--list-depth,
+   set per row), and a folder's row shows the sidebar's arrow, open. */
+.export-playlists-row .export-playlists-name,
+.export-playlists-folder-name {
+  padding-left: calc(8px + var(--list-depth, 0) * 14px);
+}
+
+.add-to-item.list-tree-indent {
+  padding-left: calc(12px + var(--list-depth, 0) * 14px);
+}
+
+.export-playlists-folder {
+  cursor: pointer;
+}
+
+.export-playlists-folder-name {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.export-playlists-folder-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* In the Add to… dialog the folder's box comes first, then its arrow. */
+.add-to-folder .add-to-item {
+  gap: 6px;
+}
+
+.add-to-folder .add-to-item > input {
+  margin-right: 4px;
 }
 
 .export-playlists-num {

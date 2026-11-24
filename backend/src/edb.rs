@@ -159,6 +159,8 @@ pub struct ExportManifestTrack {
 pub struct ExportDbPlaylist {
     pub playlist_id: i64,
     pub sort_order: i64,
+    /// Its folders and name in the eDB's playlist tree.
+    pub path: crate::pdb_reader::PlaylistPath,
     pub tracks: Vec<UsbTrack>,
 }
 
@@ -383,7 +385,7 @@ pub(crate) fn open_edb_rw_at(path: &Path) -> Option<rusqlite::Connection> {
 pub(crate) fn edb_as_parsed_pdb(
     conn: &rusqlite::Connection,
 ) -> BackendResult<crate::pdb_reader::ParsedPdb> {
-    use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, PdbPlaylistTreeRow, PdbTrackRow};
+    use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, PdbTrackRow};
     let id = |value: Option<i64>| value.and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
     let mut parsed = ParsedPdb::default();
     if table_exists(conn, "content") {
@@ -482,21 +484,7 @@ pub(crate) fn edb_as_parsed_pdb(
         parsed.artworks = id_names("SELECT image_id, path FROM image")?;
     }
     if table_exists(conn, "playlist") {
-        let mut stmt = conn.prepare(
-            "SELECT playlist_id, COALESCE(playlist_id_parent, 0), COALESCE(sequenceNo, 0), \
-             COALESCE(attribute, 0), COALESCE(name, '') FROM playlist",
-        )?;
-        parsed.playlist_tree = stmt
-            .query_map([], |row| {
-                Ok(PdbPlaylistTreeRow {
-                    id: id(row.get(0)?),
-                    parent_id: id(row.get(1)?),
-                    sort_order: id(row.get(2)?),
-                    is_folder: row.get::<_, i64>(3)? == 1,
-                    name: row.get(4)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+        parsed.playlist_tree = read_edb_playlist_tree(conn)?;
     }
     if table_exists(conn, "playlist_content") {
         let mut stmt = conn.prepare(
@@ -622,9 +610,16 @@ impl EdbRead {
 pub struct EdbLibrary {
     /// Every track, by `content_id`.
     pub tracks: HashMap<u32, UsbTrack>,
-    /// The playlists by name, each with its tracks in order. Playlists that
-    /// share a name are one, under the first one's id, without repeats.
+    /// The playlists by [`PlaylistPath::display`] ("Folder / Name"; the bare
+    /// name at the top level), each with its tracks in order. Playlists that
+    /// share a name in the same folder are one, under the first one's id,
+    /// without repeats.
+    ///
+    /// [`PlaylistPath::display`]: crate::pdb_reader::PlaylistPath::display
     pub playlists: HashMap<String, ExportDbPlaylist>,
+    /// The folders (read with the playlists): each one's path (its parent
+    /// folders, then its own name) and `sequenceNo`.
+    pub folders: Vec<(crate::pdb_reader::PlaylistPath, i64)>,
     /// `content_id` -> `dateCreated`, for the tracks that have one.
     pub date_created: HashMap<u32, String>,
 }
@@ -636,6 +631,7 @@ impl EdbLibrary {
         Self {
             tracks: self.resolved_tracks(usb_root),
             playlists: self.resolved_playlists(usb_root),
+            folders: self.folders.clone(),
             date_created: self.date_created.clone(),
         }
     }
@@ -658,6 +654,7 @@ impl EdbLibrary {
                     ExportDbPlaylist {
                         playlist_id: playlist.playlist_id,
                         sort_order: playlist.sort_order,
+                        path: playlist.path.clone(),
                         tracks: playlist
                             .tracks
                             .iter()
@@ -706,7 +703,7 @@ pub fn read_edb(conn: &rusqlite::Connection, usb_root: &Path, what: EdbRead) -> 
         }
     }
     if what.playlists {
-        library.playlists = read_edb_playlists(conn, &library.tracks)?;
+        (library.playlists, library.folders) = read_edb_playlists(conn, &library.tracks)?;
         logging::debug(
             "edb",
             format!(
@@ -848,38 +845,68 @@ fn read_edb_content(conn: &rusqlite::Connection) -> Option<Vec<(u32, UsbTrack, O
     Some(tracks)
 }
 
-/// The playlists (not folders), each with its tracks from `tracks` in order.
+/// The eDB's `playlist` table, folders (`attribute = 1`) and playlists, in
+/// the PDB's playlist tree shape, by `sequenceNo`: the one reader of the
+/// eDB's tree.
+pub(crate) fn read_edb_playlist_tree(
+    conn: &rusqlite::Connection,
+) -> BackendResult<Vec<crate::pdb_reader::PdbPlaylistTreeRow>> {
+    let parent = if load_table_columns(conn, "playlist")?
+        .iter()
+        .any(|c| c == "playlist_id_parent")
+    {
+        "COALESCE(playlist_id_parent, 0)"
+    } else {
+        "0"
+    };
+    let id = |value: i64| u32::try_from(value).unwrap_or(0);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT playlist_id, {parent}, COALESCE(sequenceNo, 0), COALESCE(attribute, 0), \
+         COALESCE(name, '') FROM playlist ORDER BY sequenceNo ASC"
+    ))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(crate::pdb_reader::PdbPlaylistTreeRow {
+                id: id(row.get(0)?),
+                parent_id: id(row.get(1)?),
+                sort_order: id(row.get(2)?),
+                is_folder: row.get::<_, i64>(3)? == 1,
+                name: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// The playlists, each with its tracks from `tracks` in order, keyed as
+/// [`EdbLibrary::playlists`] says; and the folders, as
+/// [`EdbLibrary::folders`] lists them.
+#[allow(clippy::type_complexity)]
 fn read_edb_playlists(
     conn: &rusqlite::Connection,
     tracks: &HashMap<u32, UsbTrack>,
-) -> Option<HashMap<String, ExportDbPlaylist>> {
-    let mut playlist_stmt = match conn.prepare(
-        r#"
-        SELECT playlist_id, name, COALESCE(sequenceNo, 0)
-        FROM playlist
-        WHERE attribute = 0
-        ORDER BY sequenceNo ASC
-        "#,
-    ) {
-        Ok(s) => s,
+) -> Option<(
+    HashMap<String, ExportDbPlaylist>,
+    Vec<(crate::pdb_reader::PlaylistPath, i64)>,
+)> {
+    let tree_rows = match read_edb_playlist_tree(conn) {
+        Ok(rows) => rows,
         Err(err) => {
-            logging::debug("edb", format!("eDB schema query failed: {err}"));
+            logging::debug("edb", format!("eDB playlist query failed: {err:?}"));
             return None;
         }
     };
-    let playlist_rows = match playlist_stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)?,
-        ))
-    }) {
-        Ok(rows) => rows.flatten().collect::<Vec<_>>(),
-        Err(err) => {
-            logging::debug("edb", format!("eDB playlist query failed: {err}"));
-            return None;
-        }
-    };
+    let tree = crate::pdb_reader::PlaylistTree::new(&tree_rows);
+    let playlist_rows = tree_rows
+        .iter()
+        .filter(|row| !row.is_folder)
+        .map(|row| (i64::from(row.id), tree.path(row), i64::from(row.sort_order)))
+        .collect::<Vec<_>>();
+    let folders = tree_rows
+        .iter()
+        .filter(|row| row.is_folder)
+        .map(|row| (tree.path(row), i64::from(row.sort_order)))
+        .collect::<Vec<_>>();
 
     // Every playlist's content ids in order, in one query.
     let mut content_by_playlist = HashMap::<i64, Vec<i64>>::new();
@@ -897,12 +924,13 @@ fn read_edb_playlists(
     }
 
     let mut out = HashMap::<String, ExportDbPlaylist>::new();
-    for (playlist_id, playlist_name, sort_order) in playlist_rows {
+    for (playlist_id, path, sort_order) in playlist_rows {
         let existing = out
-            .entry(playlist_name)
+            .entry(path.display())
             .or_insert_with(|| ExportDbPlaylist {
                 playlist_id,
                 sort_order,
+                path,
                 tracks: Vec::new(),
             });
         if sort_order < existing.sort_order
@@ -932,7 +960,7 @@ fn read_edb_playlists(
             }
         }
     }
-    Some(out)
+    Some((out, folders))
 }
 
 pub fn table_exists(conn: &rusqlite::Connection, table: &str) -> bool {
@@ -1054,18 +1082,35 @@ pub fn preferred_export_playlist_row_id(
     conn: &rusqlite::Connection,
     playlist_name: &str,
 ) -> BackendResult<Option<i64>> {
+    preferred_export_playlist_row_id_in(conn, playlist_name, None)
+}
+
+/// [`preferred_export_playlist_row_id`], in the folder `parent` (0: the top
+/// level) when given, else in any folder.
+fn preferred_export_playlist_row_id_in(
+    conn: &rusqlite::Connection,
+    playlist_name: &str,
+    parent: Option<i64>,
+) -> BackendResult<Option<i64>> {
     let playlist_name = sanitize_metadata(playlist_name);
+    let in_parent = if parent.is_some() {
+        "AND COALESCE(p.playlist_id_parent, 0) = ?2"
+    } else {
+        "AND ?2 IS NULL"
+    };
     conn.query_row(
-        r#"
+        &format!(
+            r#"
         SELECT p.playlist_id
         FROM playlist p
         LEFT JOIN playlist_content pc ON pc.playlist_id = p.playlist_id
-        WHERE p.name = ?1 AND COALESCE(p.attribute, 0) = 0
+        WHERE p.name = ?1 AND COALESCE(p.attribute, 0) = 0 {in_parent}
         GROUP BY p.playlist_id
         ORDER BY COUNT(pc.content_id) DESC, p.playlist_id ASC
         LIMIT 1
-        "#,
-        params![playlist_name.as_ref()],
+        "#
+        ),
+        params![playlist_name.as_ref(), parent],
         |row| row.get::<_, i64>(0),
     )
     .optional()
@@ -1099,10 +1144,11 @@ fn move_export_playlist_row_to_front(
             )
             .optional()?
             .unwrap_or(0);
+        // Folders and playlists share one sequence per parent, as rekordbox
+        // numbers them and as the PDB side renumbers its siblings.
         let mut stmt = conn.prepare(
             "SELECT playlist_id FROM playlist
-             WHERE attribute = 0
-               AND COALESCE(playlist_id_parent, 0) = ?1
+             WHERE COALESCE(playlist_id_parent, 0) = ?1
                AND playlist_id <> ?2
              ORDER BY COALESCE(sequenceNo, 0) ASC, playlist_id ASC",
         )?;
@@ -1119,12 +1165,12 @@ fn move_export_playlist_row_to_front(
     };
 
     conn.execute(
-        "UPDATE playlist SET sequenceNo = 0 WHERE playlist_id = ?1 AND attribute = 0",
+        "UPDATE playlist SET sequenceNo = 0 WHERE playlist_id = ?1",
         params![playlist_id],
     )?;
     for (idx, sibling_id) in sibling_ids.drain(..).enumerate() {
         conn.execute(
-            "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 AND attribute = 0",
+            "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2",
             params![(idx as i64) + 1, sibling_id],
         )?;
     }
@@ -1178,19 +1224,30 @@ pub fn upsert_export_playlist_row(
     conn: &rusqlite::Connection,
     playlist: &ExportPlaylistData,
 ) -> BackendResult<i64> {
-    upsert_export_playlist_row_placed(conn, playlist, PlaylistPlacement::MoveToFront)
+    upsert_export_playlist_row_placed(conn, playlist, PlaylistPlacement::MoveToFront, None)
 }
 
 /// The eDB playlist row `playlist` is exported into: the same-named one, or a
 /// new one, placed by `placement`.
+///
+/// `folders` (outermost first) is the playlist's folder path in the library:
+/// the folders are found by name, or created first in their parent, and the
+/// playlist is matched by name in its folder only. Without it (a top-level
+/// library playlist) it is matched by name in any folder, and a new one goes
+/// to the top level.
 pub fn upsert_export_playlist_row_placed(
     conn: &rusqlite::Connection,
     playlist: &ExportPlaylistData,
     placement: PlaylistPlacement,
+    folders: Option<&[crate::pdb_reader::PdbPlaylistTreeRow]>,
 ) -> BackendResult<i64> {
     let columns = load_table_columns(conn, "playlist")?;
     let playlist_name = sanitized_metadata_text(&playlist.name);
-    if let Some(id) = preferred_export_playlist_row_id(conn, &playlist_name)? {
+    let parent = match folders {
+        Some(folders) => Some(ensure_edb_folder_path(conn, folders, placement)?),
+        None => None,
+    };
+    if let Some(id) = preferred_export_playlist_row_id_in(conn, &playlist_name, parent)? {
         if placement.moves_to_front(true) {
             move_export_playlist_row_to_front(conn, id, &columns)?;
         }
@@ -1198,81 +1255,231 @@ pub fn upsert_export_playlist_row_placed(
     }
 
     let next_id = next_numeric_id(conn, "playlist", "playlist_id")?;
-    match load_table_row_template(conn, "playlist", &columns) {
+    insert_playlist_row(
+        conn,
+        &columns,
+        PlaylistRow {
+            id: next_id,
+            name: &playlist_name,
+            is_folder: false,
+            parent_id: parent.unwrap_or(0),
+            sequence_no: 0,
+        },
+    )?;
+    move_export_playlist_row_to_front(conn, next_id, &columns)?;
+    Ok(next_id)
+}
+
+/// One `playlist` row to insert: a playlist or a folder.
+struct PlaylistRow<'a> {
+    id: i64,
+    name: &'a str,
+    is_folder: bool,
+    parent_id: i64,
+    sequence_no: i64,
+}
+
+/// Inserts `row` into the eDB's `playlist` table (`columns`), on the shape of
+/// a row already there when it has one.
+fn insert_playlist_row(
+    conn: &rusqlite::Connection,
+    columns: &[String],
+    row: PlaylistRow<'_>,
+) -> BackendResult<()> {
+    let attribute = i64::from(row.is_folder);
+    match load_table_row_template(conn, "playlist", columns) {
         Ok(mut values) => {
-            values.insert("playlist_id".to_string(), Value::Integer(next_id));
+            values.insert("playlist_id".to_string(), Value::Integer(row.id));
             if values.contains_key("name") {
-                values.insert("name".to_string(), Value::Text(playlist_name.clone()));
+                values.insert("name".to_string(), Value::Text(row.name.to_string()));
             }
             if values.contains_key("attribute") {
-                values.insert("attribute".to_string(), Value::Integer(0));
+                values.insert("attribute".to_string(), Value::Integer(attribute));
             }
             if values.contains_key("playlist_id_parent") {
-                values.insert("playlist_id_parent".to_string(), Value::Integer(0));
+                values.insert(
+                    "playlist_id_parent".to_string(),
+                    Value::Integer(row.parent_id),
+                );
             }
             if values.contains_key("sequenceNo") {
-                values.insert("sequenceNo".to_string(), Value::Integer(0));
+                values.insert("sequenceNo".to_string(), Value::Integer(row.sequence_no));
             }
             // rekordbox leaves a playlist's image NULL; the template's isn't ours.
             if values.contains_key("image_id") {
                 values.insert("image_id".to_string(), Value::Null);
             }
-            dynamic_insert(conn, "playlist", &columns, &values)?;
+            dynamic_insert(conn, "playlist", columns, &values)?;
         }
         Err(_) => {
-            let next_seq = 0i64;
             if columns.iter().any(|c| c == "playlist_id_parent") {
                 conn.execute(
-                    "INSERT INTO playlist (playlist_id, name, attribute, playlist_id_parent, sequenceNo) VALUES (?1, ?2, 0, 0, ?3)",
-                    params![next_id, playlist_name.as_str(), next_seq],
+                    "INSERT INTO playlist (playlist_id, name, attribute, playlist_id_parent, sequenceNo) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![row.id, row.name, attribute, row.parent_id, row.sequence_no],
                 )?;
             } else {
                 conn.execute(
-                    "INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (?1, ?2, 0, ?3)",
-                    params![next_id, playlist_name.as_str(), next_seq],
+                    "INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (?1, ?2, ?3, ?4)",
+                    params![row.id, row.name, attribute, row.sequence_no],
                 )?;
             }
         }
     }
-    move_export_playlist_row_to_front(conn, next_id, &columns)?;
-    Ok(next_id)
+    Ok(())
 }
 
+/// The folder named `name` (compared as playlist names are) in `parent` (0:
+/// the top level), the first in its order.
+fn find_edb_child_folder(
+    conn: &rusqlite::Connection,
+    parent: i64,
+    name: &str,
+) -> BackendResult<Option<i64>> {
+    let canonical = crate::service::usb::text::canonicalize_playlist_name;
+    let mut stmt = conn.prepare(
+        "SELECT playlist_id, COALESCE(name, '') FROM playlist \
+         WHERE attribute = 1 AND COALESCE(playlist_id_parent, 0) = ?1 \
+         ORDER BY sequenceNo, playlist_id",
+    )?;
+    let rows = stmt
+        .query_map(params![parent], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows
+        .into_iter()
+        .find(|(_, existing)| canonical(existing) == canonical(name))
+        .map(|(id, _)| id))
+}
+
+/// The eDB folder at `folders` (outermost first: the other database's tree
+/// for the repair, the library's folder path for an export), created where
+/// missing: each is found by name under its parent, else inserted with its
+/// own id when that is free (the next free id otherwise, and always for an
+/// id of 0) and its own sort order. Each folder is moved first in its parent
+/// when `placement` moves a playlist there (new, or found), so a forced
+/// export order holds for folders too. Returns the innermost folder's id, or
+/// 0 (the top level) for none.
+pub fn ensure_edb_folder_path(
+    conn: &rusqlite::Connection,
+    folders: &[crate::pdb_reader::PdbPlaylistTreeRow],
+    placement: PlaylistPlacement,
+) -> BackendResult<i64> {
+    let columns = load_table_columns(conn, "playlist")?;
+    if folders.is_empty() || !columns.iter().any(|c| c == "playlist_id_parent") {
+        return Ok(0);
+    }
+    let mut parent = 0i64;
+    for folder in folders {
+        let name = sanitized_metadata_text(&folder.name);
+        let existing = find_edb_child_folder(conn, parent, &name)?;
+        parent = match existing {
+            Some(id) => {
+                if placement.moves_to_front(true) {
+                    move_export_playlist_row_to_front(conn, id, &columns)?;
+                }
+                id
+            }
+            None => {
+                let wanted = i64::from(folder.id);
+                let taken: bool = wanted == 0
+                    || conn.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM playlist WHERE playlist_id = ?1)",
+                        params![wanted],
+                        |row| row.get(0),
+                    )?;
+                let id = if taken {
+                    next_numeric_id(conn, "playlist", "playlist_id")?
+                } else {
+                    wanted
+                };
+                insert_playlist_row(
+                    conn,
+                    &columns,
+                    PlaylistRow {
+                        id,
+                        name: &name,
+                        is_folder: true,
+                        parent_id: parent,
+                        sequence_no: i64::from(folder.sort_order),
+                    },
+                )?;
+                if placement.moves_to_front(false) {
+                    move_export_playlist_row_to_front(conn, id, &columns)?;
+                }
+                id
+            }
+        };
+    }
+    Ok(parent)
+}
+
+/// Numbers each folder's children, folders and playlists together, 0..n in
+/// their current order (`sequenceNo`, then id), as rekordbox numbers them.
+/// Returns the rows changed.
+pub fn renumber_edb_playlist_siblings(conn: &rusqlite::Connection) -> BackendResult<usize> {
+    let mut rows = read_edb_playlist_tree(conn)?;
+    rows.sort_by_key(|row| (row.parent_id, row.sort_order, row.id));
+    let mut changed = 0;
+    let mut position = 0u32;
+    let mut parent = None;
+    for row in rows {
+        if parent != Some(row.parent_id) {
+            parent = Some(row.parent_id);
+            position = 0;
+        }
+        if row.sort_order != position {
+            changed += conn.execute(
+                "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2",
+                params![position, row.id],
+            )?;
+        }
+        position += 1;
+    }
+    Ok(changed)
+}
+
+/// Writes `playlist`'s row with the id and `sequenceNo` the repair takes from
+/// the PDB, in the eDB folder at `folders` (created where missing, see
+/// [`ensure_edb_folder_path`]). The playlist's old rows, same name in that
+/// folder, are replaced; same-named playlists in other folders are left
+/// alone. Another row on the target id moves to a free id.
 pub fn replace_export_playlist_row_with_identity(
     conn: &rusqlite::Connection,
     playlist: &ExportPlaylistData,
     playlist_id: i64,
     sequence_no: i64,
+    folders: &[crate::pdb_reader::PdbPlaylistTreeRow],
 ) -> BackendResult<i64> {
     let columns = load_table_columns(conn, "playlist")?;
+    let has_parent = columns.iter().any(|c| c == "playlist_id_parent");
     let playlist_name = sanitized_metadata_text(&playlist.name);
-    // Remove existing rows for the same playlist name (will be recreated).
+    let mut parent = ensure_edb_folder_path(conn, folders, PlaylistPlacement::AsGiven)?;
+    let same_playlist = if has_parent {
+        "name = ?1 AND attribute = 0 AND COALESCE(playlist_id_parent, 0) = ?2"
+    } else {
+        "name = ?1 AND attribute = 0 AND ?2 = 0"
+    };
     conn.execute(
-        "DELETE FROM playlist_content WHERE playlist_id IN (SELECT playlist_id FROM playlist WHERE name = ?1 AND attribute = 0)",
-        params![playlist_name.as_str()],
+        &format!(
+            "DELETE FROM playlist_content WHERE playlist_id IN \
+             (SELECT playlist_id FROM playlist WHERE {same_playlist})"
+        ),
+        params![playlist_name.as_str(), parent],
     )?;
     conn.execute(
-        "DELETE FROM playlist WHERE name = ?1 AND attribute = 0",
-        params![playlist_name.as_str()],
+        &format!("DELETE FROM playlist WHERE {same_playlist}"),
+        params![playlist_name.as_str(), parent],
     )?;
-    // If the target playlist_id collides with a different existing row,
-    // reassign that row to a new free ID instead of deleting it. The
-    // `playlist_id` UNIQUE constraint applies across all rows regardless of
-    // `attribute` (folders share the same id space as playlists), so the
-    // collision check and the reassignment must not be scoped to
-    // `attribute = 0` — doing so let a same-id folder row go undetected (and
-    // even when detected, left unmoved), causing the INSERT below to fail
-    // with "UNIQUE constraint failed: playlist.playlist_id".
-    let collider_name: Option<String> = conn
-        .query_row(
-            "SELECT name FROM playlist WHERE playlist_id = ?1",
-            params![playlist_id],
-            |row| row.get(0),
-        )
-        .ok();
-    if let Some(ref cname) = collider_name
-        && *cname != playlist_name
-    {
+    // A row still on the target id is another playlist or a folder (folders
+    // share the id space): it moves to a free id, with its entries and, for
+    // a folder, its children.
+    let collides: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM playlist WHERE playlist_id = ?1)",
+        params![playlist_id],
+        |row| row.get(0),
+    )?;
+    if collides {
         let new_id: i64 = conn.query_row(
             "SELECT COALESCE(MAX(playlist_id), 0) + 1 FROM playlist",
             [],
@@ -1286,43 +1493,27 @@ pub fn replace_export_playlist_row_with_identity(
             "UPDATE playlist SET playlist_id = ?1 WHERE playlist_id = ?2",
             params![new_id, playlist_id],
         )?;
-    }
-
-    match load_table_row_template(conn, "playlist", &columns) {
-        Ok(mut values) => {
-            values.insert("playlist_id".to_string(), Value::Integer(playlist_id));
-            if values.contains_key("name") {
-                values.insert("name".to_string(), Value::Text(playlist_name.clone()));
-            }
-            if values.contains_key("attribute") {
-                values.insert("attribute".to_string(), Value::Integer(0));
-            }
-            if values.contains_key("playlist_id_parent") {
-                values.insert("playlist_id_parent".to_string(), Value::Integer(0));
-            }
-            if values.contains_key("sequenceNo") {
-                values.insert("sequenceNo".to_string(), Value::Integer(sequence_no));
-            }
-            // rekordbox leaves a playlist's image NULL; the template's isn't ours.
-            if values.contains_key("image_id") {
-                values.insert("image_id".to_string(), Value::Null);
-            }
-            dynamic_insert(conn, "playlist", &columns, &values)?;
+        if has_parent {
+            conn.execute(
+                "UPDATE playlist SET playlist_id_parent = ?1 WHERE playlist_id_parent = ?2",
+                params![new_id, playlist_id],
+            )?;
         }
-        Err(_) => {
-            if columns.iter().any(|c| c == "playlist_id_parent") {
-                conn.execute(
-                    "INSERT INTO playlist (playlist_id, name, attribute, playlist_id_parent, sequenceNo) VALUES (?1, ?2, 0, 0, ?3)",
-                    params![playlist_id, playlist_name.as_str(), sequence_no],
-                )?;
-            } else {
-                conn.execute(
-                    "INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (?1, ?2, 0, ?3)",
-                    params![playlist_id, playlist_name.as_str(), sequence_no],
-                )?;
-            }
+        if parent == playlist_id {
+            parent = new_id;
         }
     }
+    insert_playlist_row(
+        conn,
+        &columns,
+        PlaylistRow {
+            id: playlist_id,
+            name: &playlist_name,
+            is_folder: false,
+            parent_id: parent,
+            sequence_no,
+        },
+    )?;
     Ok(playlist_id)
 }
 
@@ -2427,7 +2618,7 @@ mod tests {
             name: "Top40".to_string(),
             tracks: Vec::new(),
         };
-        let playlist_id = replace_export_playlist_row_with_identity(&conn, &playlist, 5, 0)
+        let playlist_id = replace_export_playlist_row_with_identity(&conn, &playlist, 5, 0, &[])
             .expect("must relocate the folder collider instead of failing the UNIQUE constraint");
         assert_eq!(playlist_id, 5);
 

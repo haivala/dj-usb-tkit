@@ -598,16 +598,20 @@ where
         .filter(|n| !n.is_folder)
         .collect();
     leaves.sort_by_key(|n| n.sort_order);
+    // Grouped by path: same-named playlists in one folder are one, in
+    // different folders they stay apart (as the eDB's are keyed).
+    let tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
     let mut grouped_leaves = Vec::<(String, String, u32, Vec<u32>)>::new();
     let mut grouped_leaf_idx = HashMap::<String, usize>::new();
     for leaf in &leaves {
-        let canonical = canonicalize_playlist_name(&leaf.name);
+        let path = tree.path(leaf);
+        let canonical = path.key();
         if let Some(existing_idx) = grouped_leaf_idx.get(&canonical).copied() {
             grouped_leaves[existing_idx].3.push(leaf.id);
             continue;
         }
         grouped_leaf_idx.insert(canonical.clone(), grouped_leaves.len());
-        grouped_leaves.push((canonical, leaf.name.clone(), leaf.sort_order, vec![leaf.id]));
+        grouped_leaves.push((canonical, path.display(), leaf.sort_order, vec![leaf.id]));
     }
     grouped_leaves.sort_by_key(|(_, _, sort_order, _)| *sort_order);
     let pdb_leaf_name_keys = grouped_leaves
