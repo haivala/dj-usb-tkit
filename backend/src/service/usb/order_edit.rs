@@ -209,19 +209,23 @@ fn verify_saved_order(
     let edb_tree = crate::edb::read_edb_playlist_tree(&conn)?;
     drop(conn);
     // Each moved folder's place, where both databases have the folder.
-    let folder_places = |rows: &[crate::pdb_reader::PdbPlaylistTreeRow]| -> HashMap<String, (String, u32)> {
-        let tree = crate::pdb_reader::PlaylistTree::new(rows);
-        rows.iter()
-            .filter(|row| row.is_folder)
-            .map(|row| {
-                let path = tree.path(row);
-                let display = path.display();
-                let mut segments = path.folders;
-                segments.push(path.name);
-                (playlist_tree::folder_id(&segments), (display, row.sort_order))
-            })
-            .collect()
-    };
+    let folder_places =
+        |rows: &[crate::pdb_reader::PdbPlaylistTreeRow]| -> HashMap<String, (String, u32)> {
+            let tree = crate::pdb_reader::PlaylistTree::new(rows);
+            rows.iter()
+                .filter(|row| row.is_folder)
+                .map(|row| {
+                    let path = tree.path(row);
+                    let display = path.display();
+                    let mut segments = path.folders;
+                    segments.push(path.name);
+                    (
+                        playlist_tree::folder_id(&segments),
+                        (display, row.sort_order),
+                    )
+                })
+                .collect()
+        };
     let pdb_folders = folder_places(&parsed.playlist_tree);
     let edb_folders = folder_places(&edb_tree);
     let mut differing_folders: Vec<String> = pending
@@ -329,7 +333,10 @@ impl BackendService {
 
     /// The pending order of the folders whose items `usb_root`'s edit moved
     /// (see `PendingOrder::playlists`); empty without one.
-    pub(crate) fn pending_usb_playlist_order(&self, usb_root: &Path) -> HashMap<String, Vec<String>> {
+    pub(crate) fn pending_usb_playlist_order(
+        &self,
+        usb_root: &Path,
+    ) -> HashMap<String, Vec<String>> {
         self.order_edit_slot()
             .as_ref()
             .filter(|edit| edit.usb_root == usb_root)
@@ -512,7 +519,9 @@ impl BackendService {
             Ok(())
         })?;
         let pending = self.pending_usb_playlist_order(&usb_root);
-        data.tree = Some(playlist_tree::tree_rows(&playlist_tree::walk(nodes, &pending)));
+        data.tree = Some(playlist_tree::tree_rows(&playlist_tree::walk(
+            nodes, &pending,
+        )));
         Ok(data)
     }
 

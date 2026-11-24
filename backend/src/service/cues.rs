@@ -184,8 +184,8 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
     for cue in read_cues_from_anlz(bytes) {
         let entry = by_position.entry(cue.position_ms).or_default();
         entry.has_hot |= cue.hot_cue != 0;
-        if entry.color_id.is_none() && cue.color_id != 0 && is_valid_color_id(cue.color_id) {
-            entry.color_id = Some(cue.color_id);
+        if entry.color_id.is_none() {
+            entry.color_id = anlz_cue_color_id(&cue);
         }
         if entry.name.is_none() {
             let trimmed = cue.comment.trim();
@@ -497,6 +497,16 @@ pub fn nearest_palette_color_id(rgb: u32) -> u8 {
         })
         .map(|e| e.id)
         .unwrap_or(DEFAULT_HOTCUE_COLOR_ID)
+}
+
+/// An ANLZ cue's palette colour: its `color_id` when it is one of ours, else
+/// the palette colour nearest its RGB (a CDJ writes only the RGB), else none.
+fn anlz_cue_color_id(cue: &AnlzCue) -> Option<u8> {
+    if is_valid_color_id(cue.color_id) {
+        return Some(cue.color_id);
+    }
+    let (r, g, b) = cue.color_rgb;
+    (cue.color_rgb != (0, 0, 0)).then(|| nearest_palette_color_id(u32::from_be_bytes([0, r, g, b])))
 }
 
 /// A cue list as the cue editor gets it: every hot cue carries a colour (the
@@ -1978,6 +1988,53 @@ mod tests {
             "the hot cue's memory point already sits there"
         );
         assert!(anlz_cues_from_track_cues(&[start_cue(1000)]).is_empty());
+    }
+
+    // A CDJ-2000NXS2 writes a hot cue's colour only as RGB, each pad its own
+    // fixed colour (pads A-H on a real stick). They come back as the nearest
+    // palette colour, not as no colour (green); C (lime) and E both are green.
+    #[test]
+    fn cdj_hot_cue_rgb_maps_to_nearest_palette_colour() {
+        let pads: [(u8, u8, u8); 8] = [
+            (0xff, 0x00, 0x17),
+            (0x00, 0xc4, 0xff),
+            (0x33, 0xff, 0x00),
+            (0x4d, 0x00, 0xff),
+            (0x00, 0xff, 0x30),
+            (0xff, 0x5e, 0x00),
+            (0x00, 0x00, 0xff),
+            (0xff, 0xe8, 0x00),
+        ];
+        let mut cues: Vec<AnlzCue> = (1u32..)
+            .zip(pads)
+            .map(|(hot_cue, color_rgb)| AnlzCue {
+                position_ms: hot_cue * 1_000,
+                hot_cue,
+                color_rgb,
+                ..AnlzCue::default()
+            })
+            .collect();
+        // A cue with no colour at all stays uncoloured.
+        cues.push(AnlzCue {
+            position_ms: 20_000,
+            ..AnlzCue::default()
+        });
+        let collapsed = collapse_anlz_cues(&ext_with_cues(&cues));
+        assert_eq!(
+            collapsed.iter().map(|c| c.color_id).collect::<Vec<_>>(),
+            // red, aqua, green, purple, green, orange, blue, yellow, none
+            [
+                Some(2),
+                Some(6),
+                Some(5),
+                Some(8),
+                Some(5),
+                Some(3),
+                Some(7),
+                Some(4),
+                None
+            ]
+        );
     }
 
     #[test]

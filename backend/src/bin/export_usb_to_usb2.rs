@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddSourceFoldersRequest, AddTrackCandidate, AnalyzeNewTracksRequest, AddTrackCandidatesToPlaylistRequest,
-    BrowseSourceFilesRequest, CreatePlaylistFolderRequest, CreatePlaylistRequest,
-    ExportPlaylistsToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest,
-    MovePlaylistTreeItemRequest, PlaylistTreeItem, PlaylistTreeKind, PlaylistTreePlacement,
+    AddSourceFoldersRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
+    AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistFolderRequest,
+    CreatePlaylistRequest, ExportPlaylistsToUsbRequest, FetchUsbPlaylistsRequest,
+    InitializeUsbRequest, MovePlaylistTreeItemRequest, PlaylistTreeItem, PlaylistTreeKind,
+    PlaylistTreePlacement,
 };
 
 fn fail(message: impl AsRef<str>) -> ! {
@@ -161,8 +162,11 @@ fn main() {
     // The source stick's tree, rebuilt in the library: its folders, then each
     // playlist in its folder with the tracks matched by path.
     let usb = usb_data.data;
-    let items: HashMap<&str, &backend::models::UsbPlaylist> =
-        usb.items.iter().map(|item| (item.id.as_str(), item)).collect();
+    let items: HashMap<&str, &backend::models::UsbPlaylist> = usb
+        .items
+        .iter()
+        .map(|item| (item.id.as_str(), item))
+        .collect();
     let mut folders = HashMap::<String, String>::new();
     // Per library folder ("" at the top), its items in the source order.
     let mut siblings = HashMap::<String, Vec<PlaylistTreeItem>>::new();
@@ -180,10 +184,13 @@ fn main() {
             };
             let folder_id = data.data.folder_id;
             folders.insert(row.id.clone(), folder_id.clone());
-            siblings.entry(parent.unwrap_or_default()).or_default().push(PlaylistTreeItem {
-                kind: PlaylistTreeKind::Folder,
-                id: folder_id,
-            });
+            siblings
+                .entry(parent.unwrap_or_default())
+                .or_default()
+                .push(PlaylistTreeItem {
+                    kind: PlaylistTreeKind::Folder,
+                    id: folder_id,
+                });
             continue;
         }
         let Some(usb_playlist) = items.get(row.id.as_str()) else {
@@ -208,7 +215,10 @@ fn main() {
             folder_id: parent.clone(),
         });
         let Some(created) = create.data.filter(|_| create.ok) else {
-            eprintln!("warn: skipping playlist '{}': create failed", usb_playlist.name);
+            eprintln!(
+                "warn: skipping playlist '{}': create failed",
+                usb_playlist.name
+            );
             continue;
         };
         let playlist_id = created.data.playlist_id;
@@ -238,10 +248,13 @@ fn main() {
             );
             continue;
         }
-        siblings.entry(parent.unwrap_or_default()).or_default().push(PlaylistTreeItem {
-            kind: PlaylistTreeKind::Playlist,
-            id: playlist_id.clone(),
-        });
+        siblings
+            .entry(parent.unwrap_or_default())
+            .or_default()
+            .push(PlaylistTreeItem {
+                kind: PlaylistTreeKind::Playlist,
+                id: playlist_id.clone(),
+            });
         playlist_ids.push(playlist_id);
     }
     if playlist_ids.is_empty() {

@@ -1497,11 +1497,9 @@ fn parse_pcp2_entry(entry: &[u8]) -> Option<AnlzCue> {
     let hot_cue = read_u32_be_at(entry, 12)?;
     let position_ms = read_u32_be_at(entry, 20)?;
     let color_id = entry.get(28).copied().unwrap_or(0);
+    let len_comment = read_u32_be_at(entry, 40).map_or(0, |v| v as usize);
     let mut comment = String::new();
-    if let Some(len_comment) = read_u32_be_at(entry, 40).map(|v| v as usize)
-        && len_comment >= 2
-        && 44 + len_comment <= entry.len()
-    {
+    if len_comment >= 2 && 44 + len_comment <= entry.len() {
         let units: Vec<u16> = entry[44..44 + len_comment]
             .as_chunks::<2>()
             .0
@@ -1511,12 +1509,19 @@ fn parse_pcp2_entry(entry: &[u8]) -> Option<AnlzCue> {
             .collect();
         comment = String::from_utf16_lossy(&units);
     }
+    // After the comment: color_code, then RGB. A CDJ-2000NXS2 writes a hot
+    // cue's colour only there, with color_id and color_code 0.
+    let (color_code, color_rgb) = match entry.get(44 + len_comment..48 + len_comment) {
+        Some(&[code, r, g, b]) => (code, (r, g, b)),
+        _ => (0, (0, 0, 0)),
+    };
     Some(AnlzCue {
         position_ms,
         hot_cue,
         color_id,
+        color_rgb,
+        color_code,
         comment,
-        ..AnlzCue::default()
     })
 }
 
@@ -3331,6 +3336,42 @@ mod tests {
         let rgb_off = 44 + len_comment;
         assert_eq!(body[rgb_off], 2); // color_code
         assert_eq!(&body[rgb_off + 1..rgb_off + 4], &[0xE1, 0x24, 0x24]);
+    }
+
+    // Hot cue A as a CDJ-2000NXS2 (firmware 1.87) wrote it: color_id and
+    // color_code 0, the colour only in the RGB after the (empty) comment.
+    #[test]
+    fn cdj_written_pcp2_keeps_its_rgb() {
+        let words: [u32; 22] = [
+            0x5043_5032,
+            0x10,
+            0x58,
+            1,
+            0x0100_0096,
+            0x17,
+            0,
+            0x0003_0000,
+            0,
+            0,
+            0,
+            0x00ff_0017,
+            0,
+            0x1000,
+            0,
+            0,
+            0,
+            0x058c,
+            0,
+            0,
+            0x1000,
+            0,
+        ];
+        let entry: Vec<u8> = words.iter().flat_map(|w| w.to_be_bytes()).collect();
+        let cue = parse_pcp2_entry(&entry).expect("parses");
+        assert_eq!((cue.hot_cue, cue.position_ms), (1, 23));
+        assert_eq!((cue.color_id, cue.color_code), (0, 0));
+        assert_eq!(cue.color_rgb, (0xff, 0x00, 0x17));
+        assert_eq!(cue.comment, "");
     }
 
     #[test]

@@ -12,9 +12,9 @@ use crate::i18n::tr;
 use crate::models::{
     CreatePlaylistFolderData, CreatePlaylistFolderRequest, DeletePlaylistFolderData,
     DeletePlaylistFolderRequest, MovePlaylistTreeItemData, MovePlaylistTreeItemRequest, Playlist,
-    PlaylistFolder, PlaylistListRow, PlaylistSidebarRow, PlaylistTreeItem, PlaylistTreeKind, PlaylistTreePlacement,
-    RenamePlaylistFolderData, RenamePlaylistFolderRequest, SetPlaylistFolderCollapsedData,
-    SetPlaylistFolderCollapsedRequest,
+    PlaylistFolder, PlaylistListRow, PlaylistSidebarRow, PlaylistTreeItem, PlaylistTreeKind,
+    PlaylistTreePlacement, RenamePlaylistFolderData, RenamePlaylistFolderRequest,
+    SetPlaylistFolderCollapsedData, SetPlaylistFolderCollapsedRequest,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -202,7 +202,11 @@ pub(crate) fn ensure_folder_path(
 ) -> BackendResult<Option<String>> {
     let canonical = crate::service::usb::text::canonicalize_playlist_name;
     let mut parent: Option<String> = None;
-    for name in names.iter().map(|name| name.trim()).filter(|name| !name.is_empty()) {
+    for name in names
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+    {
         let existing = {
             let mut stmt = conn.prepare(
                 "SELECT id, name FROM playlist_folders WHERE parent_id IS ?1

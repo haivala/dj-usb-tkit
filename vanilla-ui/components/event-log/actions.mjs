@@ -199,6 +199,13 @@ export async function setupConsoleFileLogging({ pushEventLog, logToFile }) {
   const forward = (level, args) => {
     const message = args.map((v) => {
       if (typeof v === "string") return v;
+      // An Error's message and stack aren't enumerable: JSON.stringify gives "{}".
+      // Chromium's stack starts with the "Name: message" line, WebKit's doesn't.
+      if (v instanceof Error) {
+        const head = `${v.name}: ${v.message}`;
+        const stack = v.stack || "";
+        return stack.startsWith(head) ? stack : [head, stack].filter(Boolean).join("\n");
+      }
       try {
         return JSON.stringify(v);
       } catch {

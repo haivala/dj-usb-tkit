@@ -1031,7 +1031,12 @@ pub(crate) fn build_pdb_for_playlists(
         // library's folder path for an export. None (a top-level library
         // playlist): matched by name in any folder, a new one at the top.
         let parent_id = folders.map(|folders| {
-            ensure_pdb_folder_path(&mut all_playlist_tree, folders, &mut next_playlist_id, placement)
+            ensure_pdb_folder_path(
+                &mut all_playlist_tree,
+                folders,
+                &mut next_playlist_id,
+                placement,
+            )
         });
         // The playlist's existing row: the one asked for by id, else the
         // same-named one (in its folder, for the repair) with the lowest

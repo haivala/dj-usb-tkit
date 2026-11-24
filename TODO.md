@@ -125,24 +125,43 @@ Cues added on a CDJ don't reach a library track that already has cues:
 next export then replaces the stick's cues with the library's
 (`ensure_analysis_bundle_ppth` in
 `backend/src/service/export_helpers/export_paths.rs`), so the CDJ's cues are
-lost. Found by reading the code, not yet seen on a CDJ.
+lost. Found by reading the code; the loss itself hasn't been seen on a stick
+yet, but the CDJ side is now known (below).
 
 Idea: when a track's cues on the stick have changed since the last export,
 replace the library track's cues with the stick's, all of them, with no
 cue-by-cue merge. CDJ removals then carry over too.
 
-- Export saves what it wrote for each track on that stick. The library has no
-  `cueUpdateCount` of its own, and the app's count and rekordbox's can differ,
-  so the stick is compared with the saved value.
+- Export saves the ANLZ cue list it wrote for each track on that stick, and the
+  stick's list is compared with it. `cueUpdateCount` can't be used: the CDJ
+  doesn't touch it (below).
+- "The `.EXT` changed" isn't a cue change either: the CDJ also rewrites the
+  `.EXT` of tracks it only played, to add `PVB2`. Compare the cue lists.
 - Ask when the track was also edited in the library since the last export: a
   rewrite would lose those edits, and "local edits win" is the rule today.
 - The import's time shift for transcoded files still applies.
 
-First test on a CDJ: export a track, add a hot cue and a memory cue on the
-player, and compare `exportLibrary.db`, `export.pdb` and the track's `.DAT` and
-`.EXT` before and after. If `cueUpdateCount` changes, it can trigger the rewrite.
-If it doesn't, or only on some models, compare the stick's ANLZ cue list with
-the list the last export wrote instead.
+Checked on a CDJ-2000NXS2 (firmware 1.87), stick copy in
+`USB_CUE_POINTS_FROM_CDJ`. The app exported at 15:58, and the CDJ's own writes
+are the files dated 2024-01-01 02:00, since it has no clock:
+
+- `export.pdb` and `exportLibrary.db` are untouched. The eDB still has no `cue`
+  rows and a NULL `cueUpdateCount` for every track.
+- "Horse On Wheels" (`P051/00018F1B`) got two hot cues, A at 23 ms and B at
+  9620 ms. They were written to both the `.DAT` (`PCOB`) and the `.EXT` (`PCOB`
+  plus `PCO2`, colour 0), and the `.EXT` also got a `PVB2` tag. The `.2EX` was
+  left alone.
+- "Dry Your Eyes" (`P04C/00014CD0`) only had its `.EXT` rewritten, to add
+  `PVB2`. Its cue lists are still empty.
+
+Still unchecked:
+
+- Memory cues. None were found on the stick, so the player may write them
+  differently.
+- Loops, cue comments and colours from players that have them.
+- Other models: a CDJ-3000 or a player that reads `exportLibrary.db` may update
+  `cueUpdateCount` or the eDB `cue` table as well.
+- Re-exporting the stick to see the CDJ's cues get replaced.
 
 ## Hardware glance: Engine library from a stick without a PDB
 
@@ -152,3 +171,5 @@ and its PDB import counter (`lastRekordBoxLibraryImportReadCounter` /
 player has read such a library yet. Next time an eDB-only stick is near the
 Mixstream Pro, check that it opens the library without importing anything
 and shows the tracks, playlists and cues.
+
+## playlist reorder does no allow move to another folder in USB playlists

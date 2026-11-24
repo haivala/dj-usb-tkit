@@ -972,7 +972,9 @@ fn collect_merge_write(
             manifest,
             mirror_playlist_entries: true,
             identity: Some(identity),
-            placement: PlaylistPlacement::AsGiven, folders: None })
+            placement: PlaylistPlacement::AsGiven,
+            folders: None,
+        })
         .collect();
     let pdb_writes: Vec<PdbPlaylistWrite<'_>> = merged
         .iter()

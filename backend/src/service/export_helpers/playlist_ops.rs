@@ -714,11 +714,11 @@ pub fn verify_edb_content_with_conn(
         None => preferred_export_playlist_row_id(conn, &playlist.name)?,
     }
     .ok_or_else(|| {
-            BackendError::Internal(format!(
-                "export verification failed: playlist not found in eDB: {}",
-                playlist.name
-            ))
-        })?;
+        BackendError::Internal(format!(
+            "export verification failed: playlist not found in eDB: {}",
+            playlist.name
+        ))
+    })?;
 
     for track in &manifest.tracks {
         let row = conn

@@ -2029,7 +2029,9 @@ fn order_edit_usb() -> (tempfile::TempDir, std::path::PathBuf) {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront, folders: None }],
+            placement: PlaylistPlacement::MoveToFront,
+            folders: None,
+        }],
     )
     .expect("write edb playlist");
     session.commit().expect("write edb playlist");
@@ -2292,7 +2294,9 @@ fn usb_order_edit_writes_one_playlist_order_to_both_databases() {
                 manifest: &manifest,
                 mirror_playlist_entries: true,
                 identity: None,
-                placement: PlaylistPlacement::MoveToFront, folders: None }],
+                placement: PlaylistPlacement::MoveToFront,
+                folders: None,
+            }],
         )
         .expect("write edb playlist");
         session.commit().expect("write edb playlist");
@@ -2353,7 +2357,9 @@ fn usb_order_edit_saves_order_with_only_edb_playlists() {
                 manifest: &manifest,
                 mirror_playlist_entries: true,
                 identity: None,
-                placement: PlaylistPlacement::MoveToFront, folders: None }],
+                placement: PlaylistPlacement::MoveToFront,
+                folders: None,
+            }],
         )
         .expect("write edb playlist");
         session.commit().expect("write edb playlist");
@@ -2771,7 +2777,9 @@ fn remove_usb_playlist_writes_back_edb_to_usb_when_staging_enabled() {
             manifest: &manifest,
             mirror_playlist_entries: true,
             identity: None,
-            placement: PlaylistPlacement::MoveToFront, folders: None }],
+            placement: PlaylistPlacement::MoveToFront,
+            folders: None,
+        }],
     )
     .expect("seed edb playlist");
     session.commit().expect("seed edb playlist");

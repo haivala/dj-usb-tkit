@@ -1004,10 +1004,14 @@ impl UsbPlaylistNames {
     /// none at the top level) is on the USB.
     pub(crate) fn contains(&self, name: &str, folder_path: Option<&str>) -> bool {
         match folder_path.filter(|path| !path.is_empty()) {
-            None => self.names.contains(&normalize_playlist_name_for_compare(name)),
+            None => self
+                .names
+                .contains(&normalize_playlist_name_for_compare(name)),
             Some(path) => self
                 .paths
-                .contains(&normalize_playlist_name_for_compare(&format!("{path} / {name}"))),
+                .contains(&normalize_playlist_name_for_compare(&format!(
+                    "{path} / {name}"
+                ))),
         }
     }
 }
@@ -2278,7 +2282,9 @@ impl BackendService {
                             tree_rows
                                 .iter()
                                 .find(|row| i64::from(row.id) == written.playlist_id)
-                                .map(|row| tree.folders(row.parent_id).into_iter().cloned().collect())
+                                .map(|row| {
+                                    tree.folders(row.parent_id).into_iter().cloned().collect()
+                                })
                                 .unwrap_or_else(|| run.folders.clone())
                         })
                     })
@@ -3021,14 +3027,15 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendService, ContentFingerprint, UsbTrackSizes, compute_playlist_usb_export_status,
-        content_fingerprint_key, ensure_playlist_tracks_analysis_ready, estimate_export_new_bytes,
-        estimate_playlist_copy, existing_usb_relative_if_file, existing_usb_relative_if_present,
-        export_space_shortfall, format_notice, has_required_analysis, has_required_analysis_fields,
+        BackendService, ContentFingerprint, UsbPlaylistNames, UsbTrackSizes,
+        compute_playlist_usb_export_status, content_fingerprint_key,
+        ensure_playlist_tracks_analysis_ready, estimate_export_new_bytes, estimate_playlist_copy,
+        existing_usb_relative_if_file, existing_usb_relative_if_present, export_space_shortfall,
+        format_notice, has_required_analysis, has_required_analysis_fields,
         insufficient_space_error, normalize_playlist_name_for_compare,
         playlist_locks_reorder_on_export, refused_formats_error,
         resolve_collision_free_media_target, usb_drive_label,
-        UsbPlaylistNames, usb_playlist_names_for_export_compare, usb_root_last_segment,
+        usb_playlist_names_for_export_compare, usb_root_last_segment,
         validate_export_manifest_after_prune, validate_export_manifest_before_db_write,
     };
     use crate::error::BackendError;

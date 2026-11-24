@@ -1255,9 +1255,14 @@ test("USB playlists in folders: tree rows and Edit order within a folder", async
   expect(await items.evaluateAll((lis) => lis.map((li) => `${li.dataset.treeKind} ${li.style.getPropertyValue("--nav-depth")}`)))
     .toEqual(["folder 0", "playlist 1", "playlist 1", "playlist 0"]);
   await expect(items.first().locator(".nav-folder-toggle.is-open")).toHaveCount(1);
-  // A folder row opens nothing.
+  // The page opens the first playlist, not the folder before it.
+  const warm = page.locator('[data-usb-playlist="usb-pl-1"]');
+  await expect(warm).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistHeading")).toContainText("Warm");
+  // A folder row opens nothing: Warm stays open.
   await items.first().locator("button").click();
-  await expect(page.locator("#usbPlaylistHeading")).toBeHidden();
+  await expect(warm).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistHeading")).toContainText("Warm");
 
   await page.locator("#usbEditOrderBtn").click();
   const handle = (n) => `#usbPlaylists > li:nth-child(${n}) [data-usb-drag-handle]`;
@@ -2332,6 +2337,8 @@ test("frontend logging", async ({ page }) => {
     console.log("file-only-log");
     console.info("file-only-info");
     console.warn("count:", 42, { key: "val" });
+    // A caught Error logged as is: its message, not "{}".
+    console.error(new TypeError("caught-failure"));
     setTimeout(() => { throw new Error("thrown-uncaught"); });
     Promise.reject(new Error("async failure"));
     // A Tauri command's error arrives as a plain string.
@@ -2341,6 +2348,7 @@ test("frontend logging", async ({ page }) => {
   await page.locator("#eventLogBtn").click();
   const list = page.locator("#eventLogList");
   await expect(list).toContainText('count: 42 {"key":"val"}');
+  await expect(list).toContainText("TypeError: caught-failure");
   await expect(list).toContainText("thrown-uncaught");
   await expect(list).toContainText("async failure");
   await expect(list).toContainText("command refused");
@@ -2357,6 +2365,11 @@ test("frontend logging", async ({ page }) => {
   expect(lines).toContainEqual("debug [console] [console.event] file-only-log");
   expect(lines).toContainEqual("debug [console] [console.event] file-only-info");
   expect(lines).toContainEqual('warn [console] [console.event] count: 42 {"key":"val"}');
+  // The file line carries the stack too, on the same line.
+  const caught = lines.filter((line) => line.startsWith("error [console] [console.event] TypeError: caught-failure "));
+  expect(caught).toHaveLength(1);
+  expect(caught[0]).toContain(" at ");
+  expect(caught[0].split("caught-failure")).toHaveLength(2);
   expect(lines.some((line) => line.includes("from the backend"))).toBe(false);
 });
 

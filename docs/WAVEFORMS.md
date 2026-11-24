@@ -74,6 +74,16 @@ decoding out of the USB export path.
 - `.EXT`: `PCOB`/`PCPT` + `PCO2`/`PCP2` (hot + memory) — `PCP2` carries the
   hot-cue colour and comment.
 
+A hot cue set on a CDJ-2000NXS2 (firmware 1.87) has `color_id` 0 and colour
+code 0 in its `PCP2`; its colour is only the RGB after the comment, fixed per
+pad: A `#ff0017`, B `#00c4ff`, C `#33ff00`, D `#4d00ff`, E `#00ff30`,
+F `#ff5e00`, G `#0000ff`, H `#ffe800`. Reading cues (`collapse_anlz_cues`)
+takes `color_id` when it is a palette id and otherwise the palette colour
+nearest the RGB, so A-H come in as red, aqua, green, purple, green, orange,
+blue and yellow. The palette has no lime, so C and E are both green. The
+player's entries are also 88 bytes long and write "no loop" as 0, where
+the app writes `0xFFFFFFFF`.
+
 A track with no cues still emits the historical **empty** `PCOB`/`PCO2`
 placeholders byte-for-byte, so unedited exports are unchanged.
 

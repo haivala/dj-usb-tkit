@@ -85,7 +85,12 @@ impl BackendService {
             .collect();
         let mut items: Vec<UsbPlaylist> =
             resolved.items.iter().map(with_usb_playlist_texts).collect();
-        items.sort_by_key(|item| position.get(item.id.as_str()).copied().unwrap_or(usize::MAX));
+        items.sort_by_key(|item| {
+            position
+                .get(item.id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         for item in &mut items {
             item.order_edited = order_edit.edited_playlist_ids.contains(&item.id);
         }

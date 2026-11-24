@@ -8208,7 +8208,10 @@ fn export_puts_library_folders_on_the_stick_and_keeps_same_named_playlists_apart
             None => p.name.clone(),
         })
         .collect();
-    assert_eq!(library_order, ["Other / Warm", "Sets / Warm", "Sets / Peak", "Top"]);
+    assert_eq!(
+        library_order,
+        ["Other / Warm", "Sets / Warm", "Sets / Peak", "Top"]
+    );
 
     // The Export playlists page and the Add to dialog list them under their
     // folders, every folder open, indented as in the sidebar; a folder
@@ -8235,7 +8238,13 @@ fn export_puts_library_folders_on_the_stick_and_keeps_same_named_playlists_apart
         .data
         .expect("overview data");
     let name_of = |id: &str| {
-        overview.rows.iter().find(|row| row.playlist_id == id).expect("row").name.clone()
+        overview
+            .rows
+            .iter()
+            .find(|row| row.playlist_id == id)
+            .expect("row")
+            .name
+            .clone()
     };
     assert_eq!(lines(&overview.tree, &name_of), expected);
     let membership = backend
@@ -8245,7 +8254,13 @@ fn export_puts_library_folders_on_the_stick_and_keeps_same_named_playlists_apart
         .data
         .expect("membership data");
     let name_of = |id: &str| {
-        membership.items.iter().find(|item| item.playlist_id == id).expect("item").name.clone()
+        membership
+            .items
+            .iter()
+            .find(|item| item.playlist_id == id)
+            .expect("item")
+            .name
+            .clone()
     };
     assert_eq!(lines(&membership.tree, &name_of), expected);
 
@@ -8280,7 +8295,10 @@ fn export_puts_library_folders_on_the_stick_and_keeps_same_named_playlists_apart
     assert!(selected.data.expect("select data").data.usb.valid);
     let state = backend.list_playlists().data.expect("playlists");
     assert!(
-        state.playlist_usb_export_status.iter().all(|s| s.same_name_exists_on_usb),
+        state
+            .playlist_usb_export_status
+            .iter()
+            .all(|s| s.same_name_exists_on_usb),
         "{:?}",
         state.playlist_usb_export_status
     );
@@ -8384,7 +8402,10 @@ fn edit_order_moves_folders_and_playlists_within_their_folder_in_both_databases(
     let top_id = usb_tree_id(&backend, &usb, "Top", 0);
     // A folder moves with what it holds; a playlist only among its folder's items.
     assert!(mv(&top_id, Some(&sets_id), None).ok, "move Top first");
-    assert!(mv(&inner_id, None, Some(&warm_id)).ok, "move Inner after Warm");
+    assert!(
+        mv(&inner_id, None, Some(&warm_id)).ok,
+        "move Inner after Warm"
+    );
     let refused = mv(&top_id, Some(&warm_id), None);
     assert!(!refused.ok, "moved into another folder: {refused:?}");
     assert_eq!(
@@ -8392,11 +8413,19 @@ fn edit_order_moves_folders_and_playlists_within_their_folder_in_both_databases(
         "Items move only within their own folder"
     );
     let expected = ["Top", "Sets", "  Warm", "  Inner", "    Peak"];
-    assert_eq!(usb_tree_lines(&backend, &usb), expected, "pending order shown");
+    assert_eq!(
+        usb_tree_lines(&backend, &usb),
+        expected,
+        "pending order shown"
+    );
 
     let committed = backend.commit_usb_order_edit(order());
     assert!(committed.ok, "commit order edit: {committed:?}");
-    assert_eq!(usb_tree_lines(&backend, &usb), expected, "saved order read back");
+    assert_eq!(
+        usb_tree_lines(&backend, &usb),
+        expected,
+        "saved order read back"
+    );
     // Both databases hold it (the save checks moved folders' places too).
     assert_eq!(
         usb_playlist_names_in_order(&backend, &usb),

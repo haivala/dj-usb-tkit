@@ -584,8 +584,15 @@ export async function removeUsbPlaylist(ctx, playlist) {
 // Each USB list page: its <ul> (which carries the `data-loaded` mark), its read,
 // its track table and how a row opens.
 const USB_LISTS = {
-  "usb-playlists": { list: "usbPlaylists", read: readUsbPlaylists, tracksCtl: "usbPlaylistTracksCtl", openRow: openUsbPlaylistRow },
-  "usb-history": { list: "historyList", read: readUsbHistories, tracksCtl: "usbHistoryTracksCtl", openRow: openHistoryRow }
+  // `row`: what `openRow` opens. The playlist list also has folder rows.
+  "usb-playlists": {
+    list: "usbPlaylists", read: readUsbPlaylists, tracksCtl: "usbPlaylistTracksCtl",
+    row: "[data-usb-playlist]", openRow: openUsbPlaylistRow
+  },
+  "usb-history": {
+    list: "historyList", read: readUsbHistories, tracksCtl: "usbHistoryTracksCtl",
+    row: "[data-history-id]", openRow: openHistoryRow
+  }
 };
 
 // `state.usbListReads[viewId]` is the list's running read. Clearing the list or
@@ -625,10 +632,11 @@ export function ensureUsbListLoaded(ctx, viewId, { viewChanged }) {
 
 // Only for a page still on screen: one the user left opens its item on return.
 function openFirstUsbListItem(ctx, viewId) {
-  const { list, tracksCtl, openRow } = USB_LISTS[viewId];
+  const { list, tracksCtl, row, openRow } = USB_LISTS[viewId];
   const listEl = ctx.el[list];
   if (ctx.state.activeTab !== viewId || ctx[tracksCtl].scopeId != null || !("loaded" in listEl.dataset)) return;
-  const firstRow = listEl.firstElementChild?.firstElementChild;
+  // The first playlist, even when a folder comes before it.
+  const firstRow = listEl.querySelector(row);
   if (firstRow) openRow(ctx, firstRow);
 }
 

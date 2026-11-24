@@ -1377,7 +1377,9 @@ impl BackendService {
                         manifest: &manifest,
                         mirror_playlist_entries: false,
                         identity: None,
-                        placement: PlaylistPlacement::MoveToFront, folders: None }],
+                        placement: PlaylistPlacement::MoveToFront,
+                        folders: None,
+                    }],
                 )?;
                 let identity = written.first().map(|w| {
                     (

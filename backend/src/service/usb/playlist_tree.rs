@@ -212,16 +212,18 @@ mod tests {
         let none = HashMap::new();
         assert_eq!(
             lines(&nodes, &none),
-            ["Top", "Sets", "  Late", "    Deep", "  Warm", "Loose", "  Odd"]
+            [
+                "Top", "Sets", "  Late", "    Deep", "  Warm", "Loose", "  Odd"
+            ]
         );
         // A folder's pending order moves its items only.
-        let pending = HashMap::from([(
-            folder_id(&["Sets".to_string()]),
-            vec!["p-warm".to_string()],
-        )]);
+        let pending =
+            HashMap::from([(folder_id(&["Sets".to_string()]), vec!["p-warm".to_string()])]);
         assert_eq!(
             lines(&nodes, &pending),
-            ["Top", "Sets", "  Warm", "  Late", "    Deep", "Loose", "  Odd"]
+            [
+                "Top", "Sets", "  Warm", "  Late", "    Deep", "Loose", "  Odd"
+            ]
         );
         assert_eq!(parent_of(&nodes, "p-deep"), Some("usb-f-sets/late"));
         assert_eq!(parent_of(&nodes, "usb-f-sets"), Some(TOP));
