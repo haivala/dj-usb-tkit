@@ -24,9 +24,9 @@ use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
 use crate::logging::Level;
 use crate::models::{
-    MaterializeSourceTrackRequest, RemoveTrackTranscodesData, RemoveTrackTranscodesRequest,
-    ReplacedTrackRow, SetTranscodeFolderRequest, Track, TrackTranscode, TranscodeFolderData,
-    TranscodeFormatChoice, TranscodeFormatsData, TranscodeTracksData, TranscodeTracksRequest,
+    RemoveTrackTranscodesData, RemoveTrackTranscodesRequest, SetTranscodeFolderRequest, Track,
+    TrackTranscode, TranscodeFolderData, TranscodeFormatChoice, TranscodeFormatsData,
+    TranscodeTracksData, TranscodeTracksRequest,
 };
 
 pub(crate) const SETTING_TRANSCODE_DIR: &str = "transcode_dir_v1";
@@ -276,8 +276,7 @@ impl BackendService {
         self.transcode_cancelled.store(false, Ordering::SeqCst);
         let conn = self.db.connect()?;
         let mut data = TranscodeTracksData::default();
-        let track_ids =
-            self.resolve_transcode_track_ids(&conn, &req.track_ids, &mut data.replaced)?;
+        let track_ids = self.index_listed_track_ids(&conn, &req.track_ids, &mut data.replaced)?;
         let tracks = track_rows(&conn, &track_ids)?;
         let (out_dir, _) = self.transcode_dir(&conn)?;
         let roots = LibrarySources::load(&conn)?.roots;
@@ -477,52 +476,6 @@ impl BackendService {
             on_progress(done, total, &name);
         })?;
         Ok(failures)
-    }
-
-    /// The selected ids as `tracks` rows. A browse-only row (a file the
-    /// scan lists but hasn't indexed, `id == file_path`) is indexed first,
-    /// as adding it to a playlist does, and listed in `replaced`.
-    fn resolve_transcode_track_ids(
-        &self,
-        conn: &rusqlite::Connection,
-        ids: &[String],
-        replaced: &mut Vec<ReplacedTrackRow>,
-    ) -> BackendResult<Vec<String>> {
-        let mut out = Vec::with_capacity(ids.len());
-        let mut seen = HashSet::new();
-        for id in ids.iter().map(|id| id.trim()).filter(|id| !id.is_empty()) {
-            if !seen.insert(id.to_string()) {
-                continue;
-            }
-            if super::playlists::track_id_exists(conn, id)? {
-                out.push(id.to_string());
-                continue;
-            }
-            let path = stored_file_path(id);
-            if !path.is_file() {
-                continue;
-            }
-            let scanned = crate::scanner::scan_audio_file(path)?;
-            let materialized = self.materialize_source_track(MaterializeSourceTrackRequest {
-                file_path: id.to_string(),
-                title: scanned.title,
-                artist: scanned.artist,
-                album: scanned.album,
-                track_number: scanned.track_number,
-                key: scanned.tonality,
-                file_size_bytes: scanned.file_size_bytes,
-                format_ext: scanned.format_ext,
-                sample_rate_hz: scanned.sample_rate_hz,
-                bit_depth: scanned.bit_depth,
-                bitrate_kbps: scanned.bitrate_kbps,
-            })?;
-            replaced.push(ReplacedTrackRow {
-                previous_id: id.to_string(),
-                track_id: materialized.track_id.clone(),
-            });
-            out.push(materialized.track_id);
-        }
-        Ok(out)
     }
 
     pub fn remove_track_transcodes(
@@ -933,7 +886,10 @@ pub(crate) fn fill_track_transcodes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AddSourceFoldersRequest, ScanLibraryRequest};
+    use crate::models::{
+        AddSourceFoldersRequest, MaterializeSourceTrackRequest, ReplacedTrackRow,
+        ScanLibraryRequest,
+    };
 
     fn fixture(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

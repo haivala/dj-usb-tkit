@@ -1,5 +1,6 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
+import { showTracks } from "../shared/transcodes.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillFormatCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
@@ -512,6 +513,9 @@ export async function analyzeTrackIds(ctx, trackIds, options = {}) {
     query: String(state.libraryQuery || "").trim(),
     reanalyze: !!options.reanalyze
   });
+  // Picked files not in the library yet were added: their library rows
+  // replace them, so the analysis's updates find them.
+  showTracks(ctx, submitted.tracks, submitted.replaced);
   emitStatus(submitted.message);
 }
 

@@ -45,7 +45,7 @@ export function createConvertDialogController(el, document) {
 
 // Shows each returned track in every table holding it, in place of the row
 // the backend says it replaces (a listed file it indexed: `replaced`).
-function showTracks(ctx, tracks, replaced = []) {
+export function showTracks(ctx, tracks, replaced = []) {
   const previous = new Map(replaced.map((row) => [row.trackId, row.previousId]));
   for (const track of tracks || []) {
     ctx.showTrackRow(track, { replaces: previous.get(track.id) || null });

@@ -71,6 +71,13 @@ pub struct AnalysisSubmittedData {
     pub skipped: usize,
     /// For the status line.
     pub message: String,
+    /// Picked rows that were files not in the library yet, now added: the
+    /// window shows `tracks` in their place.
+    #[serde(default)]
+    pub replaced: Vec<crate::models::ReplacedTrackRow>,
+    /// The library rows of `replaced`.
+    #[serde(default)]
+    pub tracks: Vec<crate::models::Track>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

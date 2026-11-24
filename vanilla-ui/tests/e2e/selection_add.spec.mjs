@@ -24,6 +24,11 @@ function installSelectionMock(page, mockOpts = {}) {
       // No bpm field: a not-yet-analyzed library track.
       { id: "t3", title: "Sel Three", artist: "Artist", album: "Album", filePath: "/music/three.mp3" }
     ];
+    // `listed`: a file in the source folder the library doesn't hold yet --
+    // its row's id is its path, as the backend lists it.
+    if (opts.listed) {
+      tracks.push({ id: "/music/four.mp3", title: "Sel Four", artist: "Artist", album: "Album", filePath: "/music/four.mp3" });
+    }
     backend.seed({ tracks });
 
     backend.install(async (command, request, payload) => {
@@ -89,7 +94,10 @@ function installSelectionMock(page, mockOpts = {}) {
       }
       if (command === "analyze_new_tracks") {
         const ids = payload?.request?.trackIds || [];
-        return { ok: true, data: { jobId: "job-mock", queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` } };
+        // A listed file is added to the library first, under a new id.
+        const replaced = ids.filter((id) => id.startsWith("/")).map((id) => ({ previousId: id, trackId: "t4" }));
+        const added = replaced.map((row) => ({ ...tracks.find((t) => t.id === row.previousId), id: row.trackId }));
+        return { ok: true, data: { jobId: "job-mock", queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks`, replaced, tracks: added } };
       }
       // What the selected tracks share: genres differ, the release date is shared.
       if (command === "get_tracks_metadata_summary" || command === "get_usb_tracks_metadata_summary") {
@@ -590,6 +598,30 @@ function installPaginatedLibraryMock(page, { trackCount }) {
     window.__e2eBackend.install();
   }, { trackCount });
 }
+
+// A file the library doesn't hold yet can be picked and reanalyzed: the
+// backend adds it, and its row becomes the library row, still ticked.
+test("Reanalyze on a file not in the library yet swaps in its library row", async ({ page }) => {
+  await installSelectionMock(page, { listed: true });
+  await page.goto("/");
+  const body = page.locator("#libraryTableBody");
+  await expect(body.locator(".track-grid-row")).toHaveCount(4);
+  const listed = body.locator('.track-grid-row[data-track-id="/music/four.mp3"]');
+  await listed.locator(".td-select input").check();
+  const bar = page.locator(libraryBar);
+  await expect(bar.locator(".selection-count")).toHaveText("1 selected");
+
+  await bar.locator('[data-selection-action="reanalyze"]').click();
+  await expect.poll(async () => (await page.evaluate(() => window.__calls))
+    .find((c) => c.command === "analyze_new_tracks")?.request)
+    .toMatchObject({ trackIds: ["/music/four.mp3"], reanalyze: true });
+  const added = body.locator('.track-grid-row[data-track-id="t4"]');
+  await expect(added).toHaveCount(1);
+  await expect(added).toContainText("Sel Four");
+  await expect(listed).toHaveCount(0);
+  await expect(added.locator(".td-select input")).toBeChecked();
+  await expect(bar.locator(".selection-count")).toHaveText("1 selected");
+});
 
 test("select all loads and adds every matching track across multiple pages, not just the first page", async ({ page }) => {
   const trackCount = 220; // over one page (150) -- forces a second page

@@ -619,7 +619,10 @@ for when the UI disables reordering. `fetch_usb_playlists`, `run_usb_diagnostics
 have to re-derive that lock condition from raw USB-scan/export-setting state.
 
 `analyze_new_tracks` adds to the analysis job and returns at once: `jobId`, `queued`, `skipped` and
-the status line's `message`. The job's events carry the rest, including each track's saved row and,
+the status line's `message`. A picked `trackIds` entry that is a file the library doesn't hold yet
+(a listed row, its id its path) is added to the library first, as `transcode_tracks` does:
+`replaced` (`[{ previousId, trackId }]`) and `tracks` (those library rows) tell the window which
+rows to swap. Picked ids that resolve to nothing analyze nothing. The job's events carry the rest, including each track's saved row and,
 on `job.completed`, the final `message` and, when the job logged warnings, `warningText`. Rows waiting
 their turn come on `job.tracks_waiting` (`waitingTrackIds`, `waitingTooltip`) and leave on the
 track's first progress event, or on `job.tracks_not_waiting` after a cancel.

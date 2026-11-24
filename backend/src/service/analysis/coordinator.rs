@@ -427,11 +427,39 @@ impl Coordinator {
             listener,
         });
 
-        let reanalyze = request.reanalyze && !request.track_ids.is_empty();
+        // Picked rows may be files the library doesn't hold yet (`id ==
+        // file_path`): they are added first, as Convert… does, and the
+        // window swaps their rows (`replaced`). Picked ids that resolve to
+        // nothing select nothing, never the whole library.
+        let explicit = !request.track_ids.is_empty();
+        let mut replaced = Vec::new();
+        let track_ids = if explicit {
+            self.service
+                .index_listed_track_ids(&self.conn, &request.track_ids, &mut replaced)?
+        } else {
+            Vec::new()
+        };
+        let selected = if explicit && track_ids.is_empty() {
+            Vec::new()
+        } else {
+            let request = AnalyzeNewTracksRequest {
+                track_ids,
+                ..request.clone()
+            };
+            select_tracks(&self.service, &self.conn, &request)?
+        };
+        let replaced_tracks = if replaced.is_empty() {
+            Vec::new()
+        } else {
+            let ids: Vec<String> = replaced.iter().map(|row| row.track_id.clone()).collect();
+            crate::service::track_rows(&self.conn, &ids)?
+        };
+
+        let reanalyze = request.reanalyze && explicit;
         let mut new_ids = HashSet::new();
         let mut new_tracks = Vec::new();
         let mut skipped_ids = Vec::new();
-        for mut track in select_tracks(&self.service, &self.conn, &request)? {
+        for mut track in selected {
             if self.active.contains(&track.id) {
                 skipped_ids.push(track.id);
             } else if new_ids.insert(track.id.clone()) {
@@ -508,6 +536,8 @@ impl Coordinator {
                 queued: queued_ids.len(),
                 skipped: skipped_ids.len(),
                 message,
+                replaced,
+                tracks: replaced_tracks,
             },
             queued_ids,
             skipped_ids,
@@ -1019,6 +1049,108 @@ mod tests {
             "{:?}",
             data.warnings
         );
+    }
+
+    // The selection bar's Reanalyze on a row the library doesn't hold yet (a
+    // file in a source folder, its id its path) adds it and analyzes it,
+    // instead of finding no eligible tracks; ids that resolve to nothing
+    // select nothing, not the whole library.
+    #[test]
+    fn reanalyze_adds_a_listed_file_and_names_its_row_as_replaced() {
+        let dir = tempdir().expect("tempdir");
+        let music = dir.path().join("music");
+        std::fs::create_dir_all(&music).expect("mkdir music");
+        let service = BackendService::new(dir.path().join("data")).expect("service");
+        service
+            .add_source_folders(crate::models::AddSourceFoldersRequest {
+                paths: vec![music.to_string_lossy().to_string()],
+            })
+            .expect("add source folder");
+        let path = music.join("new.flac");
+        std::fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/audio/formats/track_format_flac.flac"),
+            &path,
+        )
+        .expect("copy fixture");
+        let listed_id = path.to_string_lossy().to_string();
+
+        let nothing = service
+            .submit_analysis(AnalyzeNewTracksRequest {
+                track_ids: vec![dir.path().join("gone.flac").to_string_lossy().to_string()],
+                reanalyze: true,
+                ..Default::default()
+            })
+            .expect("submit");
+        assert_eq!((nothing.queued, nothing.replaced.len()), (0, 0));
+
+        let data = service
+            .analyze_new_tracks_with_progress(
+                AnalyzeNewTracksRequest {
+                    track_ids: vec![listed_id.clone()],
+                    reanalyze: true,
+                    ..Default::default()
+                },
+                |_| {},
+            )
+            .expect("analyze");
+        assert_eq!(data.processed, 1, "{:?}", data.warnings);
+        let conn = service.db.connect().expect("connect");
+        let id: String = conn
+            .query_row(
+                "SELECT id FROM tracks WHERE file_path = ?1",
+                params![listed_id],
+                |row| row.get(0),
+            )
+            .expect("the file is in the library now");
+        assert_ne!(id, listed_id);
+
+        // A second pick of the same row, as the window may still send it,
+        // finds the library row and replaces nothing more.
+        let again = service
+            .submit_analysis(AnalyzeNewTracksRequest {
+                track_ids: vec![id.clone()],
+                reanalyze: true,
+                ..Default::default()
+            })
+            .expect("submit");
+        assert!(again.replaced.is_empty());
+    }
+
+    // What the window gets back names the row it replaces.
+    #[test]
+    fn submitting_a_listed_file_returns_its_library_row() {
+        let dir = tempdir().expect("tempdir");
+        let music = dir.path().join("music");
+        std::fs::create_dir_all(&music).expect("mkdir music");
+        let service = BackendService::new(dir.path().join("data")).expect("service");
+        service
+            .add_source_folders(crate::models::AddSourceFoldersRequest {
+                paths: vec![music.to_string_lossy().to_string()],
+            })
+            .expect("add source folder");
+        let path = music.join("new.flac");
+        std::fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/audio/formats/track_format_flac.flac"),
+            &path,
+        )
+        .expect("copy fixture");
+        let listed_id = path.to_string_lossy().to_string();
+
+        let submitted = service
+            .submit_analysis(AnalyzeNewTracksRequest {
+                track_ids: vec![listed_id.clone()],
+                reanalyze: true,
+                ..Default::default()
+            })
+            .expect("submit");
+        assert_eq!(submitted.queued, 1);
+        assert_eq!(submitted.replaced.len(), 1);
+        assert_eq!(submitted.replaced[0].previous_id, listed_id);
+        assert_eq!(submitted.tracks.len(), 1);
+        assert_eq!(submitted.tracks[0].id, submitted.replaced[0].track_id);
+        service.cancel_analysis().expect("cancel");
     }
 
     #[test]
