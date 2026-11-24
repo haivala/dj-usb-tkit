@@ -83,6 +83,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         label: tr::migration_mp3_seek,
         run: fill_cached_mp3_seek_indexes,
     },
+    Migration {
+        id: "0.6.7-long-track-waveforms",
+        phase: Phase::Startup,
+        label: tr::migration_long_track_waveforms,
+        run: drop_long_track_waveforms,
+    },
 ];
 
 impl BackendService {
@@ -361,6 +367,107 @@ fn fill_cached_mp3_seek_indexes(
     })
 }
 
+/// The mono samples analysis decoded before 0.6.7, waveform included. Fixed
+/// here: it says which waveforms that version cut, whatever the analysis cap
+/// (`BPM_KEY_MAX_SAMPLES`) becomes.
+const DECODE_CAP_BEFORE_0_6_7: i64 = 24_000_000;
+
+/// Whether analysis before 0.6.7 decoded only part of audio this long:
+/// `duration_ms` at `sample_rate_hz` (48 kHz when unknown, the lower length)
+/// reaches the decode cap, about 9 minutes at 44.1 kHz.
+fn reached_decode_cap(duration_ms: i64, sample_rate_hz: Option<i64>) -> bool {
+    let rate = sample_rate_hz.filter(|rate| *rate > 0).unwrap_or(48_000);
+    duration_ms > 0 && duration_ms.saturating_mul(rate) / 1000 >= DECODE_CAP_BEFORE_0_6_7
+}
+
+/// `0.6.7-long-track-waveforms`: analysis before 0.6.7 drew a track longer
+/// than its decode cap as the first part of its audio stretched over its
+/// whole length (docs/WAVEFORMS.md "Decode Bounds"). Such a track's cached
+/// bundle is deleted and the track marked for analysis, which draws it again
+/// whole; its BPM, key, cues and edits stay. A transcode that long loses its
+/// waveform bundle, which export draws again when it needs it. Bundles from
+/// rekordbox or a USB are not the app's and stay.
+fn drop_long_track_waveforms(
+    svc: &BackendService,
+    _: &mut dyn crate::progress::ProgressFn,
+) -> BackendResult<Outcome> {
+    let data_dir = svc.db.data_dir();
+    let waveform_dir = data_dir.join("analysis").join("waveforms");
+    let conn = svc.db.connect()?;
+    let tracks: Vec<(String, std::path::PathBuf)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, waveform_peaks_path, duration_ms, sample_rate_hz FROM tracks
+             WHERE waveform_peaks_path IS NOT NULL AND waveform_peaks_path != ''
+               AND duration_ms > 0",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+            ))
+        })?;
+        rows.filter_map(Result::ok)
+            .filter(|(_, _, duration_ms, rate)| reached_decode_cap(*duration_ms, *rate))
+            .filter_map(|(id, dat, _, _)| {
+                let dat =
+                    super::local_cache_bundle_dat(&waveform_dir, std::path::Path::new(dat.trim()))?;
+                Some((id, dat))
+            })
+            .collect()
+    };
+    for (id, dat) in &tracks {
+        conn.execute(
+            "UPDATE tracks SET waveform_peaks_path = NULL WHERE id = ?1",
+            params![id],
+        )?;
+        let still_used: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tracks WHERE waveform_peaks_path = ?1)",
+            params![dat.to_string_lossy()],
+            |row| row.get(0),
+        )?;
+        if !still_used {
+            super::remove_bundle_files(dat);
+        }
+    }
+
+    let transcodes: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT file_path, duration_ms, sample_rate_hz FROM track_transcodes
+             WHERE duration_ms > 0",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
+        })?;
+        rows.filter_map(Result::ok)
+            .filter(|(_, duration_ms, rate)| reached_decode_cap(*duration_ms, *rate))
+            .map(|(path, _, _)| path)
+            .collect()
+    };
+    for path in &transcodes {
+        let dir = super::transcode::transcode_bundle_dir(&data_dir, std::path::Path::new(path));
+        let bundle = super::transcode::transcode_waveform_bundle(&dir);
+        for file in [&bundle.dat_path, &bundle.ext_path, &bundle.twoex_path] {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+
+    crate::logging::debug(
+        "migrations",
+        format!(
+            "marked {} longer than the decode cap for analysis; dropped the waveforms of {}",
+            counted(tracks.len(), "track", "tracks"),
+            counted(transcodes.len(), "transcode", "transcodes")
+        ),
+    );
+    Ok(Outcome::Done)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,5 +617,127 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), MIGRATIONS.len());
+    }
+
+    // Before 0.6.7, analysis drew a track longer than its decode cap as its
+    // first part stretched: those cached bundles go and the tracks need
+    // analysis again; shorter tracks, other apps' bundles and tracks with no
+    // known length stay. Long transcodes lose their waveform bundle.
+    #[test]
+    fn long_track_waveforms_are_dropped_and_their_tracks_need_analysis() {
+        let (dir, svc) = service();
+        let cache = dir.path().join("analysis").join("waveforms");
+        std::fs::create_dir_all(&cache).unwrap();
+        let foreign = dir.path().join("rekordbox");
+        std::fs::create_dir_all(&foreign).unwrap();
+        let bundle = |dir: &std::path::Path, stem: &str| {
+            for ext in ["DAT", "EXT", "2EX"] {
+                std::fs::write(dir.join(format!("{stem}.{ext}")), b"x").unwrap();
+            }
+            dir.join(format!("{stem}.DAT"))
+        };
+        // (id, bundle, duration_ms, sample rate, dropped)
+        let cases = [
+            (
+                "long44",
+                bundle(&cache, "LONG44"),
+                Some(545_000),
+                Some(44_100),
+                true,
+            ),
+            (
+                "short44",
+                bundle(&cache, "SHORT44"),
+                Some(540_000),
+                Some(44_100),
+                false,
+            ),
+            (
+                "long48",
+                bundle(&cache, "LONG48"),
+                Some(510_000),
+                Some(48_000),
+                true,
+            ),
+            (
+                "unknown_rate",
+                bundle(&cache, "NORATE"),
+                Some(505_000),
+                None,
+                true,
+            ),
+            (
+                "foreign",
+                bundle(&foreign, "FOREIGN"),
+                Some(900_000),
+                Some(44_100),
+                false,
+            ),
+            (
+                "no_length",
+                bundle(&cache, "NOLEN"),
+                None,
+                Some(44_100),
+                false,
+            ),
+        ];
+        let conn = svc.db.connect().unwrap();
+        for (id, dat, duration_ms, rate, _) in &cases {
+            conn.execute(
+                "INSERT INTO tracks (id, title, artist, file_path, bpm, duration_ms,
+                   sample_rate_hz, waveform_peaks_path, created_at, updated_at)
+                 VALUES (?1, ?1, 'A', ?2, 120.0, ?3, ?4, ?5, '1', '1')",
+                params![
+                    id,
+                    format!("/music/{id}.flac"),
+                    duration_ms,
+                    rate,
+                    dat.to_string_lossy()
+                ],
+            )
+            .unwrap();
+        }
+        let transcode_bundle = |path: &str, duration_ms: i64| {
+            conn.execute(
+                "INSERT INTO track_transcodes (track_id, format, file_path, file_size_bytes,
+                   sample_rate_hz, duration_ms, created_at)
+                 VALUES ('long44', ?1, ?1, 1, 44100, ?2, '1')",
+                params![path, duration_ms],
+            )
+            .unwrap();
+            let dir = super::super::transcode::transcode_bundle_dir(
+                dir.path(),
+                std::path::Path::new(path),
+            );
+            std::fs::create_dir_all(&dir).unwrap();
+            super::super::transcode::transcode_waveform_bundle(&dir)
+        };
+        let long_transcode = transcode_bundle("/t/long.aiff", 600_000);
+        let short_transcode = transcode_bundle("/t/short.aiff", 300_000);
+        for b in [&long_transcode, &short_transcode] {
+            std::fs::write(&b.dat_path, b"x").unwrap();
+            std::fs::write(&b.ext_path, b"x").unwrap();
+        }
+
+        assert_eq!(
+            drop_long_track_waveforms(&svc, &mut |_, _, _| {}).unwrap(),
+            Outcome::Done
+        );
+
+        for (id, dat, _, _, dropped) in &cases {
+            let path: Option<String> = conn
+                .query_row(
+                    "SELECT waveform_peaks_path FROM tracks WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(path.is_none(), *dropped, "{id}");
+            for ext in ["DAT", "EXT", "2EX"] {
+                assert_eq!(!dat.with_extension(ext).exists(), *dropped, "{id} {ext}");
+            }
+        }
+        assert!(!long_transcode.dat_path.exists() && !long_transcode.ext_path.exists());
+        assert!(short_transcode.dat_path.exists() && short_transcode.ext_path.exists());
     }
 }

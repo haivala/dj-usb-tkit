@@ -137,6 +137,13 @@ stay in `db.rs` `migrate()` and are versioned by `schema_version`.
 - **Startup** migrations are quick and run at the end of `BackendService::new`, before
   the UI reads anything. Moving USB devices out of the old settings keys, filling
   `match_fingerprint` and merging duplicate USB placeholder tracks are of this kind.
+  So is `0.6.7-long-track-waveforms`: analysis before 0.6.7 drew a track longer than
+  its decode cap (24,000,000 samples, about 9 minutes at 44.1 kHz; 48 kHz assumed when
+  the rate is unknown) as its first part stretched over its whole length
+  (`docs/WAVEFORMS.md`, "Decode Bounds"). Its cached bundle in `analysis/waveforms` is
+  deleted and `waveform_peaks_path` cleared, so the track needs analysis again; BPM,
+  key, cues and edits stay. A transcode that long loses its waveform bundle, which
+  export draws again. Bundles from rekordbox or a USB aren't the app's and stay.
 - **Background** migrations run through the `run_data_migrations` command. The frontend
   calls it once after the initial load, and it shows in the footer progress bar as a
   `migration` job. With nothing pending it returns at once and emits no job events. While

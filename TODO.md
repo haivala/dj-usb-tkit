@@ -118,6 +118,21 @@ Open points:
   sessions, deciding what it writes for a row without a track id; the
   playlist tree and entry rows are already one type.
 
+## Gap: stretched waveforms of long tracks stay on USBs
+
+Analysis before 0.6.7 drew a track longer than its decode cap (about 9 minutes
+at 44.1 kHz) as its first part stretched over its whole length. The
+`0.6.7-long-track-waveforms` migration clears those from the local cache, so
+the tracks are analyzed again, but a USB that already holds such a track keeps
+its stretched waveform: export reuses the bundle on the stick
+(`existing_analysis_by_path` in `backend/src/service/export.rs`) and only
+re-applies cues and the beat grid. Seen on "Horse On Wheels" on CHIPHEAD32.
+
+Options: export replaces the waveform tags of a reused bundle from the local
+cache when they differ, or a diagnostics check finds bundles whose waveform
+doesn't match the local one. Either way the CDJ's own writes to that bundle
+(cues, `PVB2`) must survive.
+
 ## Possibility: copy cues added on a CDJ back to the library
 
 Cues added on a CDJ don't reach a library track that already has cues:

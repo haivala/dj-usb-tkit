@@ -1130,6 +1130,7 @@ migration-fingerprints = Calcul des empreintes des morceaux
 migration-merge-usb-tracks = Fusion des morceaux USB en double
 migration-beat-grids = Mise à niveau des beatgrids en cache
 migration-mp3-seek = Ajout des données de recherche MP3
+migration-long-track-waveforms = Nouveau tracé des formes d’onde des longs morceaux
 
 migration-warning-failed = Échec de { $migration } ({ $error }) ; nouvelle tentative au prochain lancement
 migration-warning-startup-failed = Échec des mises à niveau de données au démarrage ({ $error }) ; nouvelle tentative au prochain lancement

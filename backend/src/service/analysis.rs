@@ -44,7 +44,13 @@ pub(crate) use coordinator::AnalysisCoordinatorHandle;
 pub use coordinator::{AnalysisEvent, AnalysisJobSummary, AnalysisObserver};
 pub use job_events::analysis_event_payload;
 
-pub(super) const ANALYSIS_DECODE_MAX_SAMPLES: usize = 24_000_000;
+/// The mono samples analysis keeps for BPM and key detection: about 9 minutes
+/// at 44.1 kHz. Detection holds them all at once and its working set grows
+/// with their length, so this bounds a worker's memory (see the budgets below)
+/// however long the track. The first 9 minutes are enough for a constant-tempo
+/// grid and the key. The waveform is drawn from the whole file regardless
+/// (`decode_audio_with_waveform`).
+pub(super) const BPM_KEY_MAX_SAMPLES: usize = 24_000_000;
 // Reserved for the OS, the Tauri/WebKit UI process, and other running apps.
 const ANALYSIS_MEMORY_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
 // Extra margin on top of the flat headroom, since per-worker budgets below are estimates.
@@ -56,7 +62,7 @@ const ANALYSIS_MEMORY_USABLE_FRACTION: f64 = 0.75;
 // over a 2,400-track library batch with 14 workers: ~2.4GB/worker once every
 // worker had met its larger tracks, flat from there. Fewer workers than CPU
 // threads cost no throughput there: analysis was disk/memory-bound. A worker parked
-// on an unusually long single track (near the ANALYSIS_DECODE_MAX_SAMPLES cap)
+// on an unusually long single track (near the BPM_KEY_MAX_SAMPLES cap)
 // can still peak closer to ~2.7GB; accepted residual risk for libraries
 // dominated by very long recorded sets/mixes.
 const ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES: u64 = 2560 * 1024 * 1024;
@@ -1015,7 +1021,16 @@ fn analyze_local_track_with_updates(
 
     // A file with no decodable audio track fails here -- it must not be
     // "analyzed" into a waveform drawn from its raw bytes.
-    let (samples, sample_rate) = decode_audio_mono_samples(&path, ANALYSIS_DECODE_MAX_SAMPLES)?;
+    let DecodedAudio {
+        samples,
+        sample_rate,
+        duration_ms,
+        waveform,
+    } = decode_audio_with_waveform(
+        &path,
+        BPM_KEY_MAX_SAMPLES,
+        waveform_detail_bins_for_duration,
+    )?;
     timing.finish_stage("decode");
 
     // Each piece is sent as soon as it is known, in the row's column order:
@@ -1031,18 +1046,9 @@ fn analyze_local_track_with_updates(
     }
     timing.finish_stage("artwork and notification");
 
-    let duration_ms = detect_track_duration_ms(&path)
-        .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate));
     // The waveform's detail entries are a time axis: with no known length
     // there is no waveform, rather than one stretched to a made-up length.
-    let waveform = match duration_ms {
-        Some(duration_ms) => build_waveform_data_from_samples_with_rate(
-            &samples,
-            waveform_detail_bins_for_duration(duration_ms),
-            sample_rate,
-        ),
-        None => WaveformData::empty(),
-    };
+    let waveform = waveform.unwrap_or_else(WaveformData::empty);
     if !waveform.peaks.is_empty() {
         on_update(TrackPartialUpdate {
             waveform_preview: Some(downsample_waveform_peaks(
@@ -1194,17 +1200,17 @@ pub(crate) fn write_waveform_bundle_for_audio(
     audio: &Path,
     paths: &AnlzBundlePaths,
 ) -> BackendResult<()> {
-    let (samples, sample_rate) = decode_audio_mono_samples(audio, ANALYSIS_DECODE_MAX_SAMPLES)?;
-    let duration_ms = detect_track_duration_ms(audio)
-        .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate))
-        .ok_or_else(|| {
-            BackendError::Internal(format!("no audio length for {}", audio.display()))
-        })?;
-    let waveform = build_waveform_data_from_samples_with_rate(
-        &samples,
-        waveform_detail_bins_for_duration(duration_ms),
-        sample_rate,
-    );
+    let decoded = decode_audio_with_waveform(
+        audio,
+        BPM_KEY_MAX_SAMPLES,
+        waveform_detail_bins_for_duration,
+    )?;
+    let (Some(duration_ms), Some(waveform)) = (decoded.duration_ms, decoded.waveform) else {
+        return Err(BackendError::Internal(format!(
+            "no audio length for {}",
+            audio.display()
+        )));
+    };
     if waveform.peaks.is_empty() {
         return Err(BackendError::Internal(format!(
             "no waveform drawn from {}",
@@ -1525,56 +1531,87 @@ pub(crate) fn decode_audio_mono_samples(
     path: &Path,
     max_samples: usize,
 ) -> BackendResult<(Vec<f32>, u32)> {
-    let primary_err = match decode_audio_mono_samples_rodio(path, max_samples) {
-        Ok(result) => return Ok(result),
+    let mut mono = Vec::<f32>::with_capacity(max_samples);
+    let sample_rate = decode_audio_mono_chunks(path, &mut |chunk, _rate| {
+        let room = max_samples.saturating_sub(mono.len());
+        mono.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        mono.len() < max_samples
+    })?;
+    Ok((mono, sample_rate))
+}
+
+/// Decodes `path` to mono, handing each piece to `on_chunk` with the sample
+/// rate, until the audio ends or `on_chunk` returns false. Rodio first, then
+/// Symphonia when rodio can't read the file. Returns the sample rate.
+pub(crate) fn decode_audio_mono_chunks(
+    path: &Path,
+    on_chunk: &mut dyn FnMut(&[f32], u32) -> bool,
+) -> BackendResult<u32> {
+    let primary_err = match decode_audio_mono_chunks_rodio(path, on_chunk) {
+        Ok(rate) => return Ok(rate),
         Err(err) => err,
     };
 
-    match decode_audio_mono_samples_symphonia(path, max_samples) {
-        Ok(result) => Ok(result),
+    match decode_audio_mono_chunks_symphonia(path, on_chunk) {
+        Ok(rate) => Ok(rate),
         Err(fallback_err) => Err(BackendError::Internal(format!(
             "decoder error (rodio: {primary_err}; symphonia: {fallback_err})"
         ))),
     }
 }
 
-fn decode_audio_mono_samples_rodio(
+/// Frames handed to `on_chunk` at a time by the rodio decoder.
+const DECODE_CHUNK_FRAMES: usize = 16_384;
+
+fn decode_audio_mono_chunks_rodio(
     path: &Path,
-    max_samples: usize,
-) -> Result<(Vec<f32>, u32), String> {
+    on_chunk: &mut dyn FnMut(&[f32], u32) -> bool,
+) -> Result<u32, String> {
     let file = File::open(path).map_err(|err| err.to_string())?;
     let decoder = Decoder::new(BufReader::new(file)).map_err(|err| format!("{err}"))?;
     let sample_rate = decoder.sample_rate().max(1);
     let channels = decoder.channels().max(1) as usize;
 
-    let mut mono = Vec::<f32>::with_capacity(max_samples);
+    let mut chunk = Vec::<f32>::with_capacity(DECODE_CHUNK_FRAMES);
+    let mut produced = false;
     let mut acc = 0.0f32;
     let mut in_frame = 0usize;
     let inv_channels = 1.0f32 / channels as f32;
     // rodio Decoder yields i16 samples (-32768..32767); normalise to -1.0..1.0.
     let scale = 1.0 / i16::MAX as f32;
-    for sample in decoder.take(max_samples.saturating_mul(channels)) {
+    for sample in decoder {
         acc += sample as f32 * scale;
         in_frame += 1;
         if in_frame == channels {
-            mono.push(acc * inv_channels);
+            chunk.push(acc * inv_channels);
             acc = 0.0;
             in_frame = 0;
+            if chunk.len() == DECODE_CHUNK_FRAMES {
+                produced = true;
+                if !on_chunk(&chunk, sample_rate) {
+                    return Ok(sample_rate);
+                }
+                chunk.clear();
+            }
         }
     }
     if in_frame > 0 {
-        mono.push(acc / in_frame as f32);
+        chunk.push(acc / in_frame as f32);
     }
-    if mono.is_empty() {
+    if !chunk.is_empty() {
+        produced = true;
+        on_chunk(&chunk, sample_rate);
+    }
+    if !produced {
         return Err("decoder produced no samples".to_string());
     }
-    Ok((mono, sample_rate))
+    Ok(sample_rate)
 }
 
-fn decode_audio_mono_samples_symphonia(
+fn decode_audio_mono_chunks_symphonia(
     path: &Path,
-    max_samples: usize,
-) -> Result<(Vec<f32>, u32), String> {
+    on_chunk: &mut dyn FnMut(&[f32], u32) -> bool,
+) -> Result<u32, String> {
     let source =
         crate::symphonia_decoder::open_media_source(path).map_err(|err| err.to_string())?;
     let mut hint = Hint::new();
@@ -1598,7 +1635,8 @@ fn decode_audio_mono_samples_symphonia(
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|err| err.to_string())?;
 
-    let mut mono = Vec::<f32>::with_capacity(max_samples);
+    let mut chunk = Vec::<f32>::new();
+    let mut produced = false;
     let mut sample_rate = track.codec_params.sample_rate.unwrap_or(44_100).max(1);
     let mut sample_buffer: Option<SampleBuffer<f32>> = None;
     let mut buffer_spec: Option<(u32, usize)> = None;
@@ -1648,23 +1686,27 @@ fn decode_audio_mono_samples_symphonia(
         sample_buffer_ref.copy_interleaved_ref(decoded);
         let inv_channels = 1.0f32 / channels as f32;
 
-        for frame in sample_buffer_ref.samples().chunks(channels) {
-            let avg = frame.iter().copied().sum::<f32>() * inv_channels;
-            mono.push(avg);
-            if mono.len() >= max_samples {
-                break;
-            }
+        chunk.clear();
+        chunk.extend(
+            sample_buffer_ref
+                .samples()
+                .chunks(channels)
+                .map(|frame| frame.iter().copied().sum::<f32>() * inv_channels),
+        );
+        if chunk.is_empty() {
+            continue;
         }
-        if mono.len() >= max_samples {
+        produced = true;
+        if !on_chunk(&chunk, sample_rate) {
             break;
         }
     }
 
-    if mono.is_empty() {
+    if !produced {
         return Err("decoder produced no samples".to_string());
     }
 
-    Ok((mono, sample_rate))
+    Ok(sample_rate)
 }
 
 pub(crate) fn discover_cover_art_path(audio_path: &Path) -> Option<PathBuf> {
@@ -1702,18 +1744,72 @@ pub(crate) fn build_waveform_preview_from_audio(
     if bins == 0 {
         return Ok(WaveformData::empty());
     }
-    let (samples, sample_rate) = decode_audio_mono_samples(path, max_samples)?;
-    if samples.is_empty() {
+    let decoded = decode_audio_with_waveform(path, max_samples, |_| bins)?;
+    if decoded.samples.is_empty() {
         return Err(BackendError::Internal(format!(
             "no audio samples decoded from {}",
             path.display()
         )));
     }
-    Ok(build_waveform_data_from_samples_with_rate(
-        &samples,
-        bins,
+    Ok(decoded
+        .waveform
+        .unwrap_or_else(|| waveform_from_samples(&decoded.samples, bins, decoded.sample_rate)))
+}
+
+/// One decode of `path`: what analysis needs from its audio.
+pub(crate) struct DecodedAudio {
+    /// The first `max_samples` mono samples, for BPM and key.
+    pub(crate) samples: Vec<f32>,
+    pub(crate) sample_rate: u32,
+    /// From the file's metadata, else from the decoded samples.
+    pub(crate) duration_ms: Option<u64>,
+    /// `bins_for(duration_ms)` bins over the track's length; `None` with no
+    /// known length.
+    pub(crate) waveform: Option<WaveformData>,
+}
+
+/// Decodes `path` once, keeping its first `max_samples` mono samples and
+/// drawing its waveform from all of its audio as it goes, each bin over its
+/// own stretch of the track's length, so a track longer than the cap isn't
+/// drawn as its first part stretched. With no length in the metadata, the
+/// decode stops at the cap and the waveform is drawn over what it kept.
+pub(crate) fn decode_audio_with_waveform(
+    path: &Path,
+    max_samples: usize,
+    bins_for: impl Fn(u64) -> usize,
+) -> BackendResult<DecodedAudio> {
+    let Some(duration_ms) = detect_track_duration_ms(path) else {
+        let (samples, sample_rate) = decode_audio_mono_samples(path, max_samples)?;
+        let duration_ms = duration_ms_from_decoded(samples.len(), sample_rate);
+        let waveform = duration_ms
+            .map(|duration_ms| waveform_from_samples(&samples, bins_for(duration_ms), sample_rate));
+        return Ok(DecodedAudio {
+            samples,
+            sample_rate,
+            duration_ms,
+            waveform,
+        });
+    };
+    let bins = bins_for(duration_ms);
+    let mut samples = Vec::<f32>::new();
+    let mut waveform: Option<WaveformAccumulator> = None;
+    let sample_rate = decode_audio_mono_chunks(path, &mut |chunk, rate| {
+        let room = max_samples.saturating_sub(samples.len());
+        samples.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        waveform
+            .get_or_insert_with(|| {
+                let total = duration_ms.saturating_mul(u64::from(rate)) / 1000;
+                WaveformAccumulator::new(bins, total as usize, rate)
+            })
+            .push(chunk);
+        true
+    })?;
+    Ok(DecodedAudio {
+        samples,
         sample_rate,
-    ))
+        duration_ms: Some(duration_ms),
+        waveform: waveform.map(WaveformAccumulator::finish),
+    })
 }
 
 #[cfg(test)]
@@ -1759,19 +1855,16 @@ pub(crate) fn build_waveform_preview_from_samples(samples: &[f32], bins: usize) 
         .collect::<Vec<u8>>()
 }
 
-/// Build waveform data with both amplitude peaks (0-100) and frequency bands (0-5) per bin.
+/// The waveform of `samples`, all of a track's audio: `bins` bins over their
+/// whole length, with amplitude peaks (0-100), 3-band energies and a
+/// frequency band (0-5) per bin.
 ///
 /// Frequency band is determined by zero-crossing rate (ZCR) within each bin:
 ///   0 = sub-bass, 1 = bass, 2 = low-mid, 3 = mid, 4 = high-mid, 5 = treble
 ///
 /// This matches the External library PWAV encoding where high 3 bits encode the dominant
 /// frequency band and low 5 bits encode amplitude.
-#[cfg(test)]
-pub(crate) fn build_waveform_data_from_samples(samples: &[f32], bins: usize) -> WaveformData {
-    build_waveform_data_from_samples_with_rate(samples, bins, 44100)
-}
-
-pub(crate) fn build_waveform_data_from_samples_with_rate(
+pub(crate) fn waveform_from_samples(
     samples: &[f32],
     bins: usize,
     sample_rate: u32,
@@ -1779,64 +1872,198 @@ pub(crate) fn build_waveform_data_from_samples_with_rate(
     if bins == 0 || samples.is_empty() {
         return WaveformData::empty();
     }
+    let mut waveform = WaveformAccumulator::new(bins, samples.len(), sample_rate);
+    waveform.push(samples);
+    waveform.finish()
+}
 
-    // Pre-filter the entire signal into 3 bands using 2nd-order Butterworth IIR filters.
-    // Crossover frequencies: low < 350Hz, mid 350-1000Hz, high > 1000Hz.
-    // Tuned to match reference-export energy distribution (see docs/WAVEFORMS.md).
-    let sr = sample_rate as f64;
-    let (low_filtered, mid_filtered, high_filtered) = three_band_split(samples, sr, 350.0, 1000.0);
+/// A 2nd-order Butterworth section (biquad, direct form II transposed), fed a
+/// sample at a time.
+struct Biquad {
+    b0: f64,
+    b1: f64,
+    b2: f64,
+    a1: f64,
+    a2: f64,
+    z1: f64,
+    z2: f64,
+}
 
-    let n = samples.len();
-    let mut raw_peak_levels = Vec::<f32>::with_capacity(bins);
-    let mut zcr_values = Vec::<f32>::with_capacity(bins);
-    let mut raw_low = Vec::<f32>::with_capacity(bins);
-    let mut raw_mid = Vec::<f32>::with_capacity(bins);
-    let mut raw_high = Vec::<f32>::with_capacity(bins);
-    let mut max_sample_peak = 0.0f32;
-
-    for i in 0..bins {
-        let start = i * n / bins;
-        let end = ((i + 1) * n / bins).max(start + 1).min(n);
-        let slice = &samples[start..end];
-
-        // Amplitude: same weighted peak+RMS as build_waveform_preview_from_samples
-        let mut local_peak = 0.0f32;
-        for &v in slice {
-            let a = v.abs();
-            if a > local_peak {
-                local_peak = a;
-            }
+impl Biquad {
+    fn new((b0, b1, b2, a1, a2): (f64, f64, f64, f64, f64)) -> Self {
+        Self {
+            b0,
+            b1,
+            b2,
+            a1,
+            a2,
+            z1: 0.0,
+            z2: 0.0,
         }
-        if local_peak > max_sample_peak {
-            max_sample_peak = local_peak;
-        }
-        raw_peak_levels.push(local_peak);
-
-        // 3-band RMS energy per bin from filtered audio.
-        let low_rms = rms_of_slice(&low_filtered[start..end]);
-        let mid_rms = rms_of_slice(&mid_filtered[start..end]);
-        let high_rms = rms_of_slice(&high_filtered[start..end]);
-        raw_low.push(low_rms);
-        raw_mid.push(mid_rms);
-        raw_high.push(high_rms);
-
-        // Zero-crossing rate: count sign changes normalized to 0.0..1.0
-        let mut crossings = 0u32;
-        if slice.len() > 1 {
-            for w in slice.windows(2) {
-                if (w[0] >= 0.0) != (w[1] >= 0.0) {
-                    crossings += 1;
-                }
-            }
-        }
-        let zcr = if slice.len() > 1 {
-            crossings as f32 / (slice.len() - 1) as f32
-        } else {
-            0.0
-        };
-        zcr_values.push(zcr);
     }
 
+    fn step(&mut self, s: f32) -> f32 {
+        let x = s as f64;
+        let y = self.b0 * x + self.z1;
+        self.z1 = self.b1 * x - self.a1 * y + self.z2;
+        self.z2 = self.b2 * x - self.a2 * y;
+        y as f32
+    }
+}
+
+/// A waveform built from audio fed in chunks, so a track is never held whole.
+/// `total` is the audio's length in samples, known up front (from the track's
+/// length), so each bin covers its own stretch of time: samples past it are
+/// left out, bins the audio doesn't reach stay silent.
+pub(crate) struct WaveformAccumulator {
+    bins: usize,
+    total: usize,
+    pos: usize,
+    bin_end: usize,
+    low_filter: Biquad,
+    high_filter: Biquad,
+    peak: f32,
+    sum_low: f32,
+    sum_mid: f32,
+    sum_high: f32,
+    len: usize,
+    crossings: u32,
+    prev: Option<f32>,
+    levels: BinLevels,
+}
+
+impl WaveformAccumulator {
+    pub(crate) fn new(bins: usize, total: usize, sample_rate: u32) -> Self {
+        let sr = f64::from(sample_rate.max(1));
+        Self {
+            bins,
+            total,
+            pos: 0,
+            bin_end: Self::end_of(0, bins, total),
+            low_filter: Biquad::new(biquad_lowpass_coeffs(sr, 350.0)),
+            high_filter: Biquad::new(biquad_highpass_coeffs(sr, 1000.0)),
+            peak: 0.0,
+            sum_low: 0.0,
+            sum_mid: 0.0,
+            sum_high: 0.0,
+            len: 0,
+            crossings: 0,
+            prev: None,
+            levels: BinLevels {
+                peak: Vec::with_capacity(bins),
+                low: Vec::with_capacity(bins),
+                mid: Vec::with_capacity(bins),
+                high: Vec::with_capacity(bins),
+                zcr: Vec::with_capacity(bins),
+                max_peak: 0.0,
+            },
+        }
+    }
+
+    fn end_of(bin: usize, bins: usize, total: usize) -> usize {
+        if bins == 0 {
+            0
+        } else {
+            (bin + 1) * total / bins
+        }
+    }
+
+    pub(crate) fn push(&mut self, samples: &[f32]) {
+        for &v in samples {
+            if self.pos >= self.total || self.levels.peak.len() >= self.bins {
+                return;
+            }
+            // 3 bands from 2nd-order Butterworth filters over every sample:
+            // low < 350 Hz, high > 1000 Hz, mid what is left. Tuned to match
+            // reference-export energy distribution (see docs/WAVEFORMS.md).
+            let low = self.low_filter.step(v);
+            let high = self.high_filter.step(v);
+            let mid = v - low - high;
+            let a = v.abs();
+            if a > self.peak {
+                self.peak = a;
+            }
+            self.sum_low += low * low;
+            self.sum_mid += mid * mid;
+            self.sum_high += high * high;
+            if let Some(prev) = self.prev
+                && (prev >= 0.0) != (v >= 0.0)
+            {
+                self.crossings += 1;
+            }
+            self.prev = Some(v);
+            self.len += 1;
+            self.pos += 1;
+            if self.pos >= self.bin_end {
+                self.close_bin();
+            }
+        }
+    }
+
+    fn close_bin(&mut self) {
+        let len = self.len.max(1) as f32;
+        let levels = &mut self.levels;
+        levels.peak.push(self.peak);
+        levels.max_peak = levels.max_peak.max(self.peak);
+        levels.low.push((self.sum_low / len).sqrt());
+        levels.mid.push((self.sum_mid / len).sqrt());
+        levels.high.push((self.sum_high / len).sqrt());
+        levels.zcr.push(if self.len > 1 {
+            self.crossings as f32 / (self.len - 1) as f32
+        } else {
+            0.0
+        });
+        self.peak = 0.0;
+        (self.sum_low, self.sum_mid, self.sum_high) = (0.0, 0.0, 0.0);
+        self.len = 0;
+        self.crossings = 0;
+        self.prev = None;
+        self.bin_end = Self::end_of(levels.peak.len(), self.bins, self.total);
+    }
+
+    pub(crate) fn finish(mut self) -> WaveformData {
+        if self.bins == 0 {
+            return WaveformData::empty();
+        }
+        if self.len > 0 {
+            self.close_bin();
+        }
+        let levels = &mut self.levels;
+        for list in [
+            &mut levels.peak,
+            &mut levels.low,
+            &mut levels.mid,
+            &mut levels.high,
+            &mut levels.zcr,
+        ] {
+            list.resize(self.bins, 0.0);
+        }
+        waveform_from_bin_levels(self.levels)
+    }
+}
+
+/// Per-bin raw levels of a waveform, before they are scaled to bytes.
+struct BinLevels {
+    peak: Vec<f32>,
+    low: Vec<f32>,
+    mid: Vec<f32>,
+    high: Vec<f32>,
+    zcr: Vec<f32>,
+    max_peak: f32,
+}
+
+/// Scales per-bin levels to the stored waveform: one shared scale per track,
+/// so it needs every bin's levels first.
+fn waveform_from_bin_levels(levels: BinLevels) -> WaveformData {
+    let BinLevels {
+        peak: raw_peak_levels,
+        low: raw_low,
+        mid: raw_mid,
+        high: raw_high,
+        zcr: zcr_values,
+        max_peak: max_sample_peak,
+    } = levels;
+    let bins = raw_peak_levels.len();
     if max_sample_peak <= f32::EPSILON {
         return WaveformData {
             peaks: vec![0; bins],
@@ -1932,14 +2159,6 @@ pub(crate) fn build_waveform_data_from_samples_with_rate(
     }
 }
 
-fn rms_of_slice(slice: &[f32]) -> f32 {
-    if slice.is_empty() {
-        return 0.0;
-    }
-    let sum_sq: f32 = slice.iter().map(|&v| v * v).sum();
-    (sum_sq / slice.len() as f32).sqrt()
-}
-
 fn percentile(values: &[f32], q: f32) -> f32 {
     if values.is_empty() {
         return 0.0;
@@ -1949,46 +2168,6 @@ fn percentile(values: &[f32], q: f32) -> f32 {
     let qq = q.clamp(0.0, 1.0);
     let idx = ((sorted.len().saturating_sub(1)) as f32 * qq).round() as usize;
     sorted[idx.min(sorted.len().saturating_sub(1))]
-}
-
-/// Split audio samples into 3 frequency bands using cascaded 2nd-order Butterworth filters.
-///
-/// Returns (low, mid, high) where:
-///   low  = frequencies below `low_cutoff` Hz
-///   mid  = frequencies between `low_cutoff` and `high_cutoff` Hz
-///   high = frequencies above `high_cutoff` Hz
-fn three_band_split(
-    samples: &[f32],
-    sample_rate: f64,
-    low_cutoff: f64,
-    high_cutoff: f64,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let n = samples.len();
-
-    // Low-pass at low_cutoff → gives us the low band
-    let low_band = biquad_lowpass_filter(samples, sample_rate, low_cutoff);
-
-    // High-pass at high_cutoff → gives us the high band
-    let high_band = biquad_highpass_filter(samples, sample_rate, high_cutoff);
-
-    // Mid = original - low - high
-    let mid_band: Vec<f32> = (0..n)
-        .map(|i| samples[i] - low_band[i] - high_band[i])
-        .collect();
-
-    (low_band, mid_band, high_band)
-}
-
-/// 2nd-order Butterworth low-pass filter (biquad, direct form II transposed).
-fn biquad_lowpass_filter(samples: &[f32], sample_rate: f64, cutoff: f64) -> Vec<f32> {
-    let (b0, b1, b2, a1, a2) = biquad_lowpass_coeffs(sample_rate, cutoff);
-    biquad_apply(samples, b0, b1, b2, a1, a2)
-}
-
-/// 2nd-order Butterworth high-pass filter (biquad, direct form II transposed).
-fn biquad_highpass_filter(samples: &[f32], sample_rate: f64, cutoff: f64) -> Vec<f32> {
-    let (b0, b1, b2, a1, a2) = biquad_highpass_coeffs(sample_rate, cutoff);
-    biquad_apply(samples, b0, b1, b2, a1, a2)
 }
 
 /// Compute 2nd-order Butterworth low-pass biquad coefficients.
@@ -2025,39 +2204,20 @@ fn biquad_highpass_coeffs(sample_rate: f64, cutoff: f64) -> (f64, f64, f64, f64,
     (b0, b1, b2, a1, a2)
 }
 
-/// Apply biquad filter (direct form II transposed).
-fn biquad_apply(samples: &[f32], b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) -> Vec<f32> {
-    let n = samples.len();
-    let mut out = Vec::with_capacity(n);
-    let mut z1 = 0.0f64;
-    let mut z2 = 0.0f64;
-
-    for &s in samples {
-        let x = s as f64;
-        let y = b0 * x + z1;
-        z1 = b1 * x - a1 * y + z2;
-        z2 = b2 * x - a2 * y;
-        out.push(y as f32);
-    }
-
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         AnalysisEngine, EssentiaResult, TRACK_ANALYSIS_UPDATE_SQL,
-        build_waveform_data_from_samples, build_waveform_preview_from_audio,
-        build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
-        decode_audio_mono_samples, discover_cover_art_in_dir, discover_cover_art_in_parent,
-        discover_cover_art_path, duration_ms_from_decoded, essentia_result_has_detected_values,
-        first_beat_for_saved_bpm, has_memory_headroom_for_engine, kept_analysis_values,
-        local_analysis_bundle_paths, normalize_essentia_result,
-        persist_library_artwork_thumbnail_from_image, resolve_analysis_bpm_range,
-        resolve_analysis_engine, resolve_analysis_parallelism_budget_with_cap,
-        resolve_memory_worker_cap, resolve_worker_cap_for_engine, strip_appimage_lib_path,
-        waveform_detail_bins_for_duration, waveform_detail_entries_for_duration,
-        waveform_preview_if_persisted,
+        build_waveform_preview_from_audio, build_waveform_preview_from_samples,
+        collect_tracks_for_analysis, combine_worker_caps, decode_audio_mono_samples,
+        discover_cover_art_in_dir, discover_cover_art_in_parent, discover_cover_art_path,
+        duration_ms_from_decoded, essentia_result_has_detected_values, first_beat_for_saved_bpm,
+        has_memory_headroom_for_engine, kept_analysis_values, local_analysis_bundle_paths,
+        normalize_essentia_result, persist_library_artwork_thumbnail_from_image,
+        resolve_analysis_bpm_range, resolve_analysis_engine,
+        resolve_analysis_parallelism_budget_with_cap, resolve_memory_worker_cap,
+        resolve_worker_cap_for_engine, strip_appimage_lib_path, waveform_detail_bins_for_duration,
+        waveform_detail_entries_for_duration, waveform_preview_if_persisted,
     };
     use crate::error::BackendError;
     use crate::service::WAVEFORM_PREVIEW_BINS;
@@ -2723,7 +2883,7 @@ mod tests {
             *sample = (t * 8000.0 * std::f32::consts::TAU).sin() * 0.8;
         }
 
-        let data = build_waveform_data_from_samples(&samples, bins);
+        let data = super::waveform_from_samples(&samples, bins, 44_100);
         assert_eq!(data.peaks.len(), bins);
         assert_eq!(data.bands.len(), bins);
 
@@ -2750,7 +2910,7 @@ mod tests {
         let samples: Vec<f32> = (0..44100)
             .map(|i| (i as f32 / 44100.0 * 440.0 * std::f32::consts::TAU).sin() * 0.5)
             .collect();
-        let data = build_waveform_data_from_samples(&samples, 150);
+        let data = super::waveform_from_samples(&samples, 150, 44_100);
         assert_eq!(data.peaks.len(), 150);
         assert_eq!(data.bands.len(), 150);
         // All bands must be in 0-5
@@ -2759,11 +2919,11 @@ mod tests {
 
     #[test]
     fn waveform_data_empty_input_returns_empty() {
-        let data = build_waveform_data_from_samples(&[], 100);
+        let data = super::waveform_from_samples(&[], 100, 44_100);
         assert!(data.peaks.is_empty());
         assert!(data.bands.is_empty());
 
-        let data = build_waveform_data_from_samples(&[0.5, 0.3], 0);
+        let data = super::waveform_from_samples(&[0.5, 0.3], 0, 44_100);
         assert!(data.peaks.is_empty());
         assert!(data.bands.is_empty());
     }
@@ -3030,5 +3190,109 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let img = image::DynamicImage::new_rgb8(0, 10);
         assert!(persist_library_artwork_thumbnail_from_image(img, dir.path(), "track-1").is_none());
+    }
+
+    // --- waveforms of audio longer than the decode cap ---
+
+    fn waveform_fields(w: &crate::service::anlz::WaveformData) -> Vec<Vec<u8>> {
+        vec![
+            w.peaks.clone(),
+            w.bands.clone(),
+            w.low_energy.clone(),
+            w.mid_energy.clone(),
+            w.high_energy.clone(),
+            w.low_energy_full.clone(),
+            w.mid_energy_full.clone(),
+            w.high_energy_full.clone(),
+        ]
+    }
+
+    #[test]
+    fn waveform_in_chunks_matches_the_waveform_of_all_samples_at_once() {
+        let n = 44_100 * 3 + 17;
+        let samples: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / 44_100.0;
+                (t * 55.0 * std::f32::consts::TAU).sin()
+                    * if (i / 9000) % 2 == 0 { 0.9 } else { 0.1 }
+                    + (t * 3_000.0 * std::f32::consts::TAU).sin() * 0.05
+            })
+            .collect();
+        let bins = 450;
+        let whole = super::waveform_from_samples(&samples, bins, 44_100);
+        let mut acc = super::WaveformAccumulator::new(bins, n, 44_100);
+        let mut rest = &samples[..];
+        let mut size = 1;
+        while !rest.is_empty() {
+            let (head, tail) = rest.split_at(size.min(rest.len()));
+            acc.push(head);
+            rest = tail;
+            size = size * 7 % 5_003 + 1;
+        }
+        let chunked = acc.finish();
+        assert_eq!(waveform_fields(&chunked), waveform_fields(&whole));
+        assert_eq!(chunked.peak_level, whole.peak_level);
+    }
+
+    /// A mono 16-bit WAV of `samples` at `rate`.
+    fn write_mono_wav(path: &std::path::Path, rate: u32, samples: &[f32]) {
+        let data: Vec<u8> = samples
+            .iter()
+            .flat_map(|v| ((v.clamp(-1.0, 1.0) * 32_000.0) as i16).to_le_bytes())
+            .collect();
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * 2).to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&data);
+        std::fs::write(path, out).expect("write wav");
+    }
+
+    // A track longer than the decode cap: silent for 3 s, then loud. Its
+    // waveform keeps the loud part at 3 s instead of stretching the decoded
+    // first second over the whole track (which drew no sound at all).
+    #[test]
+    fn a_track_longer_than_the_decode_cap_keeps_its_time_axis() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("long.wav");
+        let rate = 8_000u32;
+        let samples: Vec<f32> = (0..rate as usize * 4)
+            .map(|i| {
+                if i < rate as usize * 3 {
+                    0.0
+                } else {
+                    (i as f32 / rate as f32 * 60.0 * std::f32::consts::TAU).sin() * 0.8
+                }
+            })
+            .collect();
+        write_mono_wav(&path, rate, &samples);
+
+        let cap = rate as usize; // one second
+        let waveform = build_waveform_preview_from_audio(&path, 40, cap).expect("waveform");
+        assert_eq!(waveform.peaks.len(), 40);
+        assert!(
+            waveform.peaks[..30].iter().all(|&p| p == 0),
+            "{:?}",
+            waveform.peaks
+        );
+        assert!(
+            waveform.peaks[30..].iter().all(|&p| p > 50),
+            "{:?}",
+            waveform.peaks
+        );
+
+        // What the cap leaves alone is built as before.
+        let whole =
+            build_waveform_preview_from_audio(&path, 40, rate as usize * 10).expect("waveform");
+        assert_eq!(waveform_fields(&whole), waveform_fields(&waveform));
     }
 }

@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::analysis::{ANALYSIS_DECODE_MAX_SAMPLES, decode_audio_mono_samples};
+use super::analysis::{BPM_KEY_MAX_SAMPLES, decode_audio_mono_samples};
 use super::anlz::{read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz};
 use super::bpm_key::{
     find_tempo_peak, first_beat_secs, refine_bpm, refine_near_estimate, stratum_config,
@@ -189,7 +189,7 @@ fn analyze(
         own_first_beat,
     };
     let Ok((samples, sample_rate)) =
-        decode_audio_mono_samples(&reference.path, ANALYSIS_DECODE_MAX_SAMPLES)
+        decode_audio_mono_samples(&reference.path, BPM_KEY_MAX_SAMPLES)
     else {
         return outcome(None, None, None, None, None);
     };

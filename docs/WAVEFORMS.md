@@ -274,8 +274,28 @@ own `SEEKTABLE`.
 
 ## Decode Bounds
 
-Waveform generation decodes up to `24_000_000` mono samples during analysis. Duration for ANLZ
-entry counts is resolved from track duration metadata first, then falls back to decoded sample count.
+Analysis keeps up to `24_000_000` mono samples (`BPM_KEY_MAX_SAMPLES`, about 9 minutes at
+44.1 kHz) for BPM and key: detection holds them all at once and its working set grows with their
+length, so the cap bounds a worker's memory however long the track. Duration for ANLZ entry
+counts is resolved from track duration metadata first, then falls back to decoded sample count.
+
+The waveform is not drawn from those samples: spread over the track's length, they would
+stretch the first 9 minutes of a longer track over all of it. `decode_audio_with_waveform`
+decodes the file once, keeping the capped samples and feeding all of the audio, a chunk at a
+time, to a `WaveformAccumulator`, whose bins each cover their own stretch of the track's length
+(`duration × rate / bins` samples), so nothing is held whole. It is the only waveform builder:
+when the file's metadata has no length, the decode stops at the cap and `waveform_from_samples`
+feeds the kept samples to it at once, over their own length. Fed the same samples, the
+accumulator gives byte-for-byte the waveform the earlier one-slice builder gave (checked against
+it before that builder was removed). Track analysis, a transcode's bundle and
+`build_waveform_preview_from_audio` (the repairs' waveforms, capped at 2,000,000 samples) all
+decode this way.
+
+Measured on 20 library tracks (release build, best of 3, 6–12 minutes, FLAC/WAV/AIFF/MP3), the
+decode and waveform stage takes 28% less time than the earlier capped decode plus one-slice
+builder, even for the tracks it now decodes in full: it makes one pass and keeps no filtered
+copies of the signal. BPM and key detection take about 95% of a track's analysis, so the whole analysis is about
+1% faster.
 
 ## Implementation Anchors
 

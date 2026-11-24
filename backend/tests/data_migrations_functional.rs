@@ -139,6 +139,7 @@ fn startup_migrations_are_recorded_when_the_service_opens() {
             "0.2-merge-usb-placeholder-tracks",
             "0.2-track-match-fingerprints",
             "0.2-usb-devices-from-legacy-settings",
+            "0.6.7-long-track-waveforms",
         ]
     );
 }
