@@ -114,17 +114,28 @@ const SUBDIVISIONS: [f64; 3] = [1.0, 2.0, 4.0];
 /// to the best tempo: on a track whose tempo is a whole or half BPM, the
 /// best tempo can still land a few hundredths off it.
 const GRID_SNAP_COHERENCE: f64 = 0.9;
-/// stratum sometimes answers a tempo related to the real one by 3:2 or 4:3
-/// (83 for 125, 116 for 174). At such a tempo the beats land on two or
-/// three different phases and cancel out, so the real one scores clearly
-/// higher. Halving and doubling are left alone: there, every onset still
-/// lands on the grid and the score can't tell which is right.
+/// stratum sometimes answers a tempo related to the real one by 3:2, 4:3 or
+/// 5:4 (83 for 125, 116 for 174, 156 for 125 on a short stretch of audio).
+/// At such a tempo the beats land on two to four different phases and
+/// cancel out, so the real one scores clearly higher. Halving and doubling
+/// are left alone: there, every onset still lands on the grid and the score
+/// can't tell which is right.
 ///
 /// Each factor comes with how many times more coherent the related tempo
 /// must be than stratum's to replace it. 3/2 and 3/4 need far more: one of
 /// their `SUBDIVISIONS` is 3× stratum's tempo, where every one of its beats
-/// lands in phase too, so they score well even when they are wrong.
-const TEMPO_FAMILY: [(f64, f64); 4] = [(1.5, 8.0), (0.75, 8.0), (2.0 / 3.0, 2.5), (4.0 / 3.0, 2.5)];
+/// lands in phase too, so they score well even when they are wrong. On 54
+/// store-referenced tracks, a right tempo's 5:4 and 4:5 relatives scored at
+/// most 1.02 times as coherent, and the real tempo under a 5:4 mistake 5.9
+/// to 60 times (USB_KEY_PLAN.md); 2.5 sits between.
+const TEMPO_FAMILY: [(f64, f64); 6] = [
+    (1.5, 8.0),
+    (0.75, 8.0),
+    (2.0 / 3.0, 2.5),
+    (4.0 / 3.0, 2.5),
+    (0.8, 2.5),
+    (1.25, 2.5),
+];
 
 /// Turn stratum's raw estimate into the BPM stored for the track.
 ///
@@ -136,8 +147,9 @@ const TEMPO_FAMILY: [(f64, f64); 4] = [(1.5, 8.0), (0.75, 8.0), (2.0 / 3.0, 2.5)
 /// as whole and half ones. When no tempo clearly wins, the whole and half
 /// BPMs alone are compared the same way; when none of those wins either
 /// (ambiguous rhythm, tempo changes), the estimate is rounded to a whole BPM.
-/// stratum's octave is kept as is, but a tempo related to it by 3:2 or 4:3
-/// replaces it when that one clearly fits the track better (`TEMPO_FAMILY`).
+/// stratum's octave is kept as is, but a tempo related to it by 3:2, 4:3 or
+/// 5:4 replaces it when that one clearly fits the track better
+/// (`TEMPO_FAMILY`).
 pub(super) fn refine_bpm(
     samples: &[f32],
     sample_rate: u32,
@@ -162,7 +174,7 @@ pub(super) fn refine_bpm(
     }
 }
 
-/// `refine_bpm` without the 3:2 / 4:3 check.
+/// `refine_bpm` without the tempo family check.
 pub(super) fn refine_near_estimate(
     samples: &[f32],
     sample_rate: u32,
@@ -211,6 +223,8 @@ fn broad_tempo_candidate(
         (0.75, 2.0),
         (2.0 / 3.0, 2.0),
         (4.0 / 3.0, 3.0),
+        (0.8, 2.0),
+        (1.25, 3.0),
     ]
     .iter()
     .filter_map(|&(factor, radius)| {
@@ -236,7 +250,7 @@ fn broad_tempo_candidate(
     (score >= MIN_SCORE && score >= MIN_LEAD * rival).then_some(bpm as f32)
 }
 
-/// The tempo related to stratum's estimate by 3:2 or 4:3 (`TEMPO_FAMILY`)
+/// The tempo related to stratum's estimate by 3:2, 4:3 or 5:4 (`TEMPO_FAMILY`)
 /// that comes closest to replacing it, and how close: its coherence lead
 /// over the estimate divided by the lead its factor requires, so 1.0 or
 /// more means it should replace the estimate. Both are compared at their
@@ -577,6 +591,15 @@ mod tests {
         // strongest candidate is 124.5, outside a ±2 search from 127.5.
         let samples = click_track(124.5, 44100);
         assert_eq!(refine_bpm(&samples, 44100, 85.0, 70, 180), 124.5);
+    }
+
+    #[test]
+    fn refine_bpm_corrects_a_tempo_five_fourths_off() {
+        // A chunk's stratum answering 156.25 for a 125 track, and 100 the
+        // other way.
+        let samples = click_track(125.0, 44100);
+        assert_eq!(refine_bpm(&samples, 44100, 156.25, 70, 180), 125.0);
+        assert_eq!(refine_bpm(&samples, 44100, 100.0, 70, 180), 125.0);
     }
 
     #[test]
