@@ -41,7 +41,7 @@ use uuid::Uuid;
 
 mod coordinator;
 mod job_events;
-pub(crate) use coordinator::AnalysisCoordinatorHandle;
+pub(crate) use coordinator::{AnalysisCoordinatorHandle, FileAnalysis};
 pub use coordinator::{AnalysisEvent, AnalysisJobSummary, AnalysisObserver};
 pub use job_events::analysis_event_payload;
 
@@ -1314,57 +1314,6 @@ pub(crate) fn analysis_settings(conn: &rusqlite::Connection) -> (AnalysisEngine,
     (engine, bpm_min, bpm_max)
 }
 
-/// Runs `work` on every item, as many at once as library analysis runs
-/// tracks with `engine` (its memory-based worker cap), and returns the
-/// results in the items' order. `on_done` is called on this thread as each
-/// finishes, with the count done so far.
-pub(crate) fn map_under_analysis_cap<T, R>(
-    items: Vec<T>,
-    engine: AnalysisEngine,
-    work: impl Fn(T) -> R + Sync,
-    on_done: &mut dyn FnMut(usize),
-) -> Vec<R>
-where
-    T: Send,
-    R: Send,
-{
-    let total = items.len();
-    if total == 0 {
-        return Vec::new();
-    }
-    let workers = analysis_capacity(engine).min(total);
-    let queue = std::sync::Mutex::new(items.into_iter().enumerate());
-    let (tx, rx) = std::sync::mpsc::channel::<(usize, R)>();
-    let mut results: Vec<Option<R>> = (0..total).map(|_| None).collect();
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            let tx = tx.clone();
-            let queue = &queue;
-            let work = &work;
-            scope.spawn(move || {
-                loop {
-                    let next = queue
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .next();
-                    let Some((index, item)) = next else {
-                        return;
-                    };
-                    if tx.send((index, work(item))).is_err() {
-                        return;
-                    }
-                }
-            });
-        }
-        drop(tx);
-        for (done, (index, result)) in rx.iter().enumerate() {
-            results[index] = Some(result);
-            on_done(done + 1);
-        }
-    });
-    results.into_iter().flatten().collect()
-}
-
 fn duration_ms_from_decoded(sample_count: usize, sample_rate: u32) -> Option<u64> {
     if sample_count == 0 || sample_rate == 0 {
         return None;
@@ -2142,11 +2091,7 @@ impl WaveformAccumulator {
     }
 
     fn end_of(bin: usize, bins: usize, total: usize) -> usize {
-        if bins == 0 {
-            0
-        } else {
-            (bin + 1) * total / bins
-        }
+        ((bin + 1) * total).checked_div(bins).unwrap_or(0)
     }
 
     pub(crate) fn push(&mut self, samples: &[f32]) {

@@ -1278,6 +1278,7 @@ repair-warning-app-analysis-unreadable = analysis file not updated: unable to an
 repair-warning-app-analysis-library-failed = analysis file not updated: the library could not analyze { $track }
 repair-warning-app-analysis-write-failed = analysis file not updated for { $track }: { $error }
 repair-warning-app-analysis-check-failed = analysis files this app wrote not checked: { $error }
+repair-warning-analysis-cancelled = not analyzed, analysis was cancelled: { $track }
 repair-warning-beat-grid-not-constant = beat grid not rewritten (not a constant-tempo grid): { $path }
 # $format: MP3 or FLAC. $reason: what in the audio file stops it (technical, not translated).
 repair-warning-seek-data-skipped-replace = { $format } seek data not added ({ $reason }): { $path }; replace it with an intact copy

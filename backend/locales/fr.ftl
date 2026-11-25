@@ -972,6 +972,7 @@ repair-warning-app-analysis-unreadable = fichier d'analyse non mis à jour : imp
 repair-warning-app-analysis-library-failed = fichier d'analyse non mis à jour : la bibliothèque n'a pas pu analyser { $track }
 repair-warning-app-analysis-write-failed = fichier d'analyse non mis à jour pour { $track } : { $error }
 repair-warning-app-analysis-check-failed = fichiers d'analyse de l'application non vérifiés : { $error }
+repair-warning-analysis-cancelled = non analysé, l'analyse a été annulée : { $track }
 repair-warning-beat-grid-not-constant = beatgrid non réécrite (pas une grille à tempo constant) : { $path }
 repair-warning-seek-data-skipped-replace = données de recherche { $format } non ajoutées ({ $reason }) : { $path } ; remplacez-le par une copie intacte
 repair-warning-seek-data-skipped-report = données de recherche { $format } non ajoutées ({ $reason }) : { $path } ; merci de signaler ce fichier (les détails du format, pas l'audio) pour que ses données de recherche puissent être prises en charge

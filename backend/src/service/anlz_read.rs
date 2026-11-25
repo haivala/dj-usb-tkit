@@ -117,7 +117,7 @@ pub(crate) fn row_waveform_from_anlz_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
 /// [`ROW_WAVEFORM_ENTRIES`] entries of height, low, mid, high, each the
 /// loudest of the entries it covers. Read only: the file is never changed.
 pub(crate) fn row_waveform_from_pwv4(payload: &[u8]) -> Vec<u8> {
-    let entries = payload.chunks_exact(6).collect::<Vec<_>>();
+    let entries = payload.as_chunks::<6>().0;
     let n = entries.len();
     let count = ROW_WAVEFORM_ENTRIES.min(n);
     let mut out = Vec::with_capacity(count * 4);

@@ -6,11 +6,9 @@
 use super::*;
 use crate::i18n::tr;
 use crate::service::analysis::{
-    CoreAnalysis, CoreRequest, TrackBundle, analysis_settings, analyze_audio_core,
-    map_under_analysis_cap, write_track_bundle,
+    CoreAnalysis, CoreRequest, FileAnalysis, TrackBundle, analysis_settings, write_track_bundle,
 };
 use crate::service::anlz::{pwv3_stretched_from_bins, waveform_chunks, with_waveform_chunks};
-use crate::service::bpm_key::AnalysisEngine;
 use std::path::PathBuf;
 
 /// The bins the USB repairs drew a waveform with before 0.6.7, stretched to
@@ -19,47 +17,12 @@ use std::path::PathBuf;
 /// any size the app draws or shows waveforms at now.
 pub(super) const PRE_0_6_7_REPAIR_WAVEFORM_BINS: usize = 2400;
 
-/// The engine and BPM range a repair detects with: library analysis's.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct DrawSettings {
-    engine: AnalysisEngine,
-    bpm_min: u32,
-    bpm_max: u32,
-}
-
-impl DrawSettings {
-    pub(super) fn load(service: &BackendService) -> BackendResult<Self> {
-        let conn = service.db.connect()?;
-        let (engine, bpm_min, bpm_max) = analysis_settings(&conn);
-        Ok(Self {
-            engine,
-            bpm_min,
-            bpm_max,
-        })
-    }
-
-    fn request(self, kept_bpm: Option<f64>, detect_key: bool) -> CoreRequest {
-        CoreRequest {
-            kept_bpm,
-            kept_first_beat_ms: None,
-            existing_first_beat_ms: None,
-            detect_key,
-            detection_required: false,
-            bpm_min: self.bpm_min,
-            bpm_max: self.bpm_max,
-            engine: self.engine,
-        }
-    }
-
-    /// Runs `work` on every item under library analysis's worker cap.
-    pub(super) fn map<T: Send, R: Send>(
-        self,
-        items: Vec<T>,
-        work: impl Fn(T) -> R + Sync,
-        on_done: &mut dyn FnMut(usize),
-    ) -> Vec<R> {
-        map_under_analysis_cap(items, self.engine, work, on_done)
-    }
+/// A USB file for [`BackendService::analyze_stick_files`].
+pub(super) struct StickAudio {
+    pub(super) audio: PathBuf,
+    /// The databases' BPM, kept; detected when `None`.
+    pub(super) kept_bpm: Option<f64>,
+    pub(super) detect_key: bool,
 }
 
 /// Why a USB file's bundle wasn't drawn.
@@ -69,14 +32,15 @@ pub(super) enum DrawError {
     Unreadable,
     /// Its length is unknown, so there is no time axis to draw on.
     LengthUnknown,
+    /// Analysis was cancelled before the file's turn came.
+    Cancelled,
     Write(BackendError),
 }
 
 /// A USB file, analysed as a library track is: its waveform at detail
 /// resolution over the whole track and its length, the databases' BPM kept
 /// (else one detected) with its first beat placed, and its key when asked
-/// for. Only reads: run these under the worker cap ([`DrawSettings::map`]),
-/// then write each with [`write_stick_bundle`] one at a time, since a new
+/// for. Write each with [`write_stick_bundle`] one at a time, since a new
 /// bundle's name depends on which ones exist.
 #[derive(Debug, Clone)]
 pub(super) struct StickAnalysis {
@@ -84,25 +48,63 @@ pub(super) struct StickAnalysis {
     pub(super) duration_ms: u64,
 }
 
-pub(super) fn analyze_stick_audio(
-    audio: &Path,
-    kept_bpm: Option<f64>,
-    detect_key: bool,
-    settings: DrawSettings,
-) -> Result<StickAnalysis, DrawError> {
-    let core = analyze_audio_core(
-        audio,
-        &settings.request(kept_bpm, detect_key),
-        &mut |_, _| {},
-    )
-    .map_err(|_| DrawError::Unreadable)?;
-    let Some(duration_ms) = core.duration_ms else {
-        return Err(DrawError::LengthUnknown);
-    };
-    if core.waveform.peaks.is_empty() {
-        return Err(DrawError::Unreadable);
+impl BackendService {
+    /// Analyses USB files in the one analysis queue
+    /// (`analyze_audio_files`): after whatever is waiting, with library
+    /// analysis's engine and BPM range, paused and cancelled with it.
+    /// Results in the files' order.
+    pub(super) fn analyze_stick_files(
+        &self,
+        files: Vec<StickAudio>,
+    ) -> BackendResult<Vec<Result<StickAnalysis, DrawError>>> {
+        let conn = self.db.connect()?;
+        let (engine, bpm_min, bpm_max) = analysis_settings(&conn);
+        drop(conn);
+        let requests = files
+            .into_iter()
+            .map(|file| {
+                let request = CoreRequest {
+                    kept_bpm: file.kept_bpm,
+                    kept_first_beat_ms: None,
+                    existing_first_beat_ms: None,
+                    detect_key: file.detect_key,
+                    // A file whose BPM can't be found (silence) still gets
+                    // its waveform, with no beat grid.
+                    detection_required: false,
+                    bpm_min,
+                    bpm_max,
+                    engine,
+                };
+                (file.audio, request)
+            })
+            .collect();
+        Ok(self
+            .analyze_audio_files(requests)?
+            .into_iter()
+            .map(|result| match result {
+                FileAnalysis::Done(core) => {
+                    let Some(duration_ms) = core.duration_ms else {
+                        return Err(DrawError::LengthUnknown);
+                    };
+                    if core.waveform.peaks.is_empty() {
+                        return Err(DrawError::Unreadable);
+                    }
+                    Ok(StickAnalysis {
+                        core: *core,
+                        duration_ms,
+                    })
+                }
+                FileAnalysis::Failed(err) => {
+                    logging::debug(
+                        "usb-repair",
+                        format!("audio not analyzed: {}", err.english()),
+                    );
+                    Err(DrawError::Unreadable)
+                }
+                FileAnalysis::Cancelled => Err(DrawError::Cancelled),
+            })
+            .collect())
     }
-    Ok(StickAnalysis { core, duration_ms })
 }
 
 /// Writes a USB file's new bundle from its [`StickAnalysis`] with the
@@ -672,7 +674,18 @@ impl WaveformFiles {
 enum UpdateFailure {
     Unreadable,
     LibraryAnalysis,
+    Cancelled,
     Write(BackendError),
+}
+
+impl From<DrawError> for UpdateFailure {
+    fn from(err: DrawError) -> Self {
+        match err {
+            DrawError::Cancelled => Self::Cancelled,
+            DrawError::Write(err) => Self::Write(err),
+            DrawError::Unreadable | DrawError::LengthUnknown => Self::Unreadable,
+        }
+    }
 }
 
 impl BackendService {
@@ -781,9 +794,9 @@ impl BackendService {
             }
         }
 
-        // The stick's own audio, analysed under the worker cap: for a track
-        // getting its own bundle, and for a waveform with no library one.
-        let settings = DrawSettings::load(self)?;
+        // The stick's own audio, analysed in the one analysis queue: for a
+        // track getting its own bundle, and for a waveform with no library
+        // one.
         let draws = updates
             .iter()
             .filter(|u| !failures.contains_key(&u.track_id))
@@ -799,21 +812,29 @@ impl BackendService {
                 Some((u.track_id, audio, bpm))
             })
             .collect::<Vec<_>>();
-        let mut analyses = settings
-            .map(
-                draws,
-                |(id, audio, bpm)| {
-                    let analysis = match &audio {
-                        Some(audio) => analyze_stick_audio(audio, bpm, false, settings),
-                        None => Err(DrawError::Unreadable),
-                    };
-                    (id, audio, analysis)
-                },
-                &mut |_| {},
-            )
-            .into_iter()
-            .map(|(id, audio, analysis)| (id, (audio, analysis)))
-            .collect::<HashMap<_, _>>();
+        let mut analyses = HashMap::new();
+        let mut queued = Vec::new();
+        for (id, audio, kept_bpm) in draws {
+            match audio {
+                Some(audio) => queued.push((id, audio, kept_bpm)),
+                None => {
+                    analyses.insert(id, (None, Err(DrawError::Unreadable)));
+                }
+            }
+        }
+        let results = self.analyze_stick_files(
+            queued
+                .iter()
+                .map(|(_, audio, kept_bpm)| StickAudio {
+                    audio: audio.clone(),
+                    kept_bpm: *kept_bpm,
+                    detect_key: false,
+                })
+                .collect(),
+        )?;
+        for ((id, audio, _), result) in queued.into_iter().zip(results) {
+            analyses.insert(id, (Some(audio), result));
+        }
 
         let mut outcome = AppBundleOutcome::default();
         let mut mutations = Vec::<crate::pdb_writer::PdbTrackRowMutation>::new();
@@ -837,8 +858,8 @@ impl BackendService {
                 };
                 let analysis = match analysis {
                     Ok(analysis) => analysis,
-                    Err(_) => {
-                        failures.insert(update.track_id, UpdateFailure::Unreadable);
+                    Err(err) => {
+                        failures.insert(update.track_id, err.into());
                         continue;
                     }
                 };
@@ -885,7 +906,8 @@ impl BackendService {
                         WaveformSource::Library(dat) => WaveformFiles::read(dat),
                         WaveformSource::Draw => match analyses.remove(&update.track_id) {
                             Some((_, Ok(analysis))) => WaveformFiles::drawn(&analysis),
-                            _ => return Err(UpdateFailure::Unreadable),
+                            Some((_, Err(err))) => return Err(err.into()),
+                            None => return Err(UpdateFailure::Unreadable),
                         },
                         // Resolved above, or failed there.
                         WaveformSource::AnalyzeLibrary(_) | WaveformSource::Transcode { .. } => {
@@ -970,6 +992,9 @@ impl BackendService {
                 }
                 UpdateFailure::LibraryAnalysis => {
                     tr::repair_warning_app_analysis_library_failed(&update.track_path)
+                }
+                UpdateFailure::Cancelled => {
+                    tr::repair_warning_analysis_cancelled(&update.track_path)
                 }
                 UpdateFailure::Write(err) => {
                     tr::repair_warning_app_analysis_write_failed(&update.track_path, err)

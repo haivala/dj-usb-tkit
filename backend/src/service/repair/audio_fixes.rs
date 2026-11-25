@@ -729,19 +729,19 @@ impl BackendService {
             draws.push((empty_path_text, source_audio, target));
         }
 
-        // Analysed by the analysis pipeline, under its worker cap. The
-        // databases' BPM is kept and its first beat placed; with none, one
-        // is detected.
-        let settings = DrawSettings::load(self)?;
-        let results = settings.map(
-            draws,
-            |(path_text, audio, target)| {
-                let analysis = analyze_stick_audio(&audio, target.bpm, false, settings);
-                (path_text, audio, target, analysis)
-            },
-            &mut |_| {},
-        );
-        for (empty_path_text, source_audio, target, analysis) in results {
+        // Analysed in the one analysis queue. The databases' BPM is kept and
+        // its first beat placed; with none, one is detected.
+        let analyses = self.analyze_stick_files(
+            draws
+                .iter()
+                .map(|(_, audio, target)| StickAudio {
+                    audio: audio.clone(),
+                    kept_bpm: target.bpm,
+                    detect_key: false,
+                })
+                .collect(),
+        )?;
+        for ((empty_path_text, source_audio, target), analysis) in draws.into_iter().zip(analyses) {
             let base_dir = &target.analysis_dir;
             let paths = AnlzBundlePaths {
                 dat_path: base_dir.join("ANLZ0000.DAT"),
@@ -764,6 +764,10 @@ impl BackendService {
                 Err(DrawError::LengthUnknown) => (
                     "usb.repair.empty-analysis.duration-unknown",
                     tr::repair_warning_empty_analysis_length_unknown(source_audio.display()),
+                ),
+                Err(DrawError::Cancelled) => (
+                    "usb.repair.analysis-cancelled",
+                    tr::repair_warning_analysis_cancelled(&target.track_path),
                 ),
                 Err(DrawError::Write(err)) => (
                     "usb.repair.empty-analysis.write-failed",
@@ -973,24 +977,27 @@ impl BackendService {
         }
 
         // No bundle on the USB: the file is analysed as a new library track
-        // is (BPM, first beat, key the tags lack, waveform), under analysis's
-        // worker cap, so the track has its analysis like any exported one.
-        let settings = DrawSettings::load(self)?;
+        // is (BPM, first beat, key the tags lack, waveform), in the one
+        // analysis queue, so the track has its analysis like any exported one.
         let draws = found
             .iter()
             .enumerate()
             .filter(|(_, (_, _, _, has_bundle))| !has_bundle)
-            .map(|(index, (_, abs, scanned, _))| (index, abs.clone(), scanned.tonality.is_none()))
+            .map(|(index, (_, abs, scanned, _))| {
+                (
+                    index,
+                    StickAudio {
+                        audio: abs.clone(),
+                        kept_bpm: None,
+                        detect_key: scanned.tonality.is_none(),
+                    },
+                )
+            })
             .collect::<Vec<_>>();
-        let mut analyses = settings
-            .map(
-                draws,
-                |(index, abs, detect_key)| {
-                    (index, analyze_stick_audio(&abs, None, detect_key, settings))
-                },
-                &mut |_| {},
-            )
+        let (indexes, files): (Vec<_>, Vec<_>) = draws.into_iter().unzip();
+        let mut analyses = indexes
             .into_iter()
+            .zip(self.analyze_stick_files(files)?)
             .filter_map(|(index, analysis)| Some((index, analysis.ok()?)))
             .collect::<HashMap<_, _>>();
 

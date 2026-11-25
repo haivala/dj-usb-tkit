@@ -18,8 +18,9 @@ use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 use super::{
-    AnalyzeTrackProgress, BpmDetectionParams, LibraryDurationContext, TRACK_ANALYSIS_UPDATE_SQL,
-    analysis_capacity, analyze_track_with_usb_fallback_with_updates, build_done_progress_error,
+    AnalyzeTrackProgress, BpmDetectionParams, CoreAnalysis, CoreRequest, LibraryDurationContext,
+    TRACK_ANALYSIS_UPDATE_SQL, analysis_capacity, analyze_audio_core,
+    analyze_track_with_usb_fallback_with_updates, build_done_progress_error,
     build_done_progress_success, build_partial_progress, build_started_progress,
     collect_tracks_for_analysis, elapsed_ms_since, has_memory_headroom_for_engine,
     incomplete_analysis_reason, resolve_analysis_bpm_range, resolve_analysis_engine,
@@ -122,6 +123,13 @@ enum Message {
         item: QueuedTrack,
         result: BackendResult<LocalAnalysisResult>,
     },
+    /// Audio files to analyze for a caller outside the library (a USB
+    /// repair): queued after what is already waiting.
+    SubmitFiles(Vec<QueuedFile>),
+    FileDone {
+        reply: mpsc::Sender<FileAnalysis>,
+        result: FileAnalysis,
+    },
 }
 
 /// For a caller waiting on its own request (`analyze_new_tracks_with_progress`).
@@ -179,9 +187,43 @@ struct QueuedTrack {
     request: Arc<RequestContext>,
 }
 
-/// A track for a worker, with the job's progress when it was started.
+/// An audio file analyzed for a caller outside the library: the analysis
+/// pipeline's core (`analyze_audio_core`) runs on it and the result goes back
+/// to the caller. Nothing is saved to the library, and the job shows no row
+/// for it.
+struct QueuedFile {
+    audio: PathBuf,
+    request: CoreRequest,
+    reply: mpsc::Sender<FileAnalysis>,
+}
+
+/// What became of a file given to [`BackendService::analyze_audio_files`].
+#[derive(Debug)]
+pub(crate) enum FileAnalysis {
+    Done(Box<CoreAnalysis>),
+    Failed(BackendError),
+    /// Analysis was cancelled before the file's turn came.
+    Cancelled,
+}
+
+/// What waits in the one analysis queue.
+enum Queued {
+    Track(QueuedTrack),
+    File(QueuedFile),
+}
+
+impl Queued {
+    fn engine(&self) -> AnalysisEngine {
+        match self {
+            Queued::Track(item) => item.request.engine,
+            Queued::File(item) => item.request.engine,
+        }
+    }
+}
+
+/// Work for a worker, with the job's progress when it was started.
 struct WorkerTask {
-    item: QueuedTrack,
+    item: Queued,
     current: usize,
     total: usize,
 }
@@ -238,6 +280,30 @@ fn run_worker_task(context: &WorkerContext, task: WorkerTask) {
         current,
         total,
     } = task;
+    let item = match item {
+        Queued::Track(item) => item,
+        Queued::File(QueuedFile {
+            audio,
+            request,
+            reply,
+        }) => {
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                analyze_audio_core(&audio, &request, &mut |_, _| {})
+            }))
+            .unwrap_or_else(|payload| {
+                Err(BackendError::Internal(format!(
+                    "analysis worker panicked: {}",
+                    panic_text(payload.as_ref())
+                )))
+            });
+            let result = match result {
+                Ok(core) => FileAnalysis::Done(Box::new(core)),
+                Err(err) => FileAnalysis::Failed(err),
+            };
+            let _ = context.tx.send(Message::FileDone { reply, result });
+            return;
+        }
+    };
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
         #[cfg(test)]
         assert!(
@@ -291,7 +357,7 @@ struct Coordinator {
     job_id: String,
     started_at: Instant,
     job_started: bool,
-    queue: VecDeque<QueuedTrack>,
+    queue: VecDeque<Queued>,
     /// Waiting or in flight, by id: a track is analyzed by one thing at a time.
     active: HashSet<String>,
     in_flight: usize,
@@ -405,6 +471,14 @@ impl Coordinator {
                 self.in_flight -= 1;
                 self.finish_track(item, result);
             }
+            Message::SubmitFiles(files) => {
+                self.cancelled_of = None;
+                self.queue.extend(files.into_iter().map(Queued::File));
+            }
+            Message::FileDone { reply, result } => {
+                self.in_flight -= 1;
+                let _ = reply.send(result);
+            }
         }
     }
 
@@ -474,7 +548,9 @@ impl Coordinator {
         if reanalyze && !skipped_ids.is_empty() {
             let skipped: HashSet<&String> = skipped_ids.iter().collect();
             for item in self.queue.iter_mut() {
-                if skipped.contains(&item.track.id) {
+                if let Queued::Track(item) = item
+                    && skipped.contains(&item.track.id)
+                {
                     item.track.force_reanalysis();
                 }
             }
@@ -518,11 +594,12 @@ impl Coordinator {
                 });
             }
             self.active.extend(new_ids);
-            self.queue
-                .extend(new_tracks.into_iter().map(|track| QueuedTrack {
+            self.queue.extend(new_tracks.into_iter().map(|track| {
+                Queued::Track(QueuedTrack {
                     track,
                     request: context.clone(),
-                }));
+                })
+            }));
             self.emit(&AnalysisEvent::TracksWaiting {
                 job_id: self.job_id.clone(),
                 track_ids: queued_ids.clone(),
@@ -558,7 +635,7 @@ impl Coordinator {
     /// a resume or a cancel is exactly when this can change.
     fn dispatch(&mut self) {
         while !self.paused {
-            let Some(engine) = self.queue.front().map(|item| item.request.engine) else {
+            let Some(engine) = self.queue.front().map(Queued::engine) else {
                 return;
             };
             let budget = self.budget(engine);
@@ -588,17 +665,22 @@ impl Coordinator {
             let Some(item) = self.queue.pop_front() else {
                 return;
             };
-            item.request.emit(
-                &self.service.analysis_coordinator,
-                &self.job_id,
-                build_started_progress(self.completed, self.total, &item.track),
-            );
+            let what = match &item {
+                Queued::Track(item) => {
+                    item.request.emit(
+                        &self.service.analysis_coordinator,
+                        &self.job_id,
+                        build_started_progress(self.completed, self.total, &item.track),
+                    );
+                    format!("track={}", item.track.id)
+                }
+                Queued::File(_) => "file".to_string(),
+            };
             self.in_flight += 1;
             logging::debug(
                 "analysis",
                 format!(
-                    "dispatch: track={} engine={engine:?} in_flight={} queued={} has_memory={has_memory}",
-                    item.track.id,
+                    "dispatch: {what} engine={engine:?} in_flight={} queued={} has_memory={has_memory}",
                     self.in_flight,
                     self.queue.len(),
                 ),
@@ -608,7 +690,7 @@ impl Coordinator {
     }
 
     /// Hands `item` to a worker thread, starting threads up to `budget`.
-    fn start_on_worker(&mut self, item: QueuedTrack, budget: usize) {
+    fn start_on_worker(&mut self, item: Queued, budget: usize) {
         while self.workers.threads < budget {
             self.workers.spawn(WorkerContext {
                 tx: self.tx.clone(),
@@ -716,13 +798,23 @@ impl Coordinator {
         if self.queue.is_empty() {
             return;
         }
-        self.cancelled_of.get_or_insert(self.total);
         let mut track_ids = Vec::with_capacity(self.queue.len());
         for item in self.queue.drain(..) {
-            self.active.remove(&item.track.id);
-            item.request.tell_listener(ListenerEvent::Cancelled);
-            track_ids.push(item.track.id);
+            match item {
+                Queued::Track(item) => {
+                    self.active.remove(&item.track.id);
+                    item.request.tell_listener(ListenerEvent::Cancelled);
+                    track_ids.push(item.track.id);
+                }
+                Queued::File(item) => {
+                    let _ = item.reply.send(FileAnalysis::Cancelled);
+                }
+            }
         }
+        if track_ids.is_empty() {
+            return;
+        }
+        self.cancelled_of.get_or_insert(self.total);
         self.total = self.total.saturating_sub(track_ids.len());
         self.emit(&AnalysisEvent::TracksNotWaiting {
             job_id: self.job_id.clone(),
@@ -902,31 +994,38 @@ impl BackendService {
     ) -> BackendResult<Submitted> {
         self.ensure_no_data_migration()?;
         let (reply, replied) = mpsc::channel();
-        let mut message = Message::Submit {
+        let sender = self.send_to_coordinator(Message::Submit {
             request,
             listener,
             reply,
-        };
-        {
-            let mut sender = self.analysis_coordinator.sender();
-            if let Some(running) = sender.as_ref() {
-                match running.send(message) {
-                    Ok(()) => return wait_for_reply(sender, replied),
-                    // The coordinator is gone (it panicked): start another.
-                    Err(mpsc::SendError(unsent)) => message = unsent,
-                }
+        })?;
+        wait_for_reply(sender, replied)
+    }
+
+    /// Sends `message` to the running coordinator, starting one when none
+    /// runs (or the last one panicked). Returns with the sender's lock held.
+    fn send_to_coordinator(
+        &self,
+        mut message: Message,
+    ) -> BackendResult<MutexGuard<'_, Option<mpsc::Sender<Message>>>> {
+        let mut sender = self.analysis_coordinator.sender();
+        if let Some(running) = sender.as_ref() {
+            match running.send(message) {
+                Ok(()) => return Ok(sender),
+                // The coordinator is gone (it panicked): start another.
+                Err(mpsc::SendError(unsent)) => message = unsent,
             }
-            let conn = self.db.open_dedicated()?;
-            let (tx, rx) = mpsc::channel();
-            let coordinator = Coordinator::new(self.clone(), conn, tx.clone())?;
-            tx.send(message)
-                .map_err(|_| BackendError::Internal("analysis channel closed".to_string()))?;
-            std::thread::Builder::new()
-                .name("analysis-coordinator".to_string())
-                .spawn(move || coordinator.run(rx))?;
-            *sender = Some(tx);
-            wait_for_reply(sender, replied)
         }
+        let conn = self.db.open_dedicated()?;
+        let (tx, rx) = mpsc::channel();
+        let coordinator = Coordinator::new(self.clone(), conn, tx.clone())?;
+        tx.send(message)
+            .map_err(|_| BackendError::Internal("analysis channel closed".to_string()))?;
+        std::thread::Builder::new()
+            .name("analysis-coordinator".to_string())
+            .spawn(move || coordinator.run(rx))?;
+        *sender = Some(tx);
+        Ok(sender)
     }
 
     pub fn set_analysis_paused(&self, paused: bool) -> BackendResult<SetAnalysisPausedData> {
@@ -999,6 +1098,50 @@ impl BackendService {
             warnings,
             already_analyzing_track_ids: skipped_ids,
         })
+    }
+}
+
+impl BackendService {
+    /// Analyzes audio files outside the library (a USB repair's) with the
+    /// analysis pipeline's core, in the one analysis queue: after whatever
+    /// is waiting, under the same worker budget and memory check, paused and
+    /// cancelled with it. Waits for every file and returns their results in
+    /// order. Nothing is saved to the library.
+    pub(crate) fn analyze_audio_files(
+        &self,
+        files: Vec<(PathBuf, CoreRequest)>,
+    ) -> BackendResult<Vec<FileAnalysis>> {
+        if files.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.ensure_no_data_migration()?;
+        let (queued, replies): (Vec<_>, Vec<_>) = files
+            .into_iter()
+            .map(|(audio, request)| {
+                let (reply, replied) = mpsc::channel();
+                (
+                    QueuedFile {
+                        audio,
+                        request,
+                        reply,
+                    },
+                    replied,
+                )
+            })
+            .unzip();
+        // Let go of the lock before waiting: the coordinator needs it to
+        // finish.
+        drop(self.send_to_coordinator(Message::SubmitFiles(queued))?);
+        Ok(replies
+            .into_iter()
+            .map(|replied| {
+                replied.recv().unwrap_or_else(|_| {
+                    FileAnalysis::Failed(BackendError::Internal(
+                        "analysis coordinator stopped".to_string(),
+                    ))
+                })
+            })
+            .collect())
     }
 }
 
@@ -1173,6 +1316,110 @@ mod tests {
         assert_eq!(
             finished_text(2, 0, 1),
             "Analysis finished: analyzed 2, failed 0, incomplete 1"
+        );
+    }
+
+    /// A mono 16-bit 44.1 kHz WAV of a 440 Hz sine, `seconds` long.
+    fn write_sine_wav(path: &std::path::Path, seconds: u32) {
+        let rate = 44_100u32;
+        let samples = (rate * seconds) as usize;
+        let mut out = Vec::with_capacity(44 + samples * 2);
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + samples as u32 * 2).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * 2).to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(samples as u32 * 2).to_le_bytes());
+        for i in 0..samples {
+            let t = i as f32 / rate as f32;
+            let v = ((2.0 * std::f32::consts::PI * 440.0 * t).sin() * 8000.0) as i16;
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        std::fs::write(path, out).expect("write wav");
+    }
+
+    #[test]
+    fn files_outside_the_library_are_analyzed_in_the_queue_and_come_back_in_order() {
+        let dir = tempdir().expect("tempdir");
+        let service = BackendService::new(dir.path()).expect("service");
+        let wav = dir.path().join("a.wav");
+        write_sine_wav(&wav, 20);
+        let request = CoreRequest {
+            kept_bpm: Some(128.0),
+            kept_first_beat_ms: None,
+            existing_first_beat_ms: None,
+            detect_key: false,
+            detection_required: false,
+            bpm_min: 70,
+            bpm_max: 180,
+            engine: AnalysisEngine::Stratum,
+        };
+        let results = service
+            .analyze_audio_files(vec![
+                (dir.path().join("missing.wav"), request),
+                (wav, request),
+            ])
+            .expect("analyze");
+        assert!(
+            matches!(results[0], FileAnalysis::Failed(_)),
+            "{:?}",
+            results[0]
+        );
+        let FileAnalysis::Done(core) = &results[1] else {
+            panic!("{:?}", results[1]);
+        };
+        assert_eq!(core.bpm, Some(128.0), "the kept BPM");
+        assert_eq!(core.duration_ms, Some(20_000));
+        assert_eq!(
+            core.waveform.peaks.len(),
+            super::super::waveform_detail_bins_for_duration(20_000)
+        );
+        // Nothing went into the library.
+        let rows: i64 = service
+            .db
+            .connect()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
+    }
+
+    #[test]
+    fn cancel_hands_waiting_files_back_as_cancelled() {
+        let dir = tempdir().expect("tempdir");
+        let service = BackendService::new(dir.path()).expect("service");
+        let (reply, replied) = mpsc::channel();
+        let (tx, _rx) = mpsc::channel();
+        let conn = service.db.open_dedicated().expect("conn");
+        let mut coordinator = Coordinator::new(service.clone(), conn, tx).expect("coordinator");
+        coordinator.paused = true;
+        coordinator.handle(Message::SubmitFiles(vec![QueuedFile {
+            audio: dir.path().join("a.wav"),
+            request: CoreRequest {
+                kept_bpm: None,
+                kept_first_beat_ms: None,
+                existing_first_beat_ms: None,
+                detect_key: false,
+                detection_required: false,
+                bpm_min: 70,
+                bpm_max: 180,
+                engine: AnalysisEngine::Stratum,
+            },
+            reply,
+        }]));
+        coordinator.dispatch();
+        assert!(replied.try_recv().is_err(), "waits while paused");
+        coordinator.handle(Message::Cancel);
+        assert!(matches!(replied.try_recv(), Ok(FileAnalysis::Cancelled)));
+        assert_eq!(
+            coordinator.cancelled_of, None,
+            "no library track was cut short"
         );
     }
 }
