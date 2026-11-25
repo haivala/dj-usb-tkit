@@ -826,6 +826,7 @@ fn save_result(
                 .first_beat_ms
                 .filter(|_| local.first_beat_estimated)
                 .map(|v| v as i64),
+            local.key_source,
         ])?;
     Ok(())
 }

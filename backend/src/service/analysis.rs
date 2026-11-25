@@ -78,6 +78,7 @@ const TRACK_ANALYSIS_UPDATE_SQL: &str = r#"
                 UPDATE tracks
                 SET bpm = COALESCE(?1, bpm),
                     tonality = COALESCE(?2, tonality),
+                    tonality_source = COALESCE(?10, tonality_source),
                     duration_ms = COALESCE(?3, duration_ms),
                     artwork_path = COALESCE(?4, artwork_path),
                     waveform_peaks_path = COALESCE(?5, waveform_peaks_path),
@@ -1069,13 +1070,18 @@ fn analyze_local_track_with_updates(
     let bpm_key_result = detect_bpm_key(engine, &samples, sample_rate, bpm_min, bpm_max)?;
     timing.finish_stage("BPM and key");
     // A kept BPM / key wins over the detection, in the DB and in the beat grid
-    // written below. `bpm_analyzer` stays unset for a kept BPM so the column
-    // keeps saying where it came from.
+    // written below. `bpm_analyzer` / `key_source` stay unset for a kept value
+    // so the column keeps saying where it came from; a detected one replaces
+    // the old source, or a later import would take the key for its own.
     let bpm = kept.bpm.or(bpm_key_result.bpm);
     let bpm_analyzer = bpm
         .filter(|_| kept.bpm.is_none())
         .map(|_| engine.bpm_analyzer().to_string());
     let key = kept.key.clone().or(bpm_key_result.key);
+    let key_source = key
+        .as_ref()
+        .filter(|_| kept.key.is_none())
+        .map(|_| engine.bpm_analyzer().to_string());
     let (first_beat_ms, first_beat_estimated) = first_beat_for_saved_bpm(
         &samples,
         sample_rate,
@@ -1124,6 +1130,7 @@ fn analyze_local_track_with_updates(
         bpm,
         bpm_analyzer,
         key,
+        key_source,
         first_beat_ms,
         first_beat_estimated,
         duration_ms,
@@ -2448,6 +2455,7 @@ mod tests {
                     id,
                     Option::<String>::None,
                     anchor,
+                    Option::<String>::None,
                 ],
             )
             .expect("persist analysis");
@@ -2467,6 +2475,54 @@ mod tests {
         assert_eq!(beat("same"), (250, "estimated".to_string()));
         assert_eq!(beat("imported"), (200, "estimated".to_string()));
         assert_eq!(beat("kept"), (300, "rekordbox".to_string()));
+    }
+
+    #[test]
+    fn analysis_update_replaces_the_source_of_a_detected_key() {
+        let conn = Connection::open_in_memory().expect("open db");
+        setup_tracks_table(&conn);
+        conn.execute_batch(
+            "INSERT INTO tracks (id, title, file_path, tonality, tonality_source, updated_at)
+             VALUES ('reanalyzed', 'Reanalyzed', '/m/r.mp3', 'Am', 'mixxx', '1'),
+                    ('kept', 'Kept', '/m/k.mp3', 'Am', 'rekordbox', '1');",
+        )
+        .expect("insert tracks");
+        // A detected key comes with its source; a kept one is written
+        // without, as `run_local_analysis` does.
+        for (id, key, source) in [
+            ("reanalyzed", "C", Some("stratum-v2")),
+            ("kept", "Am", None),
+        ] {
+            conn.execute(
+                TRACK_ANALYSIS_UPDATE_SQL,
+                rusqlite::params![
+                    120.0,
+                    key,
+                    10_000,
+                    Option::<String>::None,
+                    Option::<String>::None,
+                    "2",
+                    id,
+                    Option::<String>::None,
+                    Option::<i64>::None,
+                    source,
+                ],
+            )
+            .expect("persist analysis");
+        }
+        let key = |id| {
+            conn.query_row(
+                "SELECT tonality, tonality_source FROM tracks WHERE id = ?1",
+                [id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .expect("read key")
+        };
+        assert_eq!(
+            key("reanalyzed"),
+            ("C".to_string(), "stratum-v2".to_string())
+        );
+        assert_eq!(key("kept"), ("Am".to_string(), "rekordbox".to_string()));
     }
 
     fn insert_track(conn: &Connection, id: &str, title: &str) {

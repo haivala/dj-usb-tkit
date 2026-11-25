@@ -164,6 +164,9 @@ pub struct LocalAnalysisResult {
     pub bpm: Option<f64>,
     pub bpm_analyzer: Option<String>,
     pub key: Option<String>,
+    /// `tonality_source` for a key this analysis detected; `None` for a kept
+    /// key, which keeps its source.
+    pub key_source: Option<String>,
     pub first_beat_ms: Option<u32>,
     /// Whether this analysis placed `first_beat_ms`, rather than keeping one.
     pub first_beat_estimated: bool,

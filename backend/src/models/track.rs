@@ -28,7 +28,9 @@ pub struct Track {
     #[serde(default)]
     pub bpm_source_text: Option<String>,
     pub key: Option<String>,
-    /// `"stratum"` / `"essentia"` for a detected value, `"user"` after a manual edit.
+    /// `AnalysisEngine::bpm_analyzer` for a detected value (`"stratum-v2"`,
+    /// `"essentia"`; none for a key analyzed before the source was written),
+    /// `"user"` after a manual edit, `"rekordbox"` / `"mixxx"` from an import.
     pub key_source: Option<String>,
     /// `key` in the user's display notation (Classic/Camelot). Display only;
     /// set by `service::apply_frontend_track_fields`.

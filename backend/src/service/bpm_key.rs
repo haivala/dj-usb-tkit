@@ -23,10 +23,11 @@ impl AnalysisEngine {
         }
     }
 
-    /// What a detected BPM's `bpm_analyzer` is set to: the engine, plus the
-    /// version of its BPM steps when they have changed, so tracks analyzed
-    /// before a change can be found. A bare `"stratum"` is stratum's raw
-    /// estimate, before `refine_bpm`.
+    /// What a detected BPM's `bpm_analyzer` and a detected key's
+    /// `tonality_source` are set to: the engine, plus the version of its
+    /// steps when they have changed, so tracks analyzed before a change can be
+    /// found. A bare `"stratum"` is stratum's raw estimate, before
+    /// `refine_bpm`.
     pub fn bpm_analyzer(&self) -> &'static str {
         match self {
             Self::Stratum => "stratum-v2",
