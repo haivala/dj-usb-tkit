@@ -1,4 +1,5 @@
 use super::*;
+use crate::service::tests::{varied_waveform, write_sine_wav};
 
 fn fp(size: u32, title: &str) -> Option<ContentFingerprint> {
     Some((size, title.to_string(), "artist".to_string()))
@@ -2216,32 +2217,6 @@ fn apply_fix_empty_analysis_files_fails_when_source_audio_cannot_be_decoded() {
     );
 }
 
-/// A mono 16-bit 44.1 kHz WAV of a 440 Hz sine, `duration_ms` long.
-fn write_sine_wav(path: &Path, duration_ms: u32) {
-    let sample_rate: u32 = 44_100;
-    let samples = (sample_rate as u64 * duration_ms as u64 / 1000) as usize;
-    let data_len = (samples * 2) as u32;
-    let mut out = Vec::<u8>::with_capacity(44 + samples * 2);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(36 + data_len).to_le_bytes());
-    out.extend_from_slice(b"WAVEfmt ");
-    out.extend_from_slice(&16u32.to_le_bytes());
-    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
-    out.extend_from_slice(&1u16.to_le_bytes()); // mono
-    out.extend_from_slice(&sample_rate.to_le_bytes());
-    out.extend_from_slice(&(sample_rate * 2).to_le_bytes());
-    out.extend_from_slice(&2u16.to_le_bytes());
-    out.extend_from_slice(&16u16.to_le_bytes());
-    out.extend_from_slice(b"data");
-    out.extend_from_slice(&data_len.to_le_bytes());
-    for i in 0..samples {
-        let t = i as f32 / sample_rate as f32;
-        let v = ((2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.25 * i16::MAX as f32) as i16;
-        out.extend_from_slice(&v.to_le_bytes());
-    }
-    std::fs::write(path, out).expect("write wav");
-}
-
 fn history_test_track(id: u32, path: &str) -> PdbTrackRow {
     PdbTrackRow {
         header_flags: 0,
@@ -2832,26 +2807,6 @@ fn app_db_id(service: &BackendService) -> u32 {
     )
     .unwrap();
     u32::try_from(id).unwrap()
-}
-
-/// A waveform of `bins` bins that changes from bin to bin.
-fn varied_waveform(bins: usize, seed: usize) -> crate::service::anlz::WaveformData {
-    let energy = (0..bins)
-        .map(|i| ((i + seed) * 13 % 127) as u8)
-        .collect::<Vec<_>>();
-    crate::service::anlz::WaveformData {
-        peaks: (0..bins)
-            .map(|i| ((i + seed) * 37 % 90) as u8 + 5)
-            .collect(),
-        bands: (0..bins).map(|i| ((i + seed) % 6) as u8).collect(),
-        low_energy: energy.clone(),
-        mid_energy: energy.clone(),
-        high_energy: energy.clone(),
-        low_energy_full: energy.clone(),
-        mid_energy_full: energy.clone(),
-        high_energy_full: energy,
-        peak_level: 1.0,
-    }
 }
 
 /// Writes a whole bundle at `dat` drawn from `waveform`.

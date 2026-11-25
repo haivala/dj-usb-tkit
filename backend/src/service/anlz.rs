@@ -541,14 +541,10 @@ pub(crate) fn transcode_bundle_file(
     transcode_file: &[u8],
     shift_ms: u32,
 ) -> Option<Vec<u8>> {
-    let track_chunks = anlz_chunk_ranges(track_file)?;
+    // The waveforms are the transcode's own ([`with_waveform_chunks`]).
+    let track_file = with_waveform_chunks(track_file, transcode_file)?;
+    let track_chunks = anlz_chunk_ranges(&track_file)?;
     let transcode_chunks = anlz_chunk_ranges(transcode_file)?;
-    let from_transcode = |tag: &[u8; 4]| {
-        transcode_chunks
-            .iter()
-            .find(|(t, _)| t == tag)
-            .map(|(_, range)| &transcode_file[range.clone()])
-    };
     let transcode_seek: Vec<&[u8]> = transcode_chunks
         .iter()
         .filter(|(tag, _)| SEEK_TAGS.contains(&tag))
@@ -560,11 +556,7 @@ pub(crate) fn transcode_bundle_file(
     let mut seek_written = false;
     for (index, (tag, range)) in track_chunks.iter().enumerate() {
         let chunk = &track_file[range.clone()];
-        if WAVEFORM_TAGS.contains(&tag) {
-            if let Some(own) = from_transcode(tag) {
-                out.extend_from_slice(own);
-            }
-        } else if SEEK_TAGS.contains(&tag) {
+        if SEEK_TAGS.contains(&tag) {
             if !seek_written {
                 transcode_seek.iter().for_each(|c| out.extend_from_slice(c));
                 seek_written = true;
@@ -606,6 +598,69 @@ pub(crate) fn with_waveform_chunks(file: &[u8], source: &[u8]) -> Option<Vec<u8>
     let file_len = u32::try_from(out.len()).ok()?;
     out[8..12].copy_from_slice(&file_len.to_be_bytes());
     Some(out)
+}
+
+/// The waveform chunks of a bundle's `.DAT`, `.EXT` and `.2EX` (whichever
+/// read), to put into the same files of another bundle: the library's onto
+/// a stick's (export, the USB repair), or a freshly drawn one's.
+pub(crate) struct BundleWaveforms([Option<Vec<u8>>; 3]);
+
+impl BundleWaveforms {
+    /// The bundle `path` names any member of.
+    pub(crate) fn read(path: &Path) -> Self {
+        Self(["DAT", "EXT", "2EX"].map(|ext| std::fs::read(path.with_extension(ext)).ok()))
+    }
+
+    /// `waveform`, laid out as the bundle writer lays it out.
+    pub(crate) fn drawn(waveform: &WaveformData, duration_ms: u64) -> Self {
+        Self([
+            Some(build_anlz_dat_file(
+                waveform,
+                "",
+                None,
+                duration_ms,
+                None,
+                &[],
+            )),
+            Some(build_anlz_ext_file(
+                waveform,
+                "",
+                None,
+                duration_ms,
+                None,
+                &[],
+            )),
+            Some(build_anlz_2ex_file(waveform, "", duration_ms)),
+        ])
+    }
+
+    /// `bytes` (file `index` of a bundle: 0 `.DAT`, 1 `.EXT`, 2 `.2EX`) with
+    /// these waveforms; as it is when there are none for it or either file
+    /// doesn't walk ([`with_waveform_chunks`]).
+    pub(crate) fn apply(&self, index: usize, bytes: Vec<u8>) -> Vec<u8> {
+        self.0[index]
+            .as_deref()
+            .and_then(|source| with_waveform_chunks(&bytes, source))
+            .unwrap_or(bytes)
+    }
+
+    /// Puts these waveforms into the bundle at `dat`, keeping everything else
+    /// in it; a missing file is skipped. Returns whether a file changed.
+    pub(crate) fn copy_into(&self, dat: &Path) -> BackendResult<bool> {
+        let mut changed = false;
+        for (index, ext) in ["DAT", "EXT", "2EX"].into_iter().enumerate() {
+            let file = dat.with_extension(ext);
+            let Ok(bytes) = std::fs::read(&file) else {
+                continue;
+            };
+            let patched = self.apply(index, bytes.clone());
+            if patched != bytes {
+                atomic_write_bytes(&file, &patched)?;
+                changed = true;
+            }
+        }
+        Ok(changed)
+    }
 }
 
 /// The waveform chunks of ANLZ bytes, in file order.
@@ -2131,6 +2186,7 @@ pub fn build_anlz_2ex_file(waveform: &WaveformData, track_path: &str, duration_m
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service::tests::varied_waveform;
 
     /// A minimal `.DAT` whose `PPTH` names `track_path` (none when empty).
     fn dat_naming(track_path: &str) -> Vec<u8> {
@@ -3652,48 +3708,39 @@ mod tests {
         assert_eq!(untouched, plain);
     }
 
-    /// A waveform of `bins` bins that changes from bin to bin.
-    fn varied_waveform(bins: usize) -> WaveformData {
-        let energy = (0..bins).map(|i| (i * 13 % 127) as u8).collect::<Vec<_>>();
-        WaveformData {
-            peaks: (0..bins).map(|i| (i * 37 % 90) as u8 + 5).collect(),
-            bands: (0..bins).map(|i| (i % 6) as u8).collect(),
-            low_energy: energy.clone(),
-            mid_energy: energy.clone(),
-            high_energy: energy.clone(),
-            low_energy_full: energy.clone(),
-            mid_energy_full: energy.clone(),
-            high_energy_full: energy,
-            peak_level: 1.0,
-        }
-    }
-
     #[test]
     fn a_waveform_of_2400_bins_stretched_to_the_detail_length_is_told_apart() {
         // What the USB repairs drew with up to 0.6.6.
         let bins = 2400;
         let duration_ms = 222_000;
         // What the USB repairs drew up to 0.6.6.
-        let drawn = build_anlz_ext_file(&varied_waveform(bins), "", None, duration_ms, None, &[]);
+        let drawn =
+            build_anlz_ext_file(&varied_waveform(bins, 0), "", None, duration_ms, None, &[]);
         assert_eq!(pwv3_stretched_from_bins(&drawn, bins), Some(true));
         // What analysis (and rekordbox) draw: one value per detail entry.
         let detail = detail_entry_count(duration_ms) as usize;
-        let analyzed =
-            build_anlz_ext_file(&varied_waveform(detail), "", None, duration_ms, None, &[]);
+        let analyzed = build_anlz_ext_file(
+            &varied_waveform(detail, 0),
+            "",
+            None,
+            duration_ms,
+            None,
+            &[],
+        );
         assert_eq!(pwv3_stretched_from_bins(&analyzed, bins), Some(false));
         // Silence is constant over its bins whoever drew it.
         let flat = WaveformData {
             peaks: vec![40; bins],
             bands: vec![3; bins],
-            ..varied_waveform(bins)
+            ..varied_waveform(bins, 0)
         };
         let flat = build_anlz_ext_file(&flat, "", None, duration_ms, None, &[]);
         assert_eq!(pwv3_stretched_from_bins(&flat, bins), None);
         // Too short to tell: nearly every bin holds one entry.
-        let short = build_anlz_ext_file(&varied_waveform(bins), "", None, 16_000, None, &[]);
+        let short = build_anlz_ext_file(&varied_waveform(bins, 0), "", None, 16_000, None, &[]);
         assert_eq!(pwv3_stretched_from_bins(&short, bins), None);
         // No PWV3 at all.
-        let dat = build_anlz_dat_file(&varied_waveform(bins), "", None, duration_ms, None, &[]);
+        let dat = build_anlz_dat_file(&varied_waveform(bins, 0), "", None, duration_ms, None, &[]);
         assert_eq!(pwv3_stretched_from_bins(&dat, bins), None);
     }
 
@@ -3705,14 +3752,14 @@ mod tests {
             ..AnlzCue::default()
         }];
         let old = build_anlz_ext_file(
-            &varied_waveform(2400),
+            &varied_waveform(2400, 0),
             "/Contents/a.mp3",
             Some(128.0),
             222_000,
             Some(120),
             &cues,
         );
-        let source = build_anlz_ext_file(&varied_waveform(33_304), "", None, 222_000, None, &[]);
+        let source = build_anlz_ext_file(&varied_waveform(33_304, 0), "", None, 222_000, None, &[]);
         let swapped = with_waveform_chunks(&old, &source).expect("swap");
         assert_eq!(waveform_chunks(&swapped), waveform_chunks(&source));
         let rest = |data: &[u8]| {

@@ -8,7 +8,7 @@ use crate::i18n::tr;
 use crate::service::analysis::{
     CoreAnalysis, CoreRequest, FileAnalysis, TrackBundle, analysis_settings, write_track_bundle,
 };
-use crate::service::anlz::{pwv3_stretched_from_bins, with_waveform_chunks};
+use crate::service::anlz::{BundleWaveforms, pwv3_stretched_from_bins};
 use std::path::PathBuf;
 
 /// The bins the USB repairs drew a waveform with up to 0.6.6, stretched to
@@ -153,7 +153,7 @@ fn add_flac_seek_index(dat: &Path, audio: &Path) {
 /// Returns whether a file changed.
 pub(super) fn stamp_bundle_ppth(dat: &Path, track_path: &str) -> BackendResult<bool> {
     let mut changed = false;
-    for file in bundle_files(dat) {
+    for file in ["DAT", "EXT", "2EX"].map(|ext| dat.with_extension(ext)) {
         let Ok(data) = std::fs::read(&file) else {
             continue;
         };
@@ -164,14 +164,6 @@ pub(super) fn stamp_bundle_ppth(dat: &Path, track_path: &str) -> BackendResult<b
         }
     }
     Ok(changed)
-}
-
-fn bundle_files(dat: &Path) -> [PathBuf; 3] {
-    [
-        dat.to_path_buf(),
-        dat.with_extension("EXT"),
-        dat.with_extension("2EX"),
-    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -279,10 +271,6 @@ struct LibraryIndex {
     by_export_identity: HashMap<u32, String>,
 }
 
-fn library_path_key(path: &str) -> String {
-    path.replace('\\', "/").to_lowercase()
-}
-
 impl LibraryIndex {
     fn load(conn: &rusqlite::Connection) -> BackendResult<Self> {
         let mut index = Self::default();
@@ -308,7 +296,9 @@ impl LibraryIndex {
             let (track, size, title, artist) = row?;
             let at = index.tracks.len();
             index.by_id.insert(track.id.clone(), at);
-            index.by_path.insert(library_path_key(&track.file_path), at);
+            index
+                .by_path
+                .insert(analysis_path_key(Path::new(&track.file_path)), at);
             if let Some(fingerprint) = content_fingerprint_key(size, &title, &artist) {
                 index
                     .by_fingerprint
@@ -361,10 +351,7 @@ impl LibraryIndex {
             };
             return self.by_id.get(id).map(|&at| (&self.tracks[at], format));
         }
-        if let Some(&at) = audio.and_then(|audio| {
-            self.by_path
-                .get(&library_path_key(&audio.to_string_lossy()))
-        }) {
+        if let Some(&at) = audio.and_then(|audio| self.by_path.get(&analysis_path_key(audio))) {
             return Some((&self.tracks[at], None));
         }
         let fingerprint = pdb_track_fingerprint(parsed, row)?;
@@ -429,12 +416,6 @@ fn library_waveform_source(
     )
 }
 
-/// `waveforms_maybe_stretched` of the stick's export log; none without one.
-/// A USB track's key in the export log: its stick path.
-fn log_key(row: &crate::pdb_reader::PdbTrackRow) -> String {
-    track_identity_key(&row.track_file_path, "", "", None)
-}
-
 impl BackendService {
     /// The USB tracks whose waveform analysis up to 0.6.6 drew stretched
     /// ([`WaveformCheck::stretched`]), for the diagnostics' "Long-track
@@ -464,15 +445,6 @@ impl BackendService {
         }
         Ok(found)
     }
-}
-
-/// Whether a USB track is at least as long as analysis up to 0.6.6
-/// decoded: longer ones it drew stretched.
-fn longer_than_old_decode_cap(row: &crate::pdb_reader::PdbTrackRow) -> bool {
-    let rate = u64::from(row.sample_rate_hz.filter(|r| *r > 0).unwrap_or(44_100));
-    row.duration_seconds.is_some_and(|s| {
-        u64::from(s) * rate >= crate::service::analysis::BPM_KEY_MAX_SAMPLES as u64
-    })
 }
 
 /// The one test of whether a USB track's waveform is one an earlier
@@ -526,19 +498,28 @@ impl<'a> WaveformCheck<'a> {
     /// exported it with no repair redrawing it since. The bundle alone can't
     /// tell: a stretched waveform has the right length and entry count.
     fn maybe_stretched(&self, row: &crate::pdb_reader::PdbTrackRow) -> bool {
-        longer_than_old_decode_cap(row) && self.maybe_stretched.contains(&log_key(row))
+        // The migration's test of which waveforms analysis cut, on the
+        // stick's length and sample rate.
+        crate::service::migrations::reached_decode_cap(
+            row.duration_seconds.map_or(0, |s| i64::from(s) * 1000),
+            row.sample_rate_hz.map(i64::from),
+        ) && self
+            .maybe_stretched
+            .contains(&track_identity_key(&row.track_file_path, "", "", None))
     }
 
     /// Whether this app exported `row`, by the export log.
     fn exported(&self, row: &crate::pdb_reader::PdbTrackRow) -> bool {
-        self.exported.contains(&log_key(row))
+        self.exported
+            .contains(&track_identity_key(&row.track_file_path, "", "", None))
     }
 
-    /// The library track `row` is, matched exactly ([`LibraryIndex::find`]).
-    fn library_track_id(
+    /// The library track `row` is, matched exactly ([`LibraryIndex::find`]),
+    /// and the transcode format when the stick file is its transcode.
+    fn library_track(
         &mut self,
         row: &crate::pdb_reader::PdbTrackRow,
-    ) -> BackendResult<Option<String>> {
+    ) -> BackendResult<Option<(LibraryTrack, Option<crate::audio_encode::TranscodeFormat>)>> {
         if self.library.is_none() {
             self.library = Some(LibraryIndex::load(&self.library_conn)?);
         }
@@ -548,7 +529,7 @@ impl<'a> WaveformCheck<'a> {
             .library
             .as_ref()
             .and_then(|index| index.find(self.parsed, row, self.app_master_db_id, audio.as_deref()))
-            .map(|(track, _)| track.id.clone()))
+            .map(|(track, transcode)| (track.clone(), transcode)))
     }
 
     /// Where the library keeps `row`'s waveform, when it is in the library,
@@ -558,20 +539,11 @@ impl<'a> WaveformCheck<'a> {
         &mut self,
         row: &crate::pdb_reader::PdbTrackRow,
     ) -> BackendResult<Option<(WaveformSource, bool)>> {
-        if self.library.is_none() {
-            self.library = Some(LibraryIndex::load(&self.library_conn)?);
-        }
-        let audio =
-            crate::service::usb::root::resolve_usb_side_path(self.usb_root, &row.track_file_path);
-        Ok(self
-            .library
-            .as_ref()
-            .and_then(|index| index.find(self.parsed, row, self.app_master_db_id, audio.as_deref()))
-            .and_then(|(track, transcode)| {
-                let source =
-                    library_waveform_source(&self.library_conn, &self.data_dir, track, transcode)?;
-                Some((source, track.rekordbox))
-            }))
+        Ok(self.library_track(row)?.and_then(|(track, transcode)| {
+            let source =
+                library_waveform_source(&self.library_conn, &self.data_dir, &track, transcode)?;
+            Some((source, track.rekordbox))
+        }))
     }
 
     /// Where a [`Self::maybe_stretched`] track's new waveform comes from:
@@ -701,7 +673,7 @@ impl BackendService {
         let mut waveforms = WaveformCheck::new(self, usb_root, parsed, app_master_db_id)?;
         for row in &parsed.tracks {
             if non_owners.contains(&row.id) {
-                let library_track = waveforms.library_track_id(row)?;
+                let library_track = waveforms.library_track(row)?.map(|(track, _)| track.id);
                 if let Some(update) = updates.get_mut(&row.id) {
                     update.library_track = library_track;
                 }
@@ -743,71 +715,6 @@ pub(super) struct AppBundleOutcome {
     pub(super) skipped: usize,
     /// Tracks left as they were, each named in the Event Log.
     pub(super) failed: usize,
-}
-
-/// The waveform files a bundle's waveforms are copied from, by extension.
-struct WaveformFiles {
-    dat: Option<Vec<u8>>,
-    ext: Option<Vec<u8>>,
-    twoex: Option<Vec<u8>>,
-}
-
-impl WaveformFiles {
-    fn read(dat: &Path) -> Self {
-        Self {
-            dat: std::fs::read(dat).ok(),
-            ext: std::fs::read(dat.with_extension("EXT")).ok(),
-            twoex: std::fs::read(dat.with_extension("2EX")).ok(),
-        }
-    }
-
-    /// A drawn waveform, laid out as the bundle writer lays it out.
-    fn drawn(analysis: &StickAnalysis) -> Self {
-        use crate::service::anlz::{build_anlz_2ex_file, build_anlz_dat_file, build_anlz_ext_file};
-        let waveform = &analysis.core.waveform;
-        let duration_ms = analysis.duration_ms;
-        Self {
-            dat: Some(build_anlz_dat_file(
-                waveform,
-                "",
-                None,
-                duration_ms,
-                None,
-                &[],
-            )),
-            ext: Some(build_anlz_ext_file(
-                waveform,
-                "",
-                None,
-                duration_ms,
-                None,
-                &[],
-            )),
-            twoex: Some(build_anlz_2ex_file(waveform, "", duration_ms)),
-        }
-    }
-
-    /// Puts these waveforms into the bundle at `dat`, keeping everything
-    /// else in it. A file of the bundle that is missing or doesn't walk
-    /// cleanly is left as it is.
-    fn copy_into(&self, dat: &Path) -> BackendResult<bool> {
-        let mut changed = false;
-        for (file, source) in bundle_files(dat)
-            .into_iter()
-            .zip([&self.dat, &self.ext, &self.twoex])
-        {
-            let (Ok(bytes), Some(source)) = (std::fs::read(&file), source) else {
-                continue;
-            };
-            if let Some(patched) = with_waveform_chunks(&bytes, source)
-                && patched != bytes
-            {
-                atomic_write_bytes(&file, &patched)?;
-                changed = true;
-            }
-        }
-        Ok(changed)
-    }
 }
 
 /// Why one track's bundle wasn't updated, for its Event Log line.
@@ -1081,9 +988,12 @@ impl BackendService {
                 let mut changed = false;
                 if let Some((_, source)) = &update.waveform {
                     let files = match source {
-                        WaveformSource::Library(dat) => WaveformFiles::read(dat),
+                        WaveformSource::Library(dat) => BundleWaveforms::read(dat),
                         WaveformSource::Draw => match analyses.remove(&update.track_id) {
-                            Some((_, Ok(analysis))) => WaveformFiles::drawn(&analysis),
+                            Some((_, Ok(analysis))) => BundleWaveforms::drawn(
+                                &analysis.core.waveform,
+                                analysis.duration_ms,
+                            ),
                             Some((_, Err(err))) => return Err(err.into()),
                             None => return Err(UpdateFailure::Unreadable),
                         },

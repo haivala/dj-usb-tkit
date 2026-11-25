@@ -1,5 +1,53 @@
 use super::*;
 
+// --- helpers shared by the service's tests ---
+
+/// A mono 16-bit 44.1 kHz WAV of a 440 Hz sine, `duration_ms` long.
+pub(crate) fn write_sine_wav(path: &std::path::Path, duration_ms: u32) {
+    let sample_rate: u32 = 44_100;
+    let samples = (sample_rate as u64 * duration_ms as u64 / 1000) as usize;
+    let data_len = (samples * 2) as u32;
+    let mut out = Vec::<u8>::with_capacity(44 + samples * 2);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    out.extend_from_slice(&1u16.to_le_bytes()); // mono
+    out.extend_from_slice(&sample_rate.to_le_bytes());
+    out.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    for i in 0..samples {
+        let t = i as f32 / sample_rate as f32;
+        let v = ((2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.25 * i16::MAX as f32) as i16;
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    std::fs::write(path, out).expect("write wav");
+}
+
+/// A waveform of `bins` bins that changes from bin to bin.
+pub(crate) fn varied_waveform(bins: usize, seed: usize) -> crate::service::anlz::WaveformData {
+    let energy = (0..bins)
+        .map(|i| ((i + seed) * 13 % 127) as u8)
+        .collect::<Vec<_>>();
+    crate::service::anlz::WaveformData {
+        peaks: (0..bins)
+            .map(|i| ((i + seed) * 37 % 90) as u8 + 5)
+            .collect(),
+        bands: (0..bins).map(|i| ((i + seed) % 6) as u8).collect(),
+        low_energy: energy.clone(),
+        mid_energy: energy.clone(),
+        high_energy: energy.clone(),
+        low_energy_full: energy.clone(),
+        mid_energy_full: energy.clone(),
+        high_energy_full: energy,
+        peak_level: 1.0,
+    }
+}
+
 // --- build_track_match_fingerprint ---
 
 #[test]

@@ -1319,37 +1319,12 @@ mod tests {
         );
     }
 
-    /// A mono 16-bit 44.1 kHz WAV of a 440 Hz sine, `seconds` long.
-    fn write_sine_wav(path: &std::path::Path, seconds: u32) {
-        let rate = 44_100u32;
-        let samples = (rate * seconds) as usize;
-        let mut out = Vec::with_capacity(44 + samples * 2);
-        out.extend_from_slice(b"RIFF");
-        out.extend_from_slice(&(36 + samples as u32 * 2).to_le_bytes());
-        out.extend_from_slice(b"WAVEfmt ");
-        out.extend_from_slice(&16u32.to_le_bytes());
-        out.extend_from_slice(&1u16.to_le_bytes());
-        out.extend_from_slice(&1u16.to_le_bytes());
-        out.extend_from_slice(&rate.to_le_bytes());
-        out.extend_from_slice(&(rate * 2).to_le_bytes());
-        out.extend_from_slice(&2u16.to_le_bytes());
-        out.extend_from_slice(&16u16.to_le_bytes());
-        out.extend_from_slice(b"data");
-        out.extend_from_slice(&(samples as u32 * 2).to_le_bytes());
-        for i in 0..samples {
-            let t = i as f32 / rate as f32;
-            let v = ((2.0 * std::f32::consts::PI * 440.0 * t).sin() * 8000.0) as i16;
-            out.extend_from_slice(&v.to_le_bytes());
-        }
-        std::fs::write(path, out).expect("write wav");
-    }
-
     #[test]
     fn files_outside_the_library_are_analyzed_in_the_queue_and_come_back_in_order() {
         let dir = tempdir().expect("tempdir");
         let service = BackendService::new(dir.path()).expect("service");
         let wav = dir.path().join("a.wav");
-        write_sine_wav(&wav, 20);
+        crate::service::tests::write_sine_wav(&wav, 20_000);
         let request = CoreRequest {
             kept_bpm: Some(128.0),
             kept_first_beat_ms: None,

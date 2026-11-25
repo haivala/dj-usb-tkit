@@ -381,7 +381,7 @@ const DECODE_CAP_UP_TO_0_6_6: i64 = 24_000_000;
 /// Whether analysis up to 0.6.6 decoded only part of audio this long:
 /// `duration_ms` at `sample_rate_hz` (48 kHz when unknown, the lower length)
 /// reaches the decode cap, about 9 minutes at 44.1 kHz.
-fn reached_decode_cap(duration_ms: i64, sample_rate_hz: Option<i64>) -> bool {
+pub(crate) fn reached_decode_cap(duration_ms: i64, sample_rate_hz: Option<i64>) -> bool {
     let rate = sample_rate_hz.filter(|rate| *rate > 0).unwrap_or(48_000);
     duration_ms > 0 && duration_ms.saturating_mul(rate) / 1000 >= DECODE_CAP_UP_TO_0_6_6
 }

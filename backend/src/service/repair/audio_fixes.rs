@@ -577,7 +577,7 @@ pub(super) fn add_seek_data(
 
 /// Lookup key for an analysis file or folder on the USB: its whole path with
 /// `/` separators, lowercased because the stick's filesystem ignores case.
-fn analysis_path_key(path: &std::path::Path) -> String {
+pub(super) fn analysis_path_key(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/").to_lowercase()
 }
 
@@ -839,21 +839,8 @@ impl BackendService {
 
         // ── ANLZ: the bundle names the file it belongs to ─────────────
         for (anlz_path, rel) in &bundles {
-            let Some(dat) = resolve_usb_side_path(usb_root, anlz_path) else {
-                continue;
-            };
-            for file in [
-                dat.clone(),
-                dat.with_extension("EXT"),
-                dat.with_extension("2EX"),
-            ] {
-                let Ok(data) = std::fs::read(&file) else {
-                    continue;
-                };
-                let patched = ensure_ppth_chunk(&data, rel);
-                if patched != data {
-                    atomic_write_bytes(&file, &patched)?;
-                }
+            if let Some(dat) = resolve_usb_side_path(usb_root, anlz_path) {
+                stamp_bundle_ppth(&dat, rel)?;
             }
         }
 

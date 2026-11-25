@@ -642,18 +642,16 @@ fn incomplete_analysis_reason(local: &LocalAnalysisResult, render: fn(&Text) -> 
     missing.join(", ")
 }
 
+/// The track tables' small waveform of `waveform`, once its bundle is
+/// written: built from the `PWV4` the bundle writer writes for it, so the
+/// row shows during analysis exactly what it shows once read back.
 fn waveform_preview_if_persisted(
     waveform: &WaveformData,
     waveform_peaks_path: &Option<String>,
 ) -> Option<Vec<u8>> {
-    waveform_peaks_path.as_ref().map(|_| row_waveform(waveform))
-}
-
-/// The track tables' small waveform of `waveform`: built from the `PWV4` the
-/// bundle writer writes for it, so the row shows during analysis exactly what
-/// it shows once read back from the file.
-fn row_waveform(waveform: &WaveformData) -> Vec<u8> {
-    row_waveform_from_pwv4(&pwv4_payload(waveform))
+    waveform_peaks_path
+        .as_ref()
+        .map(|_| row_waveform_from_pwv4(&pwv4_payload(waveform)))
 }
 
 /// The fewest bins a waveform is drawn with, whatever the track's length: the
@@ -1036,7 +1034,7 @@ fn analyze_local_track_with_updates(
             }
             if !waveform.peaks.is_empty() {
                 on_update(TrackPartialUpdate {
-                    waveform_preview: Some(row_waveform(waveform)),
+                    waveform_preview: Some(row_waveform_from_pwv4(&pwv4_payload(waveform))),
                     ..TrackPartialUpdate::default()
                 });
             }
