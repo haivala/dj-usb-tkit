@@ -705,7 +705,7 @@ diagnostics-check-beat-grid = Beat grid format
 diagnostics-check-beat-grid-not-exported = no tracks on this USB were exported by this app
 diagnostics-check-beat-grid-current = every beat grid this app wrote to this USB is in the current format
 # $count: the tracks. $examples: up to three of their paths, joined with ", ".
-diagnostics-check-beat-grid-outdated = Tracks with a beat grid in an outdated format that some players (e.g. the XDJ-AZ) reject, so Beat Sync is unavailable on them: { $count }; e.g. { $examples }; re-export or run the repair (fix_beat_grid_header) to fix
+diagnostics-check-beat-grid-outdated = Tracks with a beat grid in an outdated format that some players (e.g. the XDJ-AZ) reject, so Beat Sync is unavailable on them: { $count }; e.g. { $examples }; re-export or run the repair (update_app_analysis_files) to fix
 diagnostics-check-pdb-analysis = PDB analysis refs
 # $with: the track rows with an analysis path. $total: all track rows. $refs: the different analysis files they point to.
 diagnostics-check-pdb-analysis-detail = { $with }/{ $total } track rows with analysis paths; { $refs ->
@@ -982,11 +982,8 @@ repair-overview-unindexed = Puts music files that are in no playlist into a play
 repair-overview-duplicate-copies = Deletes extra copies of music files that are in no playlist.
 repair-overview-missing-audio = Removes tracks whose music file is no longer on the USB. Play history keeps them.
 repair-overview-empty-analysis = Rebuilds missing waveforms and beat grids.
-repair-overview-shared-analysis = Gives tracks that show another track's waveform their own.
-repair-overview-analysis-path = Labels waveform files so players always pick the right one.
+repair-overview-app-analysis = Updates waveforms, beat grids and other analysis data that older app versions wrote, so players show each track's own waveform and Beat Sync works.
 repair-overview-bpm-key = Makes every player show the same BPM and key.
-repair-overview-beat-grid = Updates beat grids from older app versions so Beat Sync works on every player.
-repair-overview-mp3-seek = Adds the data players need to jump to any point in MP3 tracks.
 repair-overview-flac-seek = Adds the data players need to jump to any point in FLAC tracks.
 repair-overview-engine = Rebuilds the Denon / Numark library and keeps it up to date from now on. Changes made on those players themselves are replaced.
 repair-overview-other = Fixes other errors in the player database.
@@ -1012,16 +1009,9 @@ repair-fix-empty-analysis = Fix Empty Analysis Files
 repair-fix-empty-analysis-description = Regenerate missing/empty DAT/EXT/2EX bundles when source audio is resolvable.
 repair-fix-bpm-key = Fix BPM/Key Mismatch
 repair-fix-bpm-key-description = Rebuild the ANLZ beat grid and set the eDB BPM and key from each track's PDB row, so every player reads the same BPM and key. Waveforms, cues and the first beat are kept. See Event Log for the tracks.
-repair-fix-shared-analysis = Give Tracks Their Own Analysis Files
+repair-fix-app-analysis = Update Analysis Files From This App
 # $count: the tracks.
-repair-fix-shared-analysis-description = Tracks using another track's analysis file: { $count }. Players can show that track's waveform and beat grid instead. Each gets its own file in its folder (ANLZ0001 and on, as rekordbox names them), analysed from its audio with its BPM; the file's own track keeps it. Old cues stay with the other track. See Event Log for the list.
-repair-fix-analysis-path = Add Track Path to Analysis Files
-# $count: the analysis files.
-repair-fix-analysis-path-description = Analysis files not naming their track (PPTH): { $count }. Players use that path to find a track's file when two tracks hash to the same folder. Writes the track path into each; nothing else changes. See Event Log for the list.
-repair-fix-beat-grid = Fix Beat Grid
-repair-fix-beat-grid-description = Rewrite beat grids from app versions before 0.3.7 in rekordbox's format: the .DAT header value two bytes off, and the .EXT extended grid without its checksum and sub-millisecond beat times. Some players (e.g. the XDJ-AZ) refuse Beat Sync on those. Beat positions stay within 1 ms; cues and waveforms are kept.
-repair-fix-mp3-seek = Add Missing MP3 Seek Data
-repair-fix-mp3-seek-description = Read each MP3 on the USB and write the seek index rekordbox writes for it (PVBR in the .DAT), byte for byte as rekordbox does. Beat grids, cues and waveforms are kept. Files whose index can't be reproduced exactly are skipped and named in the Event Log.
+repair-fix-app-analysis-description = Tracks whose analysis file an older version of this app wrote and that is out of date: { $count }. Each gets what it lacks: the library's waveform (drawn from its audio when the track isn't in the library) instead of a coarse or stretched one, a file of its own when it shares another track's, the track path (PPTH) players match by, the beat grid in rekordbox's format and the MP3 seek index (PVBR). A library track whose waveform isn't drawn yet is analyzed first. The BPM, beats, cues and what players wrote are kept; rekordbox's own analysis files are never changed. See Event Log for the list.
 repair-fix-flac-seek = Add Missing FLAC Seek Data
 repair-fix-flac-seek-description = Read each FLAC on the USB and write a seek index (PVB2 in the .EXT). For long tracks about 98% of its entries match rekordbox's; the rest are one frame later. Beat grids, cues and waveforms are kept. Files that don't parse cleanly are skipped and named in the Event Log.
 repair-fix-ec-conflict = Repair Table Write-Pointer Conflict
@@ -1244,8 +1234,6 @@ repair-warning-bpm-key-mismatch = BPM/key mismatch: { $path } ({ $values })
 # $tracks: the track files that name it, comma-separated. $owner: the one that keeps it.
 repair-warning-shared-analysis = shared analysis file: { $path } used by { $tracks }; kept by { $owner }
 repair-warning-shared-analysis-no-owner = shared analysis file: { $path } used by { $tracks }; kept by no track (each gets its own)
-# $track: the track file the analysis file belongs to.
-repair-warning-analysis-without-track-path = analysis file without track path: { $path } ({ $track })
 # $format: MP3 or FLAC. $reason: what in the audio file stops it (technical, not translated).
 repair-warning-seek-data-unfixable-replace = { $format } seek data can't be added ({ $reason }; replace it with an intact copy): { $path }
 repair-warning-seek-data-unfixable-report = { $format } seek data can't be added ({ $reason }; please report this file (format details, not the audio) so its seek data can be supported): { $path }
@@ -1278,6 +1266,18 @@ repair-warning-duplicate-audio-removed = removed duplicate audio file: { $path }
 repair-warning-beat-grid-length-unknown = beat grid not rebuilt: track length unknown for { $path }
 # $track: the track's file. $path: its new analysis file.
 repair-warning-analysis-separated = own analysis file for { $track }: { $path }
+# $track: the track's USB path. $reasons: the repair-app-analysis-reason-* texts that apply, joined with ", ".
+repair-warning-app-analysis = analysis file out of date: { $track } ({ $reasons })
+repair-app-analysis-reason-shared = shares another track's file
+repair-app-analysis-reason-repair-drawn = coarse waveform from an earlier repair
+repair-app-analysis-reason-stretched = waveform stretched by analysis before 0.6.7
+repair-app-analysis-reason-grid = beat grid in the pre-0.3.7 format
+repair-app-analysis-reason-track-path = no track path
+repair-app-analysis-reason-mp3-seek = no MP3 seek data
+repair-warning-app-analysis-unreadable = analysis file not updated: unable to analyze the audio of { $track }
+repair-warning-app-analysis-library-failed = analysis file not updated: the library could not analyze { $track }
+repair-warning-app-analysis-write-failed = analysis file not updated for { $track }: { $error }
+repair-warning-app-analysis-check-failed = analysis files this app wrote not checked: { $error }
 repair-warning-beat-grid-not-constant = beat grid not rewritten (not a constant-tempo grid): { $path }
 # $format: MP3 or FLAC. $reason: what in the audio file stops it (technical, not translated).
 repair-warning-seek-data-skipped-replace = { $format } seek data not added ({ $reason }): { $path }; replace it with an intact copy
@@ -1341,15 +1341,6 @@ repair-outcome-detail-duplicate-copies = deleted { $count ->
     [one] { $count } file
    *[other] { $count } files
 }
-# $kept: tracks that keep the file they shared.
-repair-outcome-detail-shared-analysis = gave { $count ->
-    [one] { $count } track
-   *[other] { $count } tracks
-} a new analysis file, { $kept } kept the original
-repair-outcome-detail-analysis-path = named the track in { $count ->
-    [one] { $count } analysis file
-   *[other] { $count } analysis files
-}
 repair-outcome-detail-bpm-key = rebuilt { $grids ->
     [one] { $grids } beat grid
    *[other] { $grids } beat grids
@@ -1357,10 +1348,11 @@ repair-outcome-detail-bpm-key = rebuilt { $grids ->
     [one] { $rows } eDB row
    *[other] { $rows } eDB rows
 }
-repair-outcome-detail-beat-grid = fixed { $count ->
-    [one] { $count } bundle
-   *[other] { $count } bundles
-}
+# $updated: tracks whose analysis file was updated. $separated: tracks given a file of their own. $skipped: MP3s whose seek data couldn't be built, $failed: tracks left as they were (both named in the Event Log).
+repair-outcome-detail-app-analysis = updated { $updated ->
+    [one] { $updated } analysis file
+   *[other] { $updated } analysis files
+}, { $separated } new, { $skipped } skipped, { $failed } failed
 repair-outcome-detail-engine = setting on, rebuilt ({ $tracks ->
     [one] { $tracks } track
    *[other] { $tracks } tracks

@@ -57,11 +57,8 @@ fn fix_overview_line(fix_id: &str) -> Option<(usize, fn() -> Text)> {
             (AREA_MUSIC_FILES, tr::repair_overview_missing_audio)
         }
         EMPTY_ANALYSIS_FILES_FIX_ID => (AREA_ANALYSIS, tr::repair_overview_empty_analysis),
-        SHARED_ANALYSIS_FIX_ID => (AREA_ANALYSIS, tr::repair_overview_shared_analysis),
-        ANALYSIS_TRACK_PATH_FIX_ID => (AREA_ANALYSIS, tr::repair_overview_analysis_path),
+        UPDATE_APP_ANALYSIS_FIX_ID => (AREA_ANALYSIS, tr::repair_overview_app_analysis),
         BPM_KEY_MISMATCH_FIX_ID => (AREA_ANALYSIS, tr::repair_overview_bpm_key),
-        BEAT_GRID_HEADER_FIX_ID => (AREA_ANALYSIS, tr::repair_overview_beat_grid),
-        MISSING_MP3_SEEK_DATA_FIX_ID => (AREA_ANALYSIS, tr::repair_overview_mp3_seek),
         MISSING_FLAC_SEEK_DATA_FIX_ID => (AREA_ANALYSIS, tr::repair_overview_flac_seek),
         ENGINE_LIBRARY_FIX_ID => (AREA_ENGINE, tr::repair_overview_engine),
         _ => return None,

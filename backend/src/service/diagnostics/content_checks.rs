@@ -250,7 +250,7 @@ pub(crate) fn detect_bpm_key_mismatches(
 
     // A shared bundle is only its owner's to align: rebuilding it for
     // another track breaks it for the owner, and the next scan flags the
-    // owner. `separate_shared_analysis` gives the other tracks their own
+    // owner. `update_app_analysis_files` gives the other tracks their own
     // bundle, analysed with their own BPM, before this fix runs.
     let shared_bundle_tracks = if scan_anlz {
         scan_analysis_ownership(usb_root, parsed, app_master_db_id, true).non_owner_track_ids()

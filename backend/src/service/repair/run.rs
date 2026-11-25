@@ -147,9 +147,10 @@ struct DetectedRepairs {
     empty_analysis_paths: Vec<std::path::PathBuf>,
     parsed_pdb: Option<std::sync::Arc<ParsedPdb>>,
     bpm_key_mismatches: Vec<BpmKeyMismatch>,
-    analysis_ownership: AnalysisOwnership,
     app_master_db_id: Option<u32>,
-    app_beat_grids: Vec<std::path::PathBuf>,
+    /// Tracks `update_app_analysis_files` found; the apply finds them again.
+    app_bundle_updates: usize,
+    /// The FLAC seek-data fix's targets (MP3s are the app-analysis fix's).
     missing_seek_data: Vec<(SeekFormat, Vec<MissingSeekData>)>,
     pdb_damaged_headers: Vec<DamagedPageHeader>,
     pdb_inconsistent_footers: Vec<InconsistentFooterPage>,
@@ -287,7 +288,7 @@ mod progress_tests {
     const TITLES: [fn() -> Text; 5] = [
         tr::repair_fix_empty_analysis,
         tr::repair_fix_bpm_key,
-        tr::repair_fix_beat_grid,
+        tr::repair_fix_header,
         tr::repair_fix_relink,
         tr::repair_fix_t19,
     ];
@@ -311,7 +312,10 @@ mod progress_tests {
             events[5],
             (
                 81,
-                crate::progress::with_detail("USB: Applying Fix Beat Grid", "1/2")
+                crate::progress::with_detail(
+                    "USB: Applying Repair PDB Header Compatibility Field",
+                    "1/2"
+                )
             )
         );
         assert_eq!(events[6].0, 84);
@@ -909,16 +913,6 @@ impl BackendService {
                 ),
                 counted(movers, "track", "tracks")
             ));
-            proposed_fixes.push(RepairFixProposal {
-                destructive: true,
-                estimated_writes: movers * 3,
-                link: Some("event-log".to_string()),
-                ..fix_proposal(
-                    SHARED_ANALYSIS_FIX_ID,
-                    tr::repair_fix_shared_analysis(),
-                    tr::repair_fix_shared_analysis_description(movers),
-                )
-            });
             for bundle in &analysis_ownership.shared {
                 let tracks = bundle
                     .track_ids
@@ -945,60 +939,23 @@ impl BackendService {
                 ));
             }
         }
-        if !analysis_ownership.unmarked.is_empty() {
-            let count = analysis_ownership.unmarked.len();
-            detected_issues.push(format!(
-                "{} without the track path players match by",
-                counted(count, "analysis file", "analysis files")
-            ));
-            proposed_fixes.push(RepairFixProposal {
-                estimated_writes: count * 3,
-                link: Some("event-log".to_string()),
-                ..fix_proposal(
-                    ANALYSIS_TRACK_PATH_FIX_ID,
-                    tr::repair_fix_analysis_path(),
-                    tr::repair_fix_analysis_path_description(count),
-                )
-            });
-            for bundle in &analysis_ownership.unmarked {
-                warnings.push(logging::log_text(
-                    Level::Warn,
-                    "usb-diagnostics",
-                    "usb.diagnostics.analysis-without-track-path",
-                    &tr::repair_warning_analysis_without_track_path(
-                        bundle_rel(&bundle.dat),
-                        &bundle.track_path,
-                    ),
-                ));
-            }
-        }
-        let app_beat_grids = outdated_beat_grid_bundles(
-            parsed_pdb
-                .as_ref()
-                .map(|parsed| match staged_pdb_path.as_deref() {
-                    Some(path) => self.outdated_beat_grids(&usb_root, path, parsed),
-                    None => std::sync::Arc::new(
-                        crate::service::diagnostics::detect_outdated_beat_grids(&usb_root, parsed),
-                    ),
-                })
-                .as_deref()
-                .and_then(|found| found.as_deref()),
-        );
+        // App-written beat grids in the pre-0.3.7 format: one of the things
+        // `update_app_analysis_files` updates.
+        let outdated_grids: Vec<std::path::PathBuf> = parsed_pdb
+            .as_ref()
+            .map(|parsed| match staged_pdb_path.as_deref() {
+                Some(path) => self.outdated_beat_grids(&usb_root, path, parsed),
+                None => std::sync::Arc::new(
+                    crate::service::diagnostics::detect_outdated_beat_grids(&usb_root, parsed),
+                ),
+            })
+            .as_deref()
+            .and_then(|found| found.as_deref())
+            .unwrap_or_default()
+            .iter()
+            .map(|grid| grid.dat.clone())
+            .collect();
         note_stage("beat grid check");
-        if !app_beat_grids.is_empty() {
-            detected_issues.push(format!(
-                "{} with a beat grid in the pre-0.3.7 format",
-                counted(app_beat_grids.len(), "analysis bundle", "analysis bundles")
-            ));
-            proposed_fixes.push(RepairFixProposal {
-                estimated_writes: app_beat_grids.len(),
-                ..fix_proposal(
-                    BEAT_GRID_HEADER_FIX_ID,
-                    tr::repair_fix_beat_grid(),
-                    tr::repair_fix_beat_grid_description(),
-                )
-            });
-        }
         // Only the analysis files are read here: the fix is offered for every
         // bundle without seek data, and the audio is parsed once, by the
         // apply. A file the apply had to skip is remembered (`SeekSkipMemory`)
@@ -1040,6 +997,15 @@ impl BackendService {
                     (format, fixable)
                 })
                 .collect();
+        // The MP3 seek index is added by `update_app_analysis_files`; the
+        // FLAC one (inexact for long tracks) stays a fix of its own.
+        let (mp3_missing_seek, missing_seek_data): (Vec<_>, Vec<_>) = missing_seek_data
+            .into_iter()
+            .partition(|(format, _)| *format == SeekFormat::Mp3);
+        let mp3_missing_seek = mp3_missing_seek
+            .into_iter()
+            .flat_map(|(_, missing)| missing)
+            .collect::<Vec<_>>();
         for (format, missing) in &missing_seek_data {
             if missing.is_empty() {
                 continue;
@@ -1052,22 +1018,74 @@ impl BackendService {
                     &format!("{} tracks", format.name())
                 )
             ));
-            let (title, description) = match format {
-                SeekFormat::Mp3 => (
-                    tr::repair_fix_mp3_seek(),
-                    tr::repair_fix_mp3_seek_description(),
-                ),
-                SeekFormat::Flac => (
-                    tr::repair_fix_flac_seek(),
-                    tr::repair_fix_flac_seek_description(),
-                ),
-            };
             proposed_fixes.push(RepairFixProposal {
                 estimated_writes: missing.len(),
-                ..fix_proposal(format.fix_id(), title, description)
+                ..fix_proposal(
+                    format.fix_id(),
+                    format.title_text(),
+                    tr::repair_fix_flac_seek_description(),
+                )
             });
         }
         note_stage("seek data check");
+
+        // Bundles this app wrote that are out of date, each with everything
+        // it needs (`update_app_analysis_files`).
+        let app_bundle_updates = match parsed_pdb.as_ref() {
+            Some(parsed) => self
+                .detect_app_bundle_updates(
+                    &usb_root,
+                    parsed,
+                    app_master_db_id,
+                    &AppBundleFindings {
+                        ownership: &analysis_ownership,
+                        outdated_grids: &outdated_grids,
+                        mp3_missing_seek: &mp3_missing_seek,
+                    },
+                )
+                .unwrap_or_else(|err| {
+                    warnings.push(logging::log_text(
+                        Level::Warn,
+                        "usb-diagnostics",
+                        "usb.diagnostics.app-analysis-unreadable",
+                        &tr::repair_warning_app_analysis_check_failed(err),
+                    ));
+                    Vec::new()
+                }),
+            None => Vec::new(),
+        };
+        note_stage("app analysis files check");
+        if !app_bundle_updates.is_empty() {
+            let count = app_bundle_updates.len();
+            detected_issues.push(format!(
+                "{} with an analysis file this app wrote that is out of date",
+                counted(count, "track", "tracks")
+            ));
+            proposed_fixes.push(RepairFixProposal {
+                estimated_writes: count * 3,
+                link: Some("event-log".to_string()),
+                ..fix_proposal(
+                    UPDATE_APP_ANALYSIS_FIX_ID,
+                    tr::repair_fix_app_analysis(),
+                    tr::repair_fix_app_analysis_description(count),
+                )
+            });
+            for update in &app_bundle_updates {
+                let line = |r: fn(&Text) -> String| {
+                    r(&tr::repair_warning_app_analysis(
+                        &update.track_path,
+                        update.reasons(r),
+                    ))
+                };
+                warnings.push(logging::log_rendered(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.app-analysis",
+                    line(Text::render),
+                    &line(Text::render_english),
+                ));
+            }
+        }
         // Every PDB detector below reads the same staged bytes.
         let staged_pdb_bytes = staged_pdb_path
             .as_deref()
@@ -1888,9 +1906,8 @@ impl BackendService {
             empty_analysis_paths,
             parsed_pdb,
             bpm_key_mismatches,
-            analysis_ownership,
             app_master_db_id,
-            app_beat_grids,
+            app_bundle_updates: app_bundle_updates.len(),
             missing_seek_data,
             pdb_damaged_headers,
             pdb_inconsistent_footers,
@@ -2053,9 +2070,8 @@ impl BackendService {
             empty_analysis_paths,
             parsed_pdb,
             bpm_key_mismatches,
-            analysis_ownership,
             app_master_db_id,
-            app_beat_grids,
+            app_bundle_updates,
             missing_seek_data,
             pdb_damaged_headers,
             pdb_inconsistent_footers,
@@ -2648,35 +2664,59 @@ impl BackendService {
             outcomes.not_selected(tr::repair_fix_missing_audio());
         }
 
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_shared_analysis(),
-            selected.contains(SHARED_ANALYSIS_FIX_ID),
-            !analysis_ownership.shared.is_empty(),
-            || {
-                pdb.on_file(|| {
-                    apply_separate_shared_analysis(
-                        usb_root,
-                        app_master_db_id,
-                        session.edb_conn(),
-                        warnings,
-                    )
-                })
-                .map(|(moved, kept)| {
-                    Detail::Text(tr::repair_outcome_detail_shared_analysis(moved, kept))
-                })
-            },
-        );
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_analysis_path(),
-            selected.contains(ANALYSIS_TRACK_PATH_FIX_ID),
-            !analysis_ownership.unmarked.is_empty(),
-            || {
-                pdb.on_file(|| apply_add_analysis_track_path(usb_root, app_master_db_id))
-                    .map(|stamped| Detail::Text(tr::repair_outcome_detail_analysis_path(stamped)))
-            },
-        );
+        // Before the BPM fix: it only aligns a bundle that is one track's own.
+        let app_selected = selected.contains(UPDATE_APP_ANALYSIS_FIX_ID);
+        let app_found = app_bundle_updates > 0;
+        if app_selected && app_found {
+            progress.start(&tr::repair_fix_app_analysis());
+        }
+        let seek_skips = SeekSkipMemory::open(&self.db.data_dir(), usb_root);
+        if app_selected && app_found {
+            let result = pdb.on_file(|| {
+                self.apply_update_app_analysis_files(
+                    usb_root,
+                    app_master_db_id,
+                    session.edb_conn(),
+                    &seek_skips,
+                    warnings,
+                    &mut |event| match event {
+                        SeekApplyEvent::Reading {
+                            done,
+                            total,
+                            file,
+                            mb_per_s,
+                        } => progress.item_reading(done, total, file, mb_per_s),
+                        SeekApplyEvent::ItemDone { done, total } => progress.item_done(done, total),
+                    },
+                )
+            });
+            match result {
+                Ok(outcome) => {
+                    let detail = Detail::Text(tr::repair_outcome_detail_app_analysis(
+                        outcome.updated,
+                        outcome.separated,
+                        outcome.skipped,
+                        outcome.failed,
+                    ));
+                    if outcome.failed > 0 {
+                        outcomes.push(
+                            tr::repair_fix_app_analysis(),
+                            FixResult::PartlyFailed(detail),
+                        );
+                    } else if outcome.updated + outcome.separated + outcome.skipped > 0 {
+                        outcomes.applied(tr::repair_fix_app_analysis(), detail);
+                    } else {
+                        outcomes.nothing_to_apply(tr::repair_fix_app_analysis());
+                    }
+                }
+                Err(err) => outcomes.failed(tr::repair_fix_app_analysis(), &err),
+            }
+            progress.finish();
+        } else if app_found {
+            outcomes.not_selected(tr::repair_fix_app_analysis());
+        } else if app_selected {
+            outcomes.nothing_to_apply(tr::repair_fix_app_analysis());
+        }
 
         let bpm_selected = selected.contains(BPM_KEY_MISMATCH_FIX_ID);
         let bpm_found = !bpm_key_mismatches.is_empty();
@@ -2701,29 +2741,6 @@ impl BackendService {
             progress.finish();
         }
 
-        let grid_selected = selected.contains(BEAT_GRID_HEADER_FIX_ID);
-        let grid_found = !app_beat_grids.is_empty();
-        if grid_selected && grid_found {
-            progress.start(&tr::repair_fix_beat_grid());
-        }
-        outcomes.record(
-            tr::repair_fix_beat_grid(),
-            grid_selected,
-            grid_found,
-            || {
-                pdb.on_file(|| {
-                    apply_beat_grid_repair(usb_root, warnings, &mut |done, total| {
-                        progress.item_done(done, total)
-                    })
-                })
-                .map(|fixed| Detail::Text(tr::repair_outcome_detail_beat_grid(fixed)))
-            },
-        );
-        if grid_selected && grid_found {
-            progress.finish();
-        }
-
-        let seek_skips = SeekSkipMemory::open(&self.db.data_dir(), usb_root);
         for (format, missing) in &missing_seek_data {
             let selected_format = selected.contains(format.fix_id());
             let found = !missing.is_empty();

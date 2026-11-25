@@ -587,6 +587,81 @@ pub(crate) fn transcode_bundle_file(
     Some(out)
 }
 
+/// `file` with its waveform chunks replaced by `source`'s chunks of the same
+/// tag; every other chunk (beat grid, cues, `PPTH`, seek index, and whatever
+/// a player wrote) is kept byte for byte, and a waveform `source` lacks stays
+/// as it was. `None` when either file doesn't walk cleanly.
+pub(crate) fn with_waveform_chunks(file: &[u8], source: &[u8]) -> Option<Vec<u8>> {
+    let chunks = anlz_chunk_ranges(file)?;
+    let source_chunks = anlz_chunk_ranges(source)?;
+    let mut out = file[..28].to_vec();
+    for (tag, range) in chunks {
+        let replacement = WAVEFORM_TAGS
+            .contains(&&tag)
+            .then(|| source_chunks.iter().find(|(t, _)| *t == tag))
+            .flatten()
+            .map(|(_, r)| &source[r.clone()]);
+        out.extend_from_slice(replacement.unwrap_or(&file[range]));
+    }
+    let file_len = u32::try_from(out.len()).ok()?;
+    out[8..12].copy_from_slice(&file_len.to_be_bytes());
+    Some(out)
+}
+
+/// The waveform chunks of ANLZ bytes, in file order: what two bundles are
+/// compared by to tell whether they show the same waveform.
+pub(crate) fn waveform_chunks(data: &[u8]) -> Vec<&[u8]> {
+    super::anlz_read::anlz_chunks(data)
+        .filter(|chunk| WAVEFORM_TAGS.contains(&&chunk.tag))
+        .map(|chunk| &data[chunk.range])
+        .collect()
+}
+
+/// Detail entries past `bins` a `PWV3` needs before
+/// [`pwv3_stretched_from_bins`] can tell: each is a bucket holding two
+/// entries, and a waveform drawn per entry has about even odds of two equal
+/// neighbours, so this many all equal never happens by chance.
+const STRETCHED_PWV3_MIN_REPEATS: usize = 256;
+
+/// Whether an `.EXT`'s `PWV3` is a waveform of `bins` bins stretched to its
+/// detail length: each entry the same as the first one of its bin
+/// (`peaks_to_levels` / `bands_to_levels` pick bin `i * bins / count`), as
+/// the USB repairs before 0.6.7 drew them. rekordbox and this app's analysis
+/// draw every entry from its own stretch of audio, so theirs never are.
+/// `None` without a `PWV3`, or with too few entries to tell (a track under
+/// about 18 s).
+pub(crate) fn pwv3_stretched_from_bins(ext: &[u8], bins: usize) -> Option<bool> {
+    let body = super::anlz_read::anlz_chunks(ext)
+        .find(|chunk| &chunk.tag == b"PWV3")
+        .map(|chunk| &ext[chunk.range])?;
+    let count = read_u32_be_at(body, 16)? as usize;
+    let header_len = read_u32_be_at(body, 4)? as usize;
+    let entries = body.get(header_len..header_len.checked_add(count)?)?;
+    if bins == 0 || count < bins + STRETCHED_PWV3_MIN_REPEATS {
+        return None;
+    }
+    let mut bin_start = 0usize;
+    let mut changes = 0usize;
+    for (i, value) in entries.iter().enumerate() {
+        let bin = i * bins / count;
+        if i == 0 || (i - 1) * bins / count != bin {
+            if i > 0 && *value != entries[bin_start] {
+                changes += 1;
+            }
+            bin_start = i;
+        } else if *value != entries[bin_start] {
+            return Some(false);
+        }
+    }
+    // A waveform that hardly changes from bin to bin (silence) is constant
+    // over its bins whoever drew it: not told apart.
+    (changes >= STRETCHED_PWV3_MIN_CHANGES).then_some(true)
+}
+
+/// Bin-to-bin changes a `PWV3` needs before [`pwv3_stretched_from_bins`]
+/// counts it as drawn from bins: a near-constant one says nothing.
+const STRETCHED_PWV3_MIN_CHANGES: usize = 64;
+
 /// A `PQTZ` chunk with every beat `shift_ms` later.
 fn shifted_pqtz(chunk: &[u8], shift_ms: u32) -> Option<Vec<u8>> {
     let mut out = chunk.to_vec();
@@ -1591,6 +1666,40 @@ fn append_pwvc_chunk(file: &mut Vec<u8>) {
 // Resampling helpers
 // ===========================================================================
 
+/// `PWV4` entries: rekordbox's colour preview has 1,200.
+const PWV4_ENTRIES: usize = 1200;
+
+/// The `PWV4` payload the `.EXT` writer writes for `waveform`: 1,200 entries
+/// of six lanes. Also what the track tables' waveform is read from, so the
+/// one drawn during analysis is the one the file holds.
+pub(crate) fn pwv4_payload(waveform: &WaveformData) -> Vec<u8> {
+    let preview_count = PWV4_ENTRIES;
+    let preview_levels =
+        peaks_to_absolute_levels(&waveform.peaks, preview_count, waveform.peak_level, 127);
+    // Use independently-scaled full-range band data for PWV4.
+    // Each band fills 0-127 using its own p95 reference (set in analysis stage).
+    let lows = resample_energy(&waveform.low_energy_full, preview_count);
+    let mids = resample_energy(&waveform.mid_energy_full, preview_count);
+    let highs = resample_energy(&waveform.high_energy_full, preview_count);
+    let mut payload = Vec::<u8>::with_capacity(preview_count * 6);
+    for i in 0..preview_count {
+        let b0 = preview_levels[i];
+        // d1: luminance boost — inverse of amplitude, floor 128 (reference pattern)
+        let b1 = if b0 == 0 {
+            0u8
+        } else {
+            255u8.saturating_sub(b0).max(128)
+        };
+        let b2 =
+            (((u16::from(lows[i]) + u16::from(mids[i])) * 3 / 4).saturating_sub(12)).min(127) as u8;
+        let b3 = lows[i];
+        let b4 = mids[i];
+        let b5 = highs[i];
+        payload.extend_from_slice(&[b0, b1, b2, b3, b4, b5]);
+    }
+    payload
+}
+
 /// Resample peaks (0-100) to height values (0-31) at target count.
 pub(crate) fn peaks_to_levels(peaks: &[u8], count: usize) -> Vec<u8> {
     if peaks.is_empty() || count == 0 {
@@ -1925,38 +2034,11 @@ pub fn build_anlz_ext_file(
     //   d4 = green channel / mid frequency (0-127)
     //   d5 = blue channel + front waveform height (0-127)
     {
-        let preview_count = 1200u32;
         let mut header = Vec::<u8>::new();
         header.extend_from_slice(&6u32.to_be_bytes()); // len_entry_bytes
-        header.extend_from_slice(&preview_count.to_be_bytes());
+        header.extend_from_slice(&(PWV4_ENTRIES as u32).to_be_bytes());
         header.extend_from_slice(&0u32.to_be_bytes());
-        let preview_levels = peaks_to_absolute_levels(
-            &waveform.peaks,
-            preview_count as usize,
-            waveform.peak_level,
-            127,
-        );
-        // Use independently-scaled full-range band data for PWV4.
-        // Each band fills 0-127 using its own p95 reference (set in analysis stage).
-        let lows = resample_energy(&waveform.low_energy_full, preview_count as usize);
-        let mids = resample_energy(&waveform.mid_energy_full, preview_count as usize);
-        let highs = resample_energy(&waveform.high_energy_full, preview_count as usize);
-        let mut payload = Vec::<u8>::with_capacity((preview_count * 6) as usize);
-        for i in 0..preview_count as usize {
-            let b0 = preview_levels[i];
-            // d1: luminance boost — inverse of amplitude, floor 128 (reference pattern)
-            let b1 = if b0 == 0 {
-                0u8
-            } else {
-                255u8.saturating_sub(b0).max(128)
-            };
-            let b2 = (((u16::from(lows[i]) + u16::from(mids[i])) * 3 / 4).saturating_sub(12))
-                .min(127) as u8;
-            let b3 = lows[i];
-            let b4 = mids[i];
-            let b5 = highs[i];
-            payload.extend_from_slice(&[b0, b1, b2, b3, b4, b5]);
-        }
+        let payload = pwv4_payload(waveform);
         append_anlz_chunk(&mut file, b"PWV4", &header, &payload);
     }
 
@@ -2367,16 +2449,14 @@ mod tests {
 
     #[test]
     fn every_reader_stops_at_a_damaged_chunk() {
-        use crate::service::anlz_read::{
-            anlz_chunk_payload, extract_waveform_preview_from_anlz_bytes,
-        };
+        use crate::service::anlz_read::{anlz_chunk_payload, row_waveform_from_anlz_bytes};
         let (ext, damaged, at) = ext_damaged_at_pco2();
         assert!(anlz_chunk_payload(&ext, b"PWV5").is_some());
 
         // Chunks before the damage read; nothing after it does, not even a
         // chunk whose header is intact.
         assert!(anlz_chunk_payload(&damaged, b"PWV3").is_some());
-        assert!(extract_waveform_preview_from_anlz_bytes(&damaged, 50).is_some());
+        assert!(row_waveform_from_anlz_bytes(&damaged).is_some());
         assert_eq!(anlz_chunk_payload(&damaged, b"PWV5"), None);
         assert_eq!(anlz_chunk_payload(&damaged, b"PWV4"), None);
         let mut chunks = anlz_chunks(&damaged);
@@ -3570,5 +3650,85 @@ mod tests {
             },
         );
         assert_eq!(untouched, plain);
+    }
+
+    /// A waveform of `bins` bins that changes from bin to bin.
+    fn varied_waveform(bins: usize) -> WaveformData {
+        let energy = (0..bins).map(|i| (i * 13 % 127) as u8).collect::<Vec<_>>();
+        WaveformData {
+            peaks: (0..bins).map(|i| (i * 37 % 90) as u8 + 5).collect(),
+            bands: (0..bins).map(|i| (i % 6) as u8).collect(),
+            low_energy: energy.clone(),
+            mid_energy: energy.clone(),
+            high_energy: energy.clone(),
+            low_energy_full: energy.clone(),
+            mid_energy_full: energy.clone(),
+            high_energy_full: energy,
+            peak_level: 1.0,
+        }
+    }
+
+    #[test]
+    fn a_waveform_of_2400_bins_stretched_to_the_detail_length_is_told_apart() {
+        // What the USB repairs drew with before 0.6.7.
+        let bins = 2400;
+        let duration_ms = 222_000;
+        // What the USB repairs drew before 0.6.7.
+        let drawn = build_anlz_ext_file(&varied_waveform(bins), "", None, duration_ms, None, &[]);
+        assert_eq!(pwv3_stretched_from_bins(&drawn, bins), Some(true));
+        // What analysis (and rekordbox) draw: one value per detail entry.
+        let detail = detail_entry_count(duration_ms) as usize;
+        let analyzed =
+            build_anlz_ext_file(&varied_waveform(detail), "", None, duration_ms, None, &[]);
+        assert_eq!(pwv3_stretched_from_bins(&analyzed, bins), Some(false));
+        // Silence is constant over its bins whoever drew it.
+        let flat = WaveformData {
+            peaks: vec![40; bins],
+            bands: vec![3; bins],
+            ..varied_waveform(bins)
+        };
+        let flat = build_anlz_ext_file(&flat, "", None, duration_ms, None, &[]);
+        assert_eq!(pwv3_stretched_from_bins(&flat, bins), None);
+        // Too short to tell: nearly every bin holds one entry.
+        let short = build_anlz_ext_file(&varied_waveform(bins), "", None, 16_000, None, &[]);
+        assert_eq!(pwv3_stretched_from_bins(&short, bins), None);
+        // No PWV3 at all.
+        let dat = build_anlz_dat_file(&varied_waveform(bins), "", None, duration_ms, None, &[]);
+        assert_eq!(pwv3_stretched_from_bins(&dat, bins), None);
+    }
+
+    #[test]
+    fn waveform_chunks_are_swapped_and_everything_else_kept() {
+        let cues = [AnlzCue {
+            hot_cue: 1,
+            position_ms: 1_000,
+            ..AnlzCue::default()
+        }];
+        let old = build_anlz_ext_file(
+            &varied_waveform(2400),
+            "/Contents/a.mp3",
+            Some(128.0),
+            222_000,
+            Some(120),
+            &cues,
+        );
+        let source = build_anlz_ext_file(&varied_waveform(33_304), "", None, 222_000, None, &[]);
+        let swapped = with_waveform_chunks(&old, &source).expect("swap");
+        assert_eq!(waveform_chunks(&swapped), waveform_chunks(&source));
+        let rest = |data: &[u8]| {
+            super::super::anlz_read::anlz_chunks(data)
+                .filter(|chunk| !WAVEFORM_TAGS.contains(&&chunk.tag))
+                .map(|chunk| data[chunk.range].to_vec())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(rest(&swapped), rest(&old), "grid, cues and PPTH are kept");
+        assert_eq!(read_cues_from_anlz(&swapped).len(), 1);
+        assert_eq!(
+            read_u32_be_at(&swapped, 8),
+            Some(swapped.len() as u32),
+            "the file length is the new one"
+        );
+        // Bytes that aren't an analysis file are left alone.
+        assert!(with_waveform_chunks(b"not anlz", &source).is_none());
     }
 }

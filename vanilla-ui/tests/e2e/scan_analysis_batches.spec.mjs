@@ -133,7 +133,7 @@ function installScanAnalysisMock(page, opts = {}) {
 
         await sleep(pieceDelayMs);
         track.waveformPeaksPath = `/tmp/${id}.DAT`;
-        track.waveformPreview = [8, 20, 42, 65, 30, 55];
+        track.waveformPreview = [8, 60, 20, 5, 20, 40, 40, 10, 42, 30, 40, 20, 65, 10, 20, 60, 30, 50, 30, 10, 55, 5, 30, 70];
         pieceEventsByPiece.waveform += 1;
         emitPartial({ waveformPeaksPath: track.waveformPeaksPath, waveformPreview: track.waveformPreview });
 

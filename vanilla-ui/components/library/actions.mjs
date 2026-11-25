@@ -6,7 +6,7 @@ import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillFormatCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
 import { applyAnalyzeButtonState } from "../../track_utils.mjs";
 import { t } from "../../ui_texts.mjs";
-import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
+import { drawWaveformCanvas, invalidateWaveformCache } from "../../waveform.mjs";
 
 const LIBRARY_SEARCH_DEBOUNCE_MS = 180;
 
@@ -717,12 +717,7 @@ export function patchLibraryRowCells(ctx, row, track) {
       const hasRenderableWaveform = trackHasWaveform(track);
       if (hasRenderableWaveform) {
         invalidateWaveformCache(waveformDiv);
-        if (track.waveformColorData?.length >= 6) {
-          setWaveformColorData(waveformDiv, track.waveformColorData);
-          delete waveformDiv.dataset.peaks;
-        } else {
-          waveformDiv.dataset.peaks = track.waveformPreview.join(",");
-        }
+        waveformDiv.dataset.peaks = track.waveformPreview.join(",");
         if (!waveformDiv.classList.contains("waveform-canvas")) {
           waveformDiv.classList.add("waveform-canvas");
           waveformDiv.prepend(cloneTemplate(row.ownerDocument, "tplWaveformCanvas"));
@@ -730,7 +725,6 @@ export function patchLibraryRowCells(ctx, row, track) {
         drawWaveformCanvas(waveformDiv);
       } else {
         delete waveformDiv.dataset.peaks;
-        setWaveformColorData(waveformDiv, null);
         invalidateWaveformCache(waveformDiv);
         waveformDiv.classList.remove("waveform-canvas");
         const canvas = waveformDiv.querySelector("canvas");

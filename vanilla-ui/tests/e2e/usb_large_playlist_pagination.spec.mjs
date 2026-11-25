@@ -41,7 +41,7 @@ function installTauriMock(page, { trackCount, gateFetches = false, unhydratedId 
     });
     const hydrate = (t) => (t.id === unhydratedId
       ? { ...t, needsHydration: true }
-      : { ...t, bpm: 120, key: "8A", waveformPreview: [10, 20, 30, 40, 30, 20, 10], needsHydration: false });
+      : { ...t, bpm: 120, key: "8A", waveformPreview: [10, 60, 20, 5, 20, 30, 40, 10, 30, 10, 20, 60, 40, 50, 30, 10, 30, 5, 30, 70, 20, 40, 40, 20, 10, 60, 10, 5], needsHydration: false });
     backend.install(async (command, r) => {
       if (command === "fetch_usb_playlists") {
         return backend.ok({
@@ -58,7 +58,7 @@ function installTauriMock(page, { trackCount, gateFetches = false, unhydratedId 
         await new Promise((resolve) => { window.__releaseInspectUsbTrack = resolve; });
         // The whole row, as the backend answers.
         const row = tracks.find((t) => t.id === r.trackId);
-        return backend.ok({ source: "pdb", track: { ...row, bpm: 128, key: "5A", waveformPreview: [5, 15, 25, 15, 5], needsHydration: false } });
+        return backend.ok({ source: "pdb", track: { ...row, bpm: 128, key: "5A", waveformPreview: [5, 60, 20, 5, 15, 30, 40, 10, 25, 10, 20, 60, 15, 50, 30, 10, 5, 5, 30, 70], needsHydration: false } });
       }
     });
   }, {

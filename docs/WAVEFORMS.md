@@ -4,12 +4,12 @@
 
 Waveform and ANLZ data are generated from local audio. USB metadata is not a waveform truth source.
 
-The app stores a small waveform preview for UI use, but player ANLZ files need higher-resolution detail chunks for the CDJ detailed waveform view.
+The track tables' small waveform is read from each track's bundle, never drawn separately, so a row always shows what the file holds.
 
 ## Resolution Rules
 
-- UI preview payloads are downsampled to `WAVEFORM_PREVIEW_BINS` (`2400`) before being returned to the frontend.
-- Local ANLZ cache generation uses detail-resolution waveform data: `max(2400, ceil(duration_seconds * 150) + 4)`.
+- The track tables' waveform (`waveformPreview`) is the bundle's `PWV4` read back, rekordbox's or this app's alike (`row_waveform_from_pwv4` in `anlz_read.rs`): its 1,200 entries shrunk to 600, each the loudest of the two it covers, as four values (height, low, mid, high, 0–127). The file is never changed. A bundle without `PWV4` gives the heights of its `PWV3`, `PWAV` or `PWV2` with no bands. During analysis, the row gets the same values from the `PWV4` the writer builds for the file (`pwv4_payload`). The UI draws every track the same way, in the theme's colours: each column's height from the heights, its shade from the bands of its loudest entry, from the theme hue for bass up to 60° round and lighter for treble (`waveformBarColors` in `waveform.mjs`); without bands, the theme's colours as they are. rekordbox's own `PWV4` colours are not shown.
+- Local ANLZ cache generation uses detail-resolution waveform data: `max(2400, ceil(duration_seconds * 150) + 4)` bins (`MIN_WAVEFORM_BINS` keeps a short track enough bins for the preview chunks).
 - USB export does not generate ANLZ; it copies previously generated `DAT/EXT/2EX` bundles.
 - Normal USB export requires waveform path, BPM, duration, and existing `DAT` + `EXT` files before media copy starts. A `2EX` is copied when present; it is optional, though every bundle seen so far has one.
 - ANLZ detail chunk entry counts are `ceil(duration_seconds * 150) + 4`, with a minimum of `400`.
@@ -108,8 +108,8 @@ invents a tempo or a length: with no known BPM it writes no beat grid
 (`PQTZ`/`PQT2`), and it takes the track length as a required input (the
 detail waveform's entry count and the grid's beat count both come from it),
 so a track with no known length gets no bundle. `fix_empty_analysis_files`
-carries the track's real PDB `tempo_x100`/duration forward, measuring the
-source file when the PDB has no length. PDB
+draws its bundle with the analysis pipeline, keeping the track's real PDB
+`tempo_x100` and placing its first beat from the audio. PDB
 and eDB tempo metadata could be completely correct while CDJ hardware still
 read the stale beat-grid tempo for its live/master display — a normal
 re-export now corrects it.
@@ -155,8 +155,8 @@ first beat at 355.102 ms, every body entry is `0x0066`. The app wrote the checks
 
 Both chunks now come from one constant-tempo grid (`BeatGrid` in `anlz.rs`). Export rebuilds
 the grid of every app-made bundle with a known tempo, so re-exporting fixes a stick. The USB
-repair **Fix Beat Grid** (`fix_beat_grid_header`) rewrites both chunks on the stick without
-an export, from the grid the `.DAT` already holds: within 1 ms of the old beat times, and
+repair **Update Analysis Files From This App** (`update_app_analysis_files`) rewrites both
+chunks on the stick without an export, from the grid the `.DAT` already holds: within 1 ms of the old beat times, and
 using the beats' own spacing when the tempo field is rounded.
 
 ## Seek-index chunks (`PVBR`, `PVB2`)
@@ -181,7 +181,8 @@ Whatever the player needs, the app writes what rekordbox writes where that is kn
   offsets. Bundles analysed before 0.3.7 get it once through the `0.3.7-cache-mp3-seek-index`
   data migration (`docs/APP_DATA_MODEL.md`, "Data migrations"), which needs each source file;
   a track whose file isn't there has its cached bundle deleted and is marked for analysis.
-  On a stick, **Add Missing MP3 Seek Data** (`add_missing_mp3_seek_data`) does the same.
+  On a stick, **Update Analysis Files From This App** (`update_app_analysis_files`) does the
+  same.
   A file the rules below don't cover keeps the empty `PVBR`, never a guessed one, and is
   named in the Event Log ("MP3 seek data not added (reason): …; please report this file")
   so the layout can be supported.
@@ -287,9 +288,13 @@ time, to a `WaveformAccumulator`, whose bins each cover their own stretch of the
 when the file's metadata has no length, the decode stops at the cap and `waveform_from_samples`
 feeds the kept samples to it at once, over their own length. Fed the same samples, the
 accumulator gives byte-for-byte the waveform the earlier one-slice builder gave (checked against
-it before that builder was removed). Track analysis, a transcode's bundle and
-`build_waveform_preview_from_audio` (the repairs' waveforms, capped at 2,000,000 samples) all
-decode this way.
+it before that builder was removed). Track analysis, a transcode's bundle and the USB repairs
+all decode this way, through one core (`analyze_audio_core` in `analysis.rs`): it needs no
+library row, keeps a BPM it is given (detecting nothing when it is also given no key to find)
+and places the first beat. One writer (`write_track_bundle`) writes every new bundle with the
+MP3 seek index. Before 0.6.7 the repairs drew their own 2,400-bin waveform from the first
+2,000,000 samples (about 45 s) and stretched it over the track;
+`update_app_analysis_files` finds and replaces those.
 
 Measured on 20 library tracks (release build, best of 3, 6–12 minutes, FLAC/WAV/AIFF/MP3), the
 decode and waveform stage takes 28% less time than the earlier capped decode plus one-slice

@@ -13,10 +13,16 @@ function installWaveformStartupMock(page) {
       fileSizeBytes: 999 + n,
       waveformPeaksPath: `/tmp/t-${n}.DAT`,
       // The page carries its rows' waveforms.
-      waveformPreview: [8, 20, 42, 65, 30, 55],
+      waveformPreview: [8, 60, 20, 5, 20, 40, 40, 10, 42, 30, 40, 20, 65, 10, 20, 60, 30, 50, 30, 10, 55, 5, 30, 70],
       ...extra
     });
-    const tracks = [track(1, { analysisReady: true }), track(2)];
+    // Entries of height, low, mid, high: the same shape, but track one is
+    // all bass and track two all treble.
+    const shape = [8, 20, 42, 65, 30, 55];
+    const tracks = [
+      track(1, { analysisReady: true, waveformPreview: shape.flatMap((h) => [h, 100, 0, 0]) }),
+      track(2, { waveformPreview: shape.flatMap((h) => [h, 0, 0, 100]) })
+    ];
     backend.seed({ tracks });
     backend.install((command, r) => {
       if (command === "resolve_track_identity") return backend.ok({ trackId: r.trackId ?? null });
@@ -37,6 +43,27 @@ function installWaveformStartupMock(page) {
       }
     });
   });
+}
+
+// The average colour of the drawn pixels of every canvas matching `selector`.
+function canvasColors(page, selector) {
+  return page.evaluate(
+    (sel) =>
+      [...document.querySelectorAll(sel)].map((canvas) => {
+        const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+        const sum = [0, 0, 0];
+        let count = 0;
+        for (let i = 0; i < pixels.length; i += 4) {
+          if (pixels[i + 3] === 0) continue;
+          sum[0] += pixels[i];
+          sum[1] += pixels[i + 1];
+          sum[2] += pixels[i + 2];
+          count += 1;
+        }
+        return sum.map((value) => Math.round(value / Math.max(1, count)));
+      }),
+    selector
+  );
 }
 
 // Whether every canvas matching `selector` has visible pixels drawn on it.
@@ -68,6 +95,12 @@ test("waveforms at startup and in the cue editor", async ({ page }) => {
     await expect
       .poll(() => canvasesDrawn(page, "#libraryTableBody .waveform-canvas-el"))
       .toEqual([true, true]);
+
+    // Drawn in the theme's colours, shaded by the sound: the bass track and
+    // the treble track come out in different shades.
+    const [bass, treble] = await canvasColors(page, "#libraryTableBody .waveform-canvas-el");
+    const difference = bass.reduce((sum, value, i) => sum + Math.abs(value - treble[i]), 0);
+    expect(difference, `bass ${bass}, treble ${treble}`).toBeGreaterThan(30);
   }
 
   await page.reload();
@@ -108,7 +141,7 @@ function installSourceChipAnalysisMock(page) {
         filePath: "/music/Track One.mp3",
         fileSizeBytes: 1000,
         waveformPeaksPath: "/tmp/t-1.DAT",
-        waveformPreview: [8, 20, 42, 65, 30, 55],
+        waveformPreview: [8, 60, 20, 5, 20, 40, 40, 10, 42, 30, 40, 20, 65, 10, 20, 60, 30, 50, 30, 10, 55, 5, 30, 70],
         bpm: 128,
         key: "8A",
         durationMs: 195000,
@@ -123,7 +156,7 @@ function installSourceChipAnalysisMock(page) {
         filePath: "/music2/Track Two.mp3",
         fileSizeBytes: 1001,
         waveformPeaksPath: "/tmp/t-2.DAT",
-        waveformPreview: [7, 19, 43, 61, 34, 57],
+        waveformPreview: [7, 60, 20, 5, 19, 40, 40, 10, 43, 30, 40, 20, 61, 10, 20, 60, 34, 50, 30, 10, 57, 5, 30, 70],
         bpm: 126,
         key: "9A",
         durationMs: 201000,

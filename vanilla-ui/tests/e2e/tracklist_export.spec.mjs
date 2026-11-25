@@ -40,7 +40,7 @@ function installTauriMock(page) {
           });
         case "fetch_usb_history_tracks":
           return backend.ok({
-            ...backend.listPage(historyTracks.map((t) => ({ ...t, bpm: 120, key: "8A", waveformPreview: [10, 20, 10] }))),
+            ...backend.listPage(historyTracks.map((t) => ({ ...t, bpm: 120, key: "8A", waveformPreview: [10, 60, 20, 5, 20, 30, 40, 10, 10, 10, 20, 60] }))),
             listSummaryText: "4 tracks"
           });
         default: return undefined;

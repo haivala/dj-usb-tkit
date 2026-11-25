@@ -46,7 +46,7 @@ fn fix_outcomes_record_covers_every_selected_found_combination() {
 
     let mut outcomes = FixOutcomes::default();
     let ok = || Ok(Detail::File("fixed 2 rows".to_string()));
-    outcomes.record(tr::repair_fix_beat_grid(), true, true, ok);
+    outcomes.record(tr::repair_fix_header(), true, true, ok);
     outcomes.record(tr::repair_fix_bpm_key(), true, true, || {
         Err(BackendError::Internal("disk full".to_string()))
     });
@@ -56,7 +56,7 @@ fn fix_outcomes_record_covers_every_selected_found_combination() {
 
     assert_eq!(
         outcomes.lines(OutcomeKind::Applied),
-        vec!["Fix Beat Grid: fixed 2 rows"]
+        vec!["Repair PDB Header Compatibility Field: fixed 2 rows"]
     );
     assert_eq!(
         outcomes.lines(OutcomeKind::Failed),
@@ -1964,7 +1964,7 @@ fn apply_fix_empty_analysis_files_bakes_real_pdb_tempo_not_120_default() {
 
     let audio_path = usb_root.join("Contents/track.wav");
     std::fs::create_dir_all(audio_path.parent().unwrap()).unwrap();
-    write_sine_wav(&audio_path, 1_000);
+    write_sine_wav(&audio_path, 20_000);
 
     let anlz_dir = usb_root.join("PIONEER/USBANLZ/P001/00000001");
     std::fs::create_dir_all(&anlz_dir).unwrap();
@@ -2033,6 +2033,15 @@ fn apply_fix_empty_analysis_files_bakes_real_pdb_tempo_not_120_default() {
         read_beatgrid_tempo_from_anlz(&dat_bytes),
         Some(14_000),
         "regenerated bundle must bake the track's real PDB tempo"
+    );
+    // Drawn by the analysis pipeline: the first beat placed from the audio,
+    // the detail waveform one entry per 1/150 s of the whole track.
+    assert!(read_first_beat_from_anlz(&dat_bytes).is_some());
+    let ext = std::fs::read(dat_path.with_extension("EXT")).expect("regenerated .EXT");
+    let pwv3 = crate::service::anlz::anlz_chunk_payload(&ext, b"PWV3").expect("PWV3");
+    assert_eq!(
+        pwv3.len(),
+        crate::service::analysis::waveform_detail_entries_for_duration(20_000)
     );
 }
 #[test]
@@ -2809,4 +2818,346 @@ fn strict_parity_replaces_flattened_edb_copies_with_the_pdb_folders() {
         edb_playlist_tracks(&usb_root, "Style B / Opening / Warmup"),
         ["/Contents/Fixture Artist/Track 2.mp3"]
     );
+}
+
+// ── update_app_analysis_files: what it finds ───────────────────────────────
+
+const APP_DB_ID: u32 = 4_242;
+
+/// A waveform of `bins` bins that changes from bin to bin.
+fn varied_waveform(bins: usize, seed: usize) -> crate::service::anlz::WaveformData {
+    let energy = (0..bins)
+        .map(|i| ((i + seed) * 13 % 127) as u8)
+        .collect::<Vec<_>>();
+    crate::service::anlz::WaveformData {
+        peaks: (0..bins)
+            .map(|i| ((i + seed) * 37 % 90) as u8 + 5)
+            .collect(),
+        bands: (0..bins).map(|i| ((i + seed) % 6) as u8).collect(),
+        low_energy: energy.clone(),
+        mid_energy: energy.clone(),
+        high_energy: energy.clone(),
+        low_energy_full: energy.clone(),
+        mid_energy_full: energy.clone(),
+        high_energy_full: energy,
+        peak_level: 1.0,
+    }
+}
+
+/// Writes a whole bundle at `dat` drawn from `waveform`.
+fn write_bundle(
+    dat: &Path,
+    waveform: &crate::service::anlz::WaveformData,
+    track_path: &str,
+    duration_ms: u64,
+) {
+    use crate::service::anlz::{build_anlz_2ex_file, build_anlz_dat_file, build_anlz_ext_file};
+    std::fs::create_dir_all(dat.parent().unwrap()).unwrap();
+    let bpm = Some(128.0);
+    std::fs::write(
+        dat,
+        build_anlz_dat_file(waveform, track_path, bpm, duration_ms, Some(100), &[]),
+    )
+    .unwrap();
+    std::fs::write(
+        dat.with_extension("EXT"),
+        build_anlz_ext_file(waveform, track_path, bpm, duration_ms, Some(100), &[]),
+    )
+    .unwrap();
+    std::fs::write(
+        dat.with_extension("2EX"),
+        build_anlz_2ex_file(waveform, track_path, duration_ms),
+    )
+    .unwrap();
+}
+
+/// A USB track `n` with its audio and a bundle drawn from `waveform`.
+fn stick_track(
+    usb_root: &Path,
+    n: u32,
+    seconds: u32,
+    waveform: &crate::service::anlz::WaveformData,
+    master_content_id: Option<u32>,
+) -> PdbTrackRow {
+    let track_path = format!("/Contents/track{n}.wav");
+    let audio = usb_root.join(track_path.trim_start_matches('/'));
+    std::fs::create_dir_all(audio.parent().unwrap()).unwrap();
+    std::fs::write(&audio, b"audio").unwrap();
+    let anlz_path = format!("/PIONEER/USBANLZ/P00{n}/0000000{n}/ANLZ0000.DAT");
+    write_bundle(
+        &usb_root.join(anlz_path.trim_start_matches('/')),
+        waveform,
+        &track_path,
+        u64::from(seconds) * 1000,
+    );
+    PdbTrackRow {
+        title: format!("Track {n}"),
+        anlz_path,
+        duration_seconds: Some(seconds),
+        sample_rate_hz: Some(44_100),
+        file_size_bytes: Some(1000 + n),
+        master_db_id: master_content_id.map(|_| APP_DB_ID),
+        master_content_id,
+        tempo_x100: 12_800,
+        ..history_test_track(n, &track_path)
+    }
+}
+
+/// A library track `id` at `file_path`, its file there, exported as
+/// `master_content_id` when given, with a bundle drawn from `waveform` when
+/// given.
+fn library_track(
+    service: &BackendService,
+    id: &str,
+    file_path: &Path,
+    seconds: u32,
+    waveform: Option<&crate::service::anlz::WaveformData>,
+    master_content_id: Option<u32>,
+) {
+    std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+    std::fs::write(file_path, b"audio").unwrap();
+    let bundle = waveform.map(|waveform| {
+        let dat = service
+            .db
+            .data_dir()
+            .join("analysis/waveforms")
+            .join(format!("{id}.DAT"));
+        write_bundle(&dat, waveform, "", u64::from(seconds) * 1000);
+        dat.to_string_lossy().to_string()
+    });
+    let conn = service.db.connect().unwrap();
+    conn.execute(
+        "INSERT INTO tracks (id, title, artist, file_path, duration_ms, waveform_peaks_path, \
+         created_at, updated_at) VALUES (?1, ?1, '', ?2, ?3, ?4, 'now', 'now')",
+        params![
+            id,
+            file_path.to_string_lossy(),
+            i64::from(seconds) * 1000,
+            bundle
+        ],
+    )
+    .unwrap();
+    if let Some(master_content_id) = master_content_id {
+        BackendService::ensure_track_export_identity_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO track_export_identity (track_id, master_content_id, created_at, \
+             updated_at) VALUES (?1, ?2, 'now', 'now')",
+            params![id, master_content_id],
+        )
+        .unwrap();
+    }
+}
+
+fn app_bundle_updates(
+    service: &BackendService,
+    usb_root: &Path,
+    parsed: &ParsedPdb,
+) -> HashMap<u32, AppBundleUpdate> {
+    let ownership = scan_analysis_ownership(usb_root, parsed, Some(APP_DB_ID), true);
+    service
+        .detect_app_bundle_updates(
+            usb_root,
+            parsed,
+            Some(APP_DB_ID),
+            &AppBundleFindings {
+                ownership: &ownership,
+                outdated_grids: &[],
+                mp3_missing_seek: &[],
+            },
+        )
+        .expect("detect")
+        .into_iter()
+        .map(|update| (update.track_id, update))
+        .collect()
+}
+
+#[test]
+fn app_analysis_check_finds_repair_drawn_waveforms_and_where_to_take_new_ones() {
+    let (_td, usb_root) = test_usb_root();
+    let data = tempdir().expect("data dir");
+    let service = BackendService::new(data.path()).expect("service");
+    let library = data.path().join("music");
+    let seconds = 222;
+    let drawn = varied_waveform(PRE_0_6_7_REPAIR_WAVEFORM_BINS, 0);
+    let detail = varied_waveform(
+        crate::service::analysis::waveform_detail_entries_for_duration(222_000),
+        5,
+    );
+
+    // 1: not in the library -> drawn from the USB's audio.
+    let t1 = stick_track(&usb_root, 1, seconds, &drawn, None);
+    // 2: exported from a library track with its waveform -> copied.
+    let t2 = stick_track(&usb_root, 2, seconds, &drawn, Some(77));
+    library_track(
+        &service,
+        "L2",
+        &library.join("2.wav"),
+        seconds,
+        Some(&detail),
+        Some(77),
+    );
+    // 3: exported from a library track not analyzed yet -> analyzed first.
+    let t3 = stick_track(&usb_root, 3, seconds, &drawn, Some(78));
+    library_track(
+        &service,
+        "L3",
+        &library.join("3.wav"),
+        seconds,
+        None,
+        Some(78),
+    );
+    // 4: rekordbox's own analysis, one value per entry -> never touched.
+    let t4 = stick_track(&usb_root, 4, seconds, &detail, None);
+    // 5: the library track is the USB file itself.
+    let t5 = stick_track(&usb_root, 5, seconds, &drawn, None);
+    library_track(
+        &service,
+        "L5",
+        &usb_root.join("Contents/track5.wav"),
+        seconds,
+        Some(&detail),
+        None,
+    );
+    // 6: same content as a library track but another length -> not it.
+    let mut t6 = stick_track(&usb_root, 6, seconds, &drawn, None);
+    t6.title = "L6".to_string();
+    library_track(
+        &service,
+        "L6",
+        &library.join("6.wav"),
+        100,
+        Some(&detail),
+        None,
+    );
+    service
+        .db
+        .connect()
+        .unwrap()
+        .execute(
+            "UPDATE tracks SET file_size_bytes = 1006 WHERE id = 'L6'",
+            [],
+        )
+        .unwrap();
+
+    let parsed = ParsedPdb {
+        tracks: vec![t1, t2, t3, t4, t5, t6],
+        ..ParsedPdb::default()
+    };
+    let found = app_bundle_updates(&service, &usb_root, &parsed);
+    let source = |id: u32| found.get(&id).and_then(|u| u.waveform.clone());
+    assert_eq!(
+        source(1),
+        Some((WaveformFault::RepairDrawn, WaveformSource::Draw))
+    );
+    let library_dat = |id: &str| data.path().join(format!("analysis/waveforms/{id}.DAT"));
+    assert_eq!(
+        source(2),
+        Some((
+            WaveformFault::RepairDrawn,
+            WaveformSource::Library(library_dat("L2"))
+        ))
+    );
+    assert_eq!(
+        source(3),
+        Some((
+            WaveformFault::RepairDrawn,
+            WaveformSource::AnalyzeLibrary("L3".to_string())
+        ))
+    );
+    assert!(!found.contains_key(&4), "{:?}", found.get(&4));
+    assert_eq!(
+        source(5),
+        Some((
+            WaveformFault::RepairDrawn,
+            WaveformSource::Library(library_dat("L5"))
+        ))
+    );
+    assert_eq!(
+        source(6),
+        Some((WaveformFault::RepairDrawn, WaveformSource::Draw))
+    );
+}
+
+#[test]
+fn app_analysis_check_finds_stretched_exports_by_the_library_waveform() {
+    let (_td, usb_root) = test_usb_root();
+    let data = tempdir().expect("data dir");
+    let service = BackendService::new(data.path()).expect("service");
+    let library = data.path().join("music");
+    // Over the old decode cap (24M samples, about 9 minutes at 44.1 kHz).
+    let long = 600;
+    let entries = |seconds: u32| {
+        crate::service::analysis::waveform_detail_entries_for_duration(u64::from(seconds) * 1000)
+    };
+    let stretched = varied_waveform(entries(long), 0);
+    let current = varied_waveform(entries(long), 9);
+
+    // 1: the library draws it differently -> copied.
+    let t1 = stick_track(&usb_root, 1, long, &stretched, Some(81));
+    library_track(
+        &service,
+        "L1",
+        &library.join("1.wav"),
+        long,
+        Some(&current),
+        Some(81),
+    );
+    // 2: the same as the library's -> nothing to do.
+    let t2 = stick_track(&usb_root, 2, long, &current, Some(82));
+    library_track(
+        &service,
+        "L2",
+        &library.join("2.wav"),
+        long,
+        Some(&current),
+        Some(82),
+    );
+    // 3: the library hasn't drawn it again yet -> analyzed first.
+    let t3 = stick_track(&usb_root, 3, long, &stretched, Some(83));
+    library_track(&service, "L3", &library.join("3.wav"), long, None, Some(83));
+    // 4: no longer in the library: nothing to compare with.
+    let t4 = stick_track(&usb_root, 4, long, &stretched, Some(84));
+    // 5: shorter than the cap: never stretched.
+    let t5 = stick_track(
+        &usb_root,
+        5,
+        200,
+        &varied_waveform(entries(200), 0),
+        Some(85),
+    );
+    library_track(
+        &service,
+        "L5",
+        &library.join("5.wav"),
+        200,
+        Some(&varied_waveform(entries(200), 9)),
+        Some(85),
+    );
+
+    let parsed = ParsedPdb {
+        tracks: vec![t1, t2, t3, t4, t5],
+        ..ParsedPdb::default()
+    };
+    let found = app_bundle_updates(&service, &usb_root, &parsed);
+    assert_eq!(
+        found.get(&1).and_then(|u| u.waveform.clone()),
+        Some((
+            WaveformFault::Stretched,
+            WaveformSource::Library(data.path().join("analysis/waveforms/L1.DAT"))
+        ))
+    );
+    assert_eq!(
+        found.get(&3).and_then(|u| u.waveform.clone()),
+        Some((
+            WaveformFault::Stretched,
+            WaveformSource::AnalyzeLibrary("L3".to_string())
+        ))
+    );
+    let mut rest = found
+        .keys()
+        .copied()
+        .filter(|id| ![1, 3].contains(id))
+        .collect::<Vec<_>>();
+    rest.sort_unstable();
+    assert!(rest.is_empty(), "{rest:?}");
 }

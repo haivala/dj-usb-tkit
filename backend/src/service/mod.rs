@@ -62,7 +62,7 @@ use track_matching::{
 };
 
 // Re-export functions used by commands.rs via crate::service::*
-use anlz_read::{load_waveform_preview_from_analysis_path, read_pwv4_from_anlz};
+use anlz_read::load_waveform_preview_from_analysis_path;
 pub use engine_export::{EngineLibrarySummary, rebuild_engine_library};
 pub use rekordbox_import::detect_external_rekordbox_db;
 use rekordbox_import::detect_external_rekordbox_db as detect_external_rekordbox_db_util;
@@ -143,7 +143,6 @@ pub(crate) const SETTING_UI_CUE_BEATGRID_LEVEL: &str = "ui_cue_beatgrid_level_v1
 pub(crate) const SETTING_UI_CUE_QUANTIZE: &str = "ui_cue_quantize_v1";
 pub(crate) const SETTING_UI_CUE_METRONOME_MIX: &str = "ui_cue_metronome_mix_v1";
 pub(crate) const SETTING_UI_CUE_FOLLOW_GRID: &str = "ui_cue_follow_grid_v1";
-const WAVEFORM_PREVIEW_BINS: usize = 2400;
 
 const TRACK_CURSOR_VERSION: &str = "track_cursor_v1";
 

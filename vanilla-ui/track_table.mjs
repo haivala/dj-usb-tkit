@@ -2,7 +2,7 @@ import { formatDurationMs, formatBpm, applyAnalyzeButtonState } from "./track_ut
 import { cloneTemplate } from "./ui_utils.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
 import { isTrackCurrentlyPlaying, moveActiveWaveform, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
-import { renderWaveforms, setWaveformColorData } from "./waveform.mjs";
+import { renderWaveforms } from "./waveform.mjs";
 import { t } from "./ui_texts.mjs";
 
 // The BPM cell: the formatted value in a pill, with the backend's
@@ -53,10 +53,13 @@ export function fillKeyCell(cell, track) {
   cell.replaceChildren(pill);
 }
 
-// Whether a row has a waveform to draw: the colour data, or a preview (the
-// backend's 0-100 levels) with any level above zero.
+// Whether a row has a waveform to draw: the backend's preview (entries of
+// height, low, mid, high) with any height above zero.
 export function trackHasWaveform(track) {
-  return track.waveformColorData?.length >= 6 || !!track.waveformPreview?.some((v) => v > 0);
+  const preview = track.waveformPreview;
+  if (!Array.isArray(preview)) return false;
+  for (let i = 0; i < preview.length; i += 4) if (preview[i] > 0) return true;
+  return false;
 }
 
 // A cover <img> of `src` (see attachCoverFallbackHandlers), or the empty
@@ -237,9 +240,6 @@ export function buildTrackTableRow(ctx, track, options) {
   } else {
     try {
       row = createTrackRow(ctx, track, options);
-      if (Array.isArray(track.waveformColorData) && track.waveformColorData.length >= 6) {
-        setWaveformColorData(row.querySelector(".waveform"), track.waveformColorData);
-      }
     } catch (error) {
       row = cloneTemplate(ctx.document, "tplTrackRowFallback");
       if (!options.reservesDragColumn) row.querySelector(".td-drag").remove();

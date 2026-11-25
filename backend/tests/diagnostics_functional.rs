@@ -1989,7 +1989,10 @@ fn assert_strict_repair_rebuilds_missing(file_name: &str, applied_line: &str) {
         .iter()
         .map(|fix| fix.id.as_str())
         .collect::<Vec<_>>();
-    assert!(offered.contains(&"add_analysis_track_path"), "{offered:?}");
+    assert!(
+        offered.contains(&"update_app_analysis_files"),
+        "{offered:?}"
+    );
     // Nothing that reads or writes only the PDB, or carries the PDB's
     // history to the eDB, without a PDB.
     if file_name == "export.pdb" {
@@ -4860,7 +4863,7 @@ fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
     assert_fix_not_proposed(&backend, &usb, "fix_bpm_key_mismatch");
 }
 
-// ── fix_beat_grid_header ────────────────────────────────────────────────────
+// ── update_app_analysis_files: beat grid ────────────────────────────────────────────────────
 
 #[test]
 fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
@@ -4896,12 +4899,12 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
     // Only a pre-0.3.7 export writes these grids, and it logged no appVersion.
     log_export_as_pre_versioning(&usb);
 
-    assert_fix_proposed(&backend, &usb, "fix_beat_grid_header");
+    assert_fix_proposed(&backend, &usb, "update_app_analysis_files");
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
-        selected_fix_ids: vec!["fix_beat_grid_header".to_string()],
+        selected_fix_ids: vec!["update_app_analysis_files".to_string()],
     });
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
@@ -4909,7 +4912,7 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
         data.data
             .applied_fixes
             .iter()
-            .any(|m| m == "Fix Beat Grid: fixed 1 bundle"),
+            .any(|m| m == "Update Analysis Files From This App: updated 1 analysis file, 0 new, 0 skipped, 0 failed"),
         "expected the grid to be rewritten: {:#?} {:#?}",
         data.data.applied_fixes,
         data.data.warnings
@@ -4921,13 +4924,21 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
             .iter()
             .any(|w| w.code == "usb.repair.applied"
                 && w.level == "info"
-                && w.message == "repair applied: Fix Beat Grid: fixed 1 bundle"),
+                && w.message == "repair applied: Update Analysis Files From This App: updated 1 analysis file, 0 new, 0 skipped, 0 failed"),
         "expected the applied fix in the log: {:#?}",
         data.data.warnings
     );
-    assert_eq!(fs::read(&dat_path).expect("read DAT"), dat);
+    // The same fix adds the MP3's seek index (PVBR) too; the rest of the
+    // .DAT is the grid in rekordbox's format.
+    let mut patched = fs::read(&dat_path).expect("read DAT");
+    let pvbr_at = patched
+        .windows(4)
+        .position(|w| w == b"PVBR")
+        .expect("PVBR chunk");
+    patched[pvbr_at + 16..pvbr_at + 16 + 1604].fill(0);
+    assert_eq!(patched, dat);
     assert_eq!(fs::read(&ext_path).expect("read EXT"), ext);
-    assert_fix_not_proposed(&backend, &usb, "fix_beat_grid_header");
+    assert_fix_not_proposed(&backend, &usb, "update_app_analysis_files");
 }
 
 /// The stick's export log as a pre-0.3.7 app wrote it: no `appVersion`.
@@ -5007,7 +5018,7 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
         fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
-        selected_fix_ids: vec!["fix_beat_grid_header".to_string()],
+        selected_fix_ids: vec!["update_app_analysis_files".to_string()],
     });
     assert!(repair.ok, "repair failed: {repair:?}");
     let after = repair
@@ -5040,10 +5051,10 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
     assert!(detail.contains(&track_path), "{detail}");
 }
 
-// ── add_missing_mp3_seek_data / add_missing_flac_seek_data ───────────────────────────────────────────────────
+// ── update_app_analysis_files: MP3 seek data / add_missing_flac_seek_data ───────────────────────────────────────────────────
 
 #[test]
-fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
+fn repair_update_app_analysis_files_fills_an_empty_pvbr_once() {
     use backend::service::anlz::{build_anlz_dat_file, build_anlz_ext_file};
 
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
@@ -5059,7 +5070,7 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
     fs::write(&dat_path, &dat).expect("write DAT");
     fs::write(dat_path.with_extension("EXT"), &ext).expect("write EXT");
 
-    assert_fix_proposed(&backend, &usb, "add_missing_mp3_seek_data");
+    assert_fix_proposed(&backend, &usb, "update_app_analysis_files");
     // The stick has no FLAC, so the FLAC fix has nothing to offer.
     assert_fix_not_proposed(&backend, &usb, "add_missing_flac_seek_data");
 
@@ -5069,15 +5080,18 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
             fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: true,
-            selected_fix_ids: vec!["add_missing_mp3_seek_data".to_string()],
+            selected_fix_ids: vec!["update_app_analysis_files".to_string()],
         },
         |current, _, message| progress.push((current, message.to_string())),
     );
     assert!(repair.ok, "repair failed: {repair:?}");
-    assert!(progress.contains(&(70, "USB: Applying Add Missing MP3 Seek Data".to_string())));
+    assert!(progress.contains(&(
+        70,
+        "USB: Applying Update Analysis Files From This App".to_string()
+    )));
     assert!(progress.contains(&(
         94,
-        backend::progress::with_detail("USB: Applying Add Missing MP3 Seek Data", "1/1")
+        backend::progress::with_detail("USB: Applying Update Analysis Files From This App", "1/1")
     )));
     // The apply reads the audio: the progress names the file being read,
     // with the count in its detail.
@@ -5086,7 +5100,7 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
         progress.contains(&(
             70,
             backend::progress::with_detail(
-                format!("USB: Applying Add Missing MP3 Seek Data — {file_name}"),
+                format!("USB: Applying Update Analysis Files From This App — {file_name}"),
                 "1/1"
             )
         )),
@@ -5112,7 +5126,7 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
         data.data
             .applied_fixes
             .iter()
-            .any(|m| m == "Add Missing MP3 Seek Data: fixed 1, skipped 0"),
+            .any(|m| m == "Update Analysis Files From This App: updated 1 analysis file, 0 new, 0 skipped, 0 failed"),
         "expected the seek data to be added: {:#?} {:#?}",
         data.data.applied_fixes,
         data.data.warnings
@@ -5139,7 +5153,7 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
         "an MP3's .EXT is left alone"
     );
     // One pass is enough: nothing left to propose.
-    assert_fix_not_proposed(&backend, &usb, "add_missing_mp3_seek_data");
+    assert_fix_not_proposed(&backend, &usb, "update_app_analysis_files");
 }
 
 // ── remove_missing_audio_references ───────────────────────────────────────
@@ -6038,7 +6052,7 @@ fn repair_gives_tracks_sharing_an_analysis_file_their_own_in_one_pass() {
 
     let ids = proposed_fix_ids(&backend, &usb);
     assert!(
-        ids.iter().any(|id| id == "separate_shared_analysis"),
+        ids.iter().any(|id| id == "update_app_analysis_files"),
         "{ids:?}"
     );
     assert!(
@@ -6072,7 +6086,7 @@ fn repair_names_the_track_in_an_analysis_file_without_ppth() {
     strip_anlz_ppth(&dat);
     let ids = proposed_fix_ids(&backend, &usb);
     assert!(
-        ids.iter().any(|id| id == "add_analysis_track_path"),
+        ids.iter().any(|id| id == "update_app_analysis_files"),
         "{ids:?}"
     );
 
@@ -6172,7 +6186,7 @@ fn repair_lists_mp3_whose_seek_data_cant_be_built_once_the_apply_skipped_it() {
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply,
         selected_fix_ids: if apply {
-            vec!["add_missing_mp3_seek_data".to_string()]
+            vec!["update_app_analysis_files".to_string()]
         } else {
             vec![]
         },
@@ -6180,7 +6194,7 @@ fn repair_lists_mp3_whose_seek_data_cant_be_built_once_the_apply_skipped_it() {
     let seek_fix_proposed = |data: &backend::models::RepairUsbDiagnosticsData| {
         data.proposed_fixes
             .iter()
-            .any(|f| f.id == "add_missing_mp3_seek_data")
+            .any(|f| f.id == "update_app_analysis_files")
     };
 
     // The preview reads no audio: every bundle without seek data is offered.
@@ -6204,7 +6218,7 @@ fn repair_lists_mp3_whose_seek_data_cant_be_built_once_the_apply_skipped_it() {
             .data
             .applied_fixes
             .iter()
-            .any(|fix| fix == "Add Missing MP3 Seek Data: fixed 0, skipped 1"),
+            .any(|fix| fix == "Update Analysis Files From This App: updated 0 analysis files, 0 new, 1 skipped, 0 failed"),
         "{:#?}",
         applied.data.applied_fixes
     );
@@ -7454,4 +7468,190 @@ fn a_damaged_track_row_whose_file_is_gone_is_removed_even_when_missing_audio_is_
     for fix in ["rebuild_damaged_track_rows", "merge_damaged_track_rows"] {
         assert!(!ids.contains(&fix), "{fix} still proposed: {ids:?}");
     }
+}
+
+// ── update_app_analysis_files: waveforms ────────────────────────────────────
+
+/// A waveform of `bins` bins that changes from bin to bin.
+fn varied_waveform(bins: usize, seed: usize) -> backend::service::anlz::WaveformData {
+    let energy = (0..bins)
+        .map(|i| ((i + seed) * 13 % 127) as u8)
+        .collect::<Vec<_>>();
+    backend::service::anlz::WaveformData {
+        peaks: (0..bins)
+            .map(|i| ((i + seed) * 37 % 90) as u8 + 5)
+            .collect(),
+        bands: (0..bins).map(|i| ((i + seed) % 6) as u8).collect(),
+        low_energy: energy.clone(),
+        mid_energy: energy.clone(),
+        high_energy: energy.clone(),
+        low_energy_full: energy.clone(),
+        mid_energy_full: energy.clone(),
+        high_energy_full: energy,
+        peak_level: 1.0,
+    }
+}
+
+/// The detail waveform (`PWV3`) of the bundle at `dat`.
+fn detail_waveform(dat: &Path) -> Vec<u8> {
+    let ext = fs::read(dat.with_extension("EXT")).expect("read EXT");
+    backend::service::anlz::anlz_chunk_payload(&ext, b"PWV3")
+        .expect("PWV3")
+        .to_vec()
+}
+
+/// The fixture's exported track, its bundle replaced by one a repair before
+/// 0.6.7 drew (2,400 bins stretched over 180 s) with a hot cue. Returns its
+/// `.DAT`, its bytes and the library bundle's `.DAT`.
+fn setup_repair_drawn_bundle() -> (TempDir, BackendCommands, PathBuf, PathBuf, Vec<u8>, PathBuf) {
+    use backend::service::anlz::{
+        AnlzCue, build_anlz_2ex_file, build_anlz_dat_file, build_anlz_ext_file,
+    };
+    let (root, backend, usb, _playlist) = setup_clean_strict_parity_fixture();
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    let track_path = parsed.tracks[0].track_file_path.clone();
+    let dat = find_exported_anlz_dat(&usb);
+    let cues = [AnlzCue {
+        position_ms: 1_000,
+        hot_cue: 1,
+        ..AnlzCue::default()
+    }];
+    let drawn = varied_waveform(2400, 0);
+    let dat_bytes =
+        build_anlz_dat_file(&drawn, &track_path, Some(120.0), 180_000, Some(250), &cues);
+    fs::write(&dat, &dat_bytes).expect("write DAT");
+    fs::write(
+        dat.with_extension("EXT"),
+        build_anlz_ext_file(&drawn, &track_path, Some(120.0), 180_000, Some(250), &cues),
+    )
+    .expect("write EXT");
+    fs::write(
+        dat.with_extension("2EX"),
+        build_anlz_2ex_file(&drawn, &track_path, 180_000),
+    )
+    .expect("write 2EX");
+
+    // The library's bundle: one value per detail entry, as analysis draws.
+    let conn = rusqlite::Connection::open(root.path().join("data").join("backend.db"))
+        .expect("open library");
+    let library_dat: String = conn
+        .query_row("SELECT waveform_peaks_path FROM tracks", [], |row| {
+            row.get(0)
+        })
+        .expect("library bundle");
+    let library_dat = PathBuf::from(library_dat);
+    let detail = varied_waveform(27_004, 3);
+    fs::write(
+        &library_dat,
+        build_anlz_dat_file(&detail, "", Some(120.0), 180_000, Some(250), &[]),
+    )
+    .expect("write library DAT");
+    fs::write(
+        library_dat.with_extension("EXT"),
+        build_anlz_ext_file(&detail, "", Some(120.0), 180_000, Some(250), &[]),
+    )
+    .expect("write library EXT");
+    fs::write(
+        library_dat.with_extension("2EX"),
+        build_anlz_2ex_file(&detail, "", 180_000),
+    )
+    .expect("write library 2EX");
+    (root, backend, usb, dat, dat_bytes, library_dat)
+}
+
+fn apply_app_analysis_fix(backend: &BackendCommands, usb: &Path) -> Vec<String> {
+    assert_fix_proposed(backend, usb, "update_app_analysis_files");
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["update_app_analysis_files".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data").data;
+    assert!(
+        data.failed_fixes.is_empty(),
+        "{:#?} {:#?}",
+        data.failed_fixes,
+        data.warnings
+    );
+    // One pass is enough.
+    assert_fix_not_proposed(backend, usb, "update_app_analysis_files");
+    data.applied_fixes
+}
+
+/// The beat grid and cues of a `.DAT`: what the fix keeps.
+fn grid_and_cues(dat: &[u8]) -> (Option<u16>, Option<u32>, usize) {
+    use backend::service::anlz::{
+        read_beatgrid_tempo_from_anlz, read_cues_from_anlz, read_first_beat_from_anlz,
+    };
+    (
+        read_beatgrid_tempo_from_anlz(dat),
+        read_first_beat_from_anlz(dat),
+        read_cues_from_anlz(dat).len(),
+    )
+}
+
+#[test]
+fn repair_copies_the_library_waveform_over_a_repair_drawn_one() {
+    let (_root, backend, usb, dat, before, library_dat) = setup_repair_drawn_bundle();
+    let applied = apply_app_analysis_fix(&backend, &usb);
+    assert!(
+        applied.iter().any(|line| line
+            == "Update Analysis Files From This App: updated 1 analysis file, 0 new, 0 skipped, 0 failed"),
+        "{applied:#?}"
+    );
+    assert_eq!(detail_waveform(&dat), detail_waveform(&library_dat));
+    let after = fs::read(&dat).expect("read DAT");
+    assert_eq!(grid_and_cues(&after), grid_and_cues(&before));
+    assert_eq!(grid_and_cues(&after).2, 1, "the hot cue is kept");
+}
+
+#[test]
+fn repair_draws_a_repair_drawn_waveform_from_the_audio_when_the_track_left_the_library() {
+    let (root, backend, usb, dat, before, _library_dat) = setup_repair_drawn_bundle();
+    let conn = rusqlite::Connection::open(root.path().join("data").join("backend.db"))
+        .expect("open library");
+    conn.execute_batch("DELETE FROM playlist_tracks; DELETE FROM tracks;")
+        .expect("empty the library");
+    drop(conn);
+
+    apply_app_analysis_fix(&backend, &usb);
+    // The fixture's audio is 12 s: 150 detail entries a second, plus 4.
+    let entries = detail_waveform(&dat).len();
+    assert!(
+        (1_804..1_820).contains(&entries),
+        "drawn at detail resolution over the audio's own length: {entries}"
+    );
+    assert_eq!(
+        grid_and_cues(&fs::read(&dat).expect("read DAT")),
+        grid_and_cues(&before),
+        "BPM, first beat and cues are the USB's"
+    );
+}
+
+#[test]
+fn repair_has_the_library_analyze_a_track_before_copying_its_waveform() {
+    let (root, backend, usb, dat, _before, _library_dat) = setup_repair_drawn_bundle();
+    let db = root.path().join("data").join("backend.db");
+    let conn = rusqlite::Connection::open(&db).expect("open library");
+    // The fixture's audio is silence: a BPM and key the user set are kept,
+    // so analysis only draws the waveform.
+    conn.execute(
+        "UPDATE tracks SET waveform_peaks_path = NULL, bpm_analyzer = 'user', \
+         tonality = '8A', tonality_source = 'user'",
+        [],
+    )
+    .expect("no library waveform");
+    drop(conn);
+
+    apply_app_analysis_fix(&backend, &usb);
+    let conn = rusqlite::Connection::open(&db).expect("open library");
+    let library_dat: Option<String> = conn
+        .query_row("SELECT waveform_peaks_path FROM tracks", [], |row| {
+            row.get(0)
+        })
+        .expect("library row");
+    let library_dat = PathBuf::from(library_dat.expect("the library analyzed the track"));
+    assert_eq!(detail_waveform(&dat), detail_waveform(&library_dat));
 }

@@ -2,13 +2,12 @@
 //! user selects. `run` drives one repair pass; the other submodules hold the
 //! detectors and apply functions it calls.
 
-use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_ms};
+use super::analysis::detect_track_duration_ms;
 use super::anlz::{
-    AnlzAnalysisEdits, AnlzBundlePaths, GridUpgrade, WaveformData, analysis_bundle_paths_for_track,
-    apply_analysis_edits_to_anlz, atomic_write_bytes, ensure_ppth_chunk, fill_mp3_pvbr,
-    has_pvb2_chunk, pvbr_total_samples, read_anlz_chunks, read_beatgrid_tempo_from_anlz,
-    read_first_beat_from_anlz, upgrade_bundle_beat_grid, with_seek_index,
-    write_generated_anlz_bundle,
+    AnlzAnalysisEdits, AnlzBundlePaths, GridUpgrade, analysis_bundle_paths_for_track,
+    apply_analysis_edits_to_anlz, atomic_write_bytes, ensure_ppth_chunk, has_pvb2_chunk,
+    pvbr_total_samples, read_anlz_chunks, read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz,
+    upgrade_bundle_beat_grid, with_seek_index,
 };
 use super::anlz_seek::{SeekIndexSkip, seek_index_for_audio, seek_index_for_audio_reporting};
 use super::cues::collapse_anlz_cues;
@@ -61,6 +60,7 @@ use rusqlite::params;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+mod app_analysis;
 mod audio_fixes;
 mod background_color;
 mod damaged_playlists;
@@ -77,6 +77,7 @@ pub use write_gate::{pdb_shape_problems, pdb_write_problems};
 #[cfg(test)]
 mod tests;
 
+use app_analysis::*;
 use audio_fixes::*;
 use damaged_playlists::*;
 use damaged_tracks::*;
@@ -89,11 +90,12 @@ pub(crate) use strict_parity::*;
 const EMPTY_ANALYSIS_FILES_FIX_ID: &str = "fix_empty_analysis_files";
 const REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID: &str = "remove_missing_audio_references";
 const BPM_KEY_MISMATCH_FIX_ID: &str = "fix_bpm_key_mismatch";
-const SHARED_ANALYSIS_FIX_ID: &str = "separate_shared_analysis";
-const ANALYSIS_TRACK_PATH_FIX_ID: &str = "add_analysis_track_path";
-const MISSING_MP3_SEEK_DATA_FIX_ID: &str = "add_missing_mp3_seek_data";
+/// Updates the analysis bundles this app wrote: what the separate fixes
+/// `separate_shared_analysis`, `add_analysis_track_path`,
+/// `fix_beat_grid_header` and `add_missing_mp3_seek_data` did one by one,
+/// plus the waveforms earlier versions drew coarse or stretched.
+const UPDATE_APP_ANALYSIS_FIX_ID: &str = "update_app_analysis_files";
 const MISSING_FLAC_SEEK_DATA_FIX_ID: &str = "add_missing_flac_seek_data";
-const BEAT_GRID_HEADER_FIX_ID: &str = "fix_beat_grid_header";
 const STRICT_PARITY_UPGRADE_FIX_ID: &str = "upgrade_export_data_to_strict_parity";
 const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playlist_entries";
 const SYNC_EDB_HISTORY_FROM_PDB_FIX_ID: &str = "sync_edb_history_from_pdb";
@@ -173,11 +175,8 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_ARTIST_NAME_LAYOUT_FIX_ID,
     PDB_HEADER_COMPATIBILITY_FIX_ID,
     // Before the BPM fix: it only aligns a bundle that is one track's own.
-    SHARED_ANALYSIS_FIX_ID,
-    ANALYSIS_TRACK_PATH_FIX_ID,
+    UPDATE_APP_ANALYSIS_FIX_ID,
     BPM_KEY_MISMATCH_FIX_ID,
-    BEAT_GRID_HEADER_FIX_ID,
-    MISSING_MP3_SEEK_DATA_FIX_ID,
     MISSING_FLAC_SEEK_DATA_FIX_ID,
     RELINK_MOVED_AUDIO_FIX_ID,
     UNINDEXED_AUDIO_PLAYLIST_FIX_ID,

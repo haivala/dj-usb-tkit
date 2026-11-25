@@ -37,6 +37,7 @@ impl AnalysisEngine {
 }
 
 /// BPM/key detection result (engine-agnostic).
+#[derive(Default)]
 pub struct BpmKeyResult {
     pub bpm: Option<f64>,
     pub key: Option<String>,

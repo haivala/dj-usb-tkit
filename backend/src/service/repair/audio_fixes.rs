@@ -311,263 +311,11 @@ pub(super) fn apply_bpm_key_mismatch_repair(
     Ok((anlz_fixed, edb_fixed))
 }
 
-/// Add the seek index rekordbox writes to a bundle the repair just
-/// generated: `PVBR` in an MP3's `.DAT` (as local analysis does), `PVB2` in a
-/// FLAC's `.EXT` (local analysis leaves that to the USB repair). Without it the
-/// seek-data fixes would find the new bundle on the next pass. A file whose
-/// index can't be built keeps none; those fixes list it as unsupported.
-fn add_seek_index_to_new_bundle(dat: &Path, audio: &Path) {
-    match SeekFormat::of(&audio.to_string_lossy()) {
-        Some(SeekFormat::Mp3) => {
-            let _ = fill_mp3_pvbr(dat, audio);
-        }
-        Some(SeekFormat::Flac) => {
-            let ext = dat.with_extension("EXT");
-            if let (Ok(Some(index)), Ok(bytes)) = (seek_index_for_audio(audio), std::fs::read(&ext))
-                && let Some(patched) = with_seek_index(&bytes, &index)
-            {
-                let _ = atomic_write_bytes(&ext, &patched);
-            }
-        }
-        None => {}
-    }
-}
-
-/// Put `track_path` into a bundle's `PPTH` (`.DAT`, `.EXT`, `.2EX`).
-fn stamp_bundle_ppth(dat: &Path, track_path: &str) -> BackendResult<()> {
-    for file in [
-        dat.to_path_buf(),
-        dat.with_extension("EXT"),
-        dat.with_extension("2EX"),
-    ] {
-        let Ok(data) = std::fs::read(&file) else {
-            continue;
-        };
-        let patched = ensure_ppth_chunk(&data, track_path);
-        if patched != data {
-            atomic_write_bytes(&file, &patched)?;
-        }
-    }
-    Ok(())
-}
-
-/// Name each track in its own bundle (`add_analysis_track_path`): the
-/// bundles only one track uses whose `PPTH` is missing or stale, re-detected
-/// from the staged PDB. Returns the number of bundles stamped.
-pub(super) fn apply_add_analysis_track_path(
-    usb_root: &Path,
-    app_master_db_id: Option<u32>,
-) -> BackendResult<usize> {
-    let parsed = parse_pdb(&staging::required_pdb(usb_root)?)?;
-    let ownership = scan_analysis_ownership(usb_root, &parsed, app_master_db_id, true);
-    for bundle in &ownership.unmarked {
-        stamp_bundle_ppth(&bundle.dat, &bundle.track_path)?;
-    }
-    Ok(ownership.unmarked.len())
-}
-
-/// Give every track that shares an analysis bundle its own
-/// (`separate_shared_analysis`), re-detected from the staged PDB. The owner
-/// (`scan_analysis_ownership`) keeps the bundle and gets its `PPTH`. Each
-/// other track gets the next free `ANLZnnnn` in its own hash folder
-/// (`analysis_bundle_paths_for_track`), generated from its audio as the
-/// empty-analysis fix does, with the PDB tempo; its PDB row and eDB content
-/// row then point there. Returns (tracks given their own bundle, bundles kept
-/// by an owner); a track whose audio can't be analysed fails the fix after
-/// the others are done.
-pub(super) fn apply_separate_shared_analysis(
-    usb_root: &Path,
-    app_master_db_id: Option<u32>,
-    edb_conn: Option<&mut rusqlite::Connection>,
-    warnings: &mut Vec<WarningEntry>,
-) -> BackendResult<(usize, usize)> {
-    let pdb_path = staging::required_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
-    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
-    let ownership = scan_analysis_ownership(usb_root, &parsed, app_master_db_id, true);
-    let row_by_id: HashMap<u32, &crate::pdb_reader::PdbTrackRow> =
-        parsed.tracks.iter().map(|t| (t.id, t)).collect();
-
-    let mut kept = 0usize;
-    let mut mutations = Vec::<crate::pdb_writer::PdbTrackRowMutation>::new();
-    // (track path, new USB-relative `.DAT` path) for the eDB.
-    let mut moved = Vec::<(String, String)>::new();
-    let mut failed = Vec::<String>::new();
-    for bundle in &ownership.shared {
-        // The owner's PPTH first, so its file is never picked as free below.
-        if let Some(owner) = bundle.owner.and_then(|id| row_by_id.get(&id)) {
-            stamp_bundle_ppth(&bundle.dat, &owner.track_file_path)?;
-            kept += 1;
-        }
-        for row in bundle
-            .track_ids
-            .iter()
-            .filter(|id| Some(**id) != bundle.owner)
-            .filter_map(|id| row_by_id.get(id))
-        {
-            let audio =
-                resolve_usb_side_path(usb_root, &row.track_file_path).filter(|path| path.is_file());
-            let duration_ms = row
-                .duration_seconds
-                .filter(|s| *s > 0)
-                .map(|s| u64::from(s) * 1000)
-                .or_else(|| audio.as_deref().and_then(detect_track_duration_ms));
-            let waveform = audio
-                .as_deref()
-                .and_then(|audio| {
-                    build_waveform_preview_from_audio(
-                        audio,
-                        crate::service::WAVEFORM_PREVIEW_BINS,
-                        2_000_000,
-                    )
-                    .ok()
-                })
-                .filter(|w| !w.peaks.is_empty());
-            let (Some(audio), Some(duration_ms), Some(waveform)) = (audio, duration_ms, waveform)
-            else {
-                failed.push(row.track_file_path.clone());
-                continue;
-            };
-            let (dat, ext, twoex) = analysis_bundle_paths_for_track(usb_root, &row.track_file_path);
-            write_generated_anlz_bundle(
-                &waveform,
-                &AnlzBundlePaths {
-                    dat_path: dat.clone(),
-                    ext_path: ext,
-                    twoex_path: twoex,
-                },
-                &row.track_file_path,
-                (row.tempo_x100 > 0).then(|| f64::from(row.tempo_x100) / 100.0),
-                duration_ms,
-            )?;
-            add_seek_index_to_new_bundle(&dat, &audio);
-            let Some(rel) = usb_relative_path(usb_root, &dat) else {
-                failed.push(row.track_file_path.clone());
-                continue;
-            };
-            let mut data = track_row_data_from_reader_row(row);
-            data.anlz_path = rel.clone();
-            mutations.push(crate::pdb_writer::PdbTrackRowMutation {
-                row: data,
-                changed_fields: vec!["anlz_path"],
-            });
-            warnings.push(logging::log_text(
-                Level::Info,
-                "usb-repair",
-                "usb.repair.shared-analysis.separated",
-                &tr::repair_warning_analysis_separated(&row.track_file_path, &rel),
-            ));
-            moved.push((row.track_file_path.clone(), rel));
-        }
-    }
-
-    if !mutations.is_empty() {
-        crate::pdb_writer::mutate_tracks_in_place(
-            &mut bytes,
-            &mutations,
-            PdbLayoutProfile::DEFAULT,
-            page_size,
-        )?;
-        std::fs::write(&pdb_path, &bytes)?;
-    }
-
-    if !moved.is_empty()
-        && let Some(mut handle) = EdbRw::shared_or_open(edb_conn, usb_root)
-        && table_exists(handle.conn(), "content")
-    {
-        let new_by_key = moved
-            .iter()
-            .map(|(track, rel)| (audio_path_key(track), rel))
-            .collect::<HashMap<_, _>>();
-        let tx = handle.conn().transaction()?;
-        let targets = {
-            let mut stmt =
-                tx.prepare("SELECT content_id, path FROM content WHERE path IS NOT NULL")?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })?;
-            let mut targets = Vec::<(i64, String)>::new();
-            for row in rows {
-                let (content_id, path) = row?;
-                if let Some(rel) = new_by_key.get(&audio_path_key(&path)) {
-                    targets.push((content_id, (*rel).clone()));
-                }
-            }
-            targets
-        };
-        for (content_id, rel) in targets {
-            tx.execute(
-                "UPDATE content SET analysisDataFilePath = ?1 WHERE content_id = ?2",
-                params![rel, content_id],
-            )?;
-        }
-        tx.commit()?;
-    }
-
-    if failed.is_empty() {
-        Ok((moved.len(), kept))
-    } else {
-        Err(BackendError::Internal(format!(
-            "gave {} a new analysis file; could not analyse the audio of: {}",
-            counted(moved.len(), "track", "tracks"),
-            failed.join(", ")
-        )))
-    }
-}
-
-/// The `.DAT` files [`detect_outdated_beat_grids`] finds, each once (tracks
-/// can share a bundle), for `fix_beat_grid_header`.
-pub(super) fn outdated_beat_grid_bundles(
-    found: Option<&[super::super::diagnostics::OutdatedBeatGrid]>,
-) -> Vec<std::path::PathBuf> {
-    let mut dats = found
-        .unwrap_or_default()
-        .iter()
-        .map(|bundle| bundle.dat.clone())
-        .collect::<Vec<_>>();
-    dats.sort();
-    dats.dedup();
-    dats
-}
-
-/// Rewrite the grids [`detect_outdated_beat_grids`] finds in rekordbox's
-/// format: `PQTZ` in the `.DAT` and `PQT2` in the `.EXT`, both from the grid
-/// the `.DAT` already holds. Re-detected through the staged PDB as this pass
-/// left it, so earlier fixes in the same pass are accounted for. A grid that isn't one constant tempo is left alone with a
-/// warning. Returns the number of bundles written.
-pub(super) fn apply_beat_grid_repair(
-    usb_root: &Path,
-    warnings: &mut Vec<WarningEntry>,
-    on_item: &mut impl FnMut(usize, usize),
-) -> BackendResult<usize> {
-    let mut fixed = 0usize;
-    let parsed = parse_pdb(&staging::required_pdb(usb_root)?)?;
-    let targets = outdated_beat_grid_bundles(
-        super::super::diagnostics::detect_outdated_beat_grids(usb_root, &parsed).as_deref(),
-    );
-    let total = targets.len();
-    for (index, dat) in targets.into_iter().enumerate() {
-        match upgrade_bundle_beat_grid(&dat)? {
-            GridUpgrade::Rewritten => fixed += 1,
-            GridUpgrade::AlreadyCurrent => {}
-            GridUpgrade::NotRebuildable => warnings.push(logging::log_text(
-                Level::Warn,
-                "usb-repair",
-                "usb.repair.beat-grid.skipped",
-                &tr::repair_warning_beat_grid_not_constant(dat.display()),
-            )),
-        }
-        on_item(index + 1, total);
-    }
-    Ok(fixed)
-}
-
 /// The two seek indexes rekordbox writes: `PVBR` in an MP3's `.DAT`, `PVB2`
-/// in a FLAC's `.EXT`. Each has its own fix, so the exactly reproduced MP3
-/// one (`add_missing_mp3_seek_data`) can be applied without the FLAC one
-/// (`add_missing_flac_seek_data`), whose long-track rule matches about 98% of
-/// rekordbox's entries.
+/// in a FLAC's `.EXT`. Each comes from its own fix, so the exactly reproduced
+/// MP3 one (part of `update_app_analysis_files`) can be applied without the
+/// FLAC one (`add_missing_flac_seek_data`), whose long-track rule matches
+/// about 98% of rekordbox's entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SeekFormat {
     Mp3,
@@ -583,9 +331,11 @@ impl SeekFormat {
         }
     }
 
+    /// The fix that adds it: the MP3 one is part of updating the analysis
+    /// files this app wrote.
     pub(super) fn fix_id(self) -> &'static str {
         match self {
-            Self::Mp3 => MISSING_MP3_SEEK_DATA_FIX_ID,
+            Self::Mp3 => UPDATE_APP_ANALYSIS_FIX_ID,
             Self::Flac => MISSING_FLAC_SEEK_DATA_FIX_ID,
         }
     }
@@ -593,7 +343,7 @@ impl SeekFormat {
     /// The fix's title, as the preview row and the apply progress show it.
     pub(super) fn title_text(self) -> crate::i18n::Text {
         match self {
-            Self::Mp3 => crate::i18n::tr::repair_fix_mp3_seek(),
+            Self::Mp3 => crate::i18n::tr::repair_fix_app_analysis(),
             Self::Flac => crate::i18n::tr::repair_fix_flac_seek(),
         }
     }
@@ -698,11 +448,8 @@ pub(super) enum SeekApplyEvent<'a> {
 
 /// Write the missing seek indexes of one format found by
 /// [`detect_missing_seek_data`], re-detected so bundles regenerated earlier in
-/// the same pass are covered. A file that doesn't parse cleanly is skipped and
-/// named in the Event Log with its reason, so it can be reported; nothing is
-/// ever approximated. A skipped file is remembered in `skips`, so the next
-/// preview lists it instead of offering the fix again, and isn't re-read
-/// while unchanged. Returns (bundles written, tracks skipped).
+/// the same pass are covered. Returns (bundles written, tracks skipped); see
+/// [`add_seek_data`].
 pub(super) fn apply_missing_seek_data_repair(
     usb_root: &Path,
     format: SeekFormat,
@@ -716,83 +463,116 @@ pub(super) fn apply_missing_seek_data_repair(
     let targets = detect_missing_seek_data(usb_root, &parsed, format);
     let total = targets.len();
     let mut meter = crate::progress::SpeedMeter::new();
-    for (done, target) in targets.into_iter().enumerate() {
-        let file = target
-            .track_path
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or(&target.track_path);
-        // A file skipped before, unchanged since: not read again.
-        let index = match skips.get(&target.audio_path) {
-            Some(skip) => Err(skip),
-            None => {
-                if meter.item_started() {
-                    on_event(SeekApplyEvent::Reading {
-                        done,
-                        total,
-                        file,
-                        mb_per_s: meter.mb_per_s(),
-                    });
-                }
-                let index = seek_index_for_audio_reporting(&target.audio_path, &mut |bytes| {
-                    if meter.bytes(bytes as u64) {
-                        on_event(SeekApplyEvent::Reading {
-                            done,
-                            total,
-                            file,
-                            mb_per_s: meter.mb_per_s(),
-                        });
-                    }
-                });
-                if let Err(skip) = index {
-                    skips.remember(&target.audio_path, skip);
-                }
-                index
-            }
+    for (done, target) in targets.iter().enumerate() {
+        let mut progress = SeekProgress {
+            done,
+            total,
+            meter: &mut meter,
+            on_event: &mut *on_event,
         };
-        let (reason, report) = match index {
-            Ok(Some(index)) => {
-                let bytes = std::fs::read(&target.bundle_path)?;
-                match with_seek_index(&bytes, &index) {
-                    Some(patched) => {
-                        atomic_write_bytes(&target.bundle_path, &patched)?;
-                        fixed += 1;
-                        on_event(SeekApplyEvent::ItemDone {
-                            done: done + 1,
-                            total,
-                        });
-                        continue;
-                    }
-                    None => ("analysis file could not be parsed", true),
-                }
-            }
-            Ok(None) => {
-                on_event(SeekApplyEvent::ItemDone {
-                    done: done + 1,
-                    total,
-                });
-                continue;
-            }
-            Err(skip) => (skip.describe(), skip.asks_for_report()),
-        };
-        skipped += 1;
-        let line = if report {
-            tr::repair_warning_seek_data_skipped_report(format.name(), reason, &target.track_path)
-        } else {
-            tr::repair_warning_seek_data_skipped_replace(format.name(), reason, &target.track_path)
-        };
-        warnings.push(logging::log_text(
-            Level::Warn,
-            "usb-repair",
-            "usb.repair.seek-data.skipped",
-            &line,
-        ));
+        match add_seek_data(target, format, skips, warnings, &mut progress)? {
+            SeekAdded::Written => fixed += 1,
+            SeekAdded::Skipped => skipped += 1,
+            SeekAdded::NotNeeded => {}
+        }
         on_event(SeekApplyEvent::ItemDone {
             done: done + 1,
             total,
         });
     }
     Ok((fixed, skipped))
+}
+
+/// Where one [`add_seek_data`] is in its fix's list, for its read progress.
+pub(super) struct SeekProgress<'a> {
+    pub(super) done: usize,
+    pub(super) total: usize,
+    pub(super) meter: &'a mut crate::progress::SpeedMeter,
+    pub(super) on_event: &'a mut dyn FnMut(SeekApplyEvent),
+}
+
+/// What [`add_seek_data`] did with a track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SeekAdded {
+    Written,
+    /// The audio needs none.
+    NotNeeded,
+    /// Named in the Event Log with its reason.
+    Skipped,
+}
+
+/// Write one track's missing seek index from its audio. A file that doesn't
+/// parse cleanly is skipped and named in the Event Log with its reason, so it
+/// can be reported; nothing is ever approximated. A skipped file is
+/// remembered in `skips`, so the next preview lists it instead of offering
+/// the fix again, and isn't re-read while unchanged.
+pub(super) fn add_seek_data(
+    target: &MissingSeekData,
+    format: SeekFormat,
+    skips: &SeekSkipMemory,
+    warnings: &mut Vec<WarningEntry>,
+    progress: &mut SeekProgress<'_>,
+) -> BackendResult<SeekAdded> {
+    let (done, total) = (progress.done, progress.total);
+    let file = target
+        .track_path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(&target.track_path);
+    // A file skipped before, unchanged since: not read again.
+    let index = match skips.get(&target.audio_path) {
+        Some(skip) => Err(skip),
+        None => {
+            if progress.meter.item_started() {
+                (progress.on_event)(SeekApplyEvent::Reading {
+                    done,
+                    total,
+                    file,
+                    mb_per_s: progress.meter.mb_per_s(),
+                });
+            }
+            let index = seek_index_for_audio_reporting(&target.audio_path, &mut |bytes| {
+                if progress.meter.bytes(bytes as u64) {
+                    (progress.on_event)(SeekApplyEvent::Reading {
+                        done,
+                        total,
+                        file,
+                        mb_per_s: progress.meter.mb_per_s(),
+                    });
+                }
+            });
+            if let Err(skip) = index {
+                skips.remember(&target.audio_path, skip);
+            }
+            index
+        }
+    };
+    let (reason, report) = match index {
+        Ok(Some(index)) => {
+            let bytes = std::fs::read(&target.bundle_path)?;
+            match with_seek_index(&bytes, &index) {
+                Some(patched) => {
+                    atomic_write_bytes(&target.bundle_path, &patched)?;
+                    return Ok(SeekAdded::Written);
+                }
+                None => ("analysis file could not be parsed", true),
+            }
+        }
+        Ok(None) => return Ok(SeekAdded::NotNeeded),
+        Err(skip) => (skip.describe(), skip.asks_for_report()),
+    };
+    let line = if report {
+        tr::repair_warning_seek_data_skipped_report(format.name(), reason, &target.track_path)
+    } else {
+        tr::repair_warning_seek_data_skipped_replace(format.name(), reason, &target.track_path)
+    };
+    warnings.push(logging::log_text(
+        Level::Warn,
+        "usb-repair",
+        "usb.repair.seek-data.skipped",
+        &line,
+    ));
+    Ok(SeekAdded::Skipped)
 }
 
 /// Lookup key for an analysis file or folder on the USB: its whole path with
@@ -819,12 +599,10 @@ impl BackendService {
             source_audio: std::path::PathBuf,
             analysis_dir: std::path::PathBuf,
             track_path: String,
-            // Known-good tempo/duration from the already-parsed PDB row, so a
-            // regenerated bundle bakes in the track's real beat grid (with no
-            // known tempo it gets no beat grid at all; with no known length the
-            // source file's own length is used; see docs/DIAGNOSTICS_REPAIRS.md).
+            // The tempo of the already-parsed PDB row (or eDB row), so a
+            // regenerated bundle keeps the track's BPM; with none, analysis
+            // detects one (see docs/DIAGNOSTICS_REPAIRS.md).
             bpm: Option<f64>,
-            duration_ms: Option<u64>,
         }
 
         let mut map_by_file = std::collections::HashMap::<String, AnalysisRepairTarget>::new();
@@ -857,10 +635,6 @@ impl BackendService {
                         analysis_dir: analysis_dir.clone(),
                         track_path: t.track_file_path.clone(),
                         bpm: (t.tempo_x100 > 0).then(|| t.tempo_x100 as f64 / 100.0),
-                        duration_ms: t
-                            .duration_seconds
-                            .filter(|s| *s > 0)
-                            .map(|s| s as u64 * 1000),
                     };
                     map_by_file.insert(analysis_path_key(&a), target.clone());
                     map_by_dir.insert(analysis_path_key(&analysis_dir), target);
@@ -873,7 +647,7 @@ impl BackendService {
         {
             let conn = handle.conn();
             let mut stmt = conn.prepare(
-                "SELECT path, analysisDataFilePath, bpmx100, length FROM content \
+                "SELECT path, analysisDataFilePath, bpmx100 FROM content \
                  WHERE analysisDataFilePath IS NOT NULL",
             )?;
             let rows = stmt.query_map([], |row| {
@@ -881,11 +655,10 @@ impl BackendService {
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<i64>>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
                 ))
             })?;
             for row in rows {
-                let (path, analysis_path, bpmx100, length_seconds) = row?;
+                let (path, analysis_path, bpmx100) = row?;
                 if let (Some(p), Some(a)) = (path.as_deref(), analysis_path.as_deref())
                     && let (Some(ra), Some(rp)) = (
                         resolve_usb_side_path(usb_root, a),
@@ -901,7 +674,6 @@ impl BackendService {
                         analysis_dir: analysis_dir.clone(),
                         track_path: p.to_string(),
                         bpm: bpmx100.filter(|v| *v > 0).map(|v| v as f64 / 100.0),
-                        duration_ms: length_seconds.filter(|v| *v > 0).map(|v| v as u64 * 1000),
                     };
                     map_by_file
                         .entry(analysis_path_key(&ra))
@@ -918,6 +690,7 @@ impl BackendService {
         let mut failed = 0usize;
         let mut writes = 0usize;
 
+        let mut draws = Vec::<(String, std::path::PathBuf, AnalysisRepairTarget)>::new();
         for empty_path in empty_analysis_paths {
             let empty_path_text = sanitize_warning_path(empty_path);
             let key_file = analysis_path_key(empty_path);
@@ -939,7 +712,7 @@ impl BackendService {
                 ));
                 continue;
             };
-            let source_audio = target.source_audio;
+            let source_audio = target.source_audio.clone();
             if !source_audio.is_file() {
                 skipped += 1;
                 warnings.push(logging::log_text(
@@ -953,61 +726,52 @@ impl BackendService {
                 ));
                 continue;
             }
-            let waveform = build_waveform_preview_from_audio(
-                &source_audio,
-                crate::service::WAVEFORM_PREVIEW_BINS,
-                2_000_000,
-            )
-            .unwrap_or_else(|_| WaveformData::empty());
-            if waveform.peaks.is_empty() {
-                failed += 1;
-                warnings.push(logging::log_text(
-                    Level::Error,
-                    "usb-repair",
-                    "usb.repair.empty-analysis.analyze-failed",
-                    &tr::repair_warning_empty_analysis_unreadable(source_audio.display()),
-                ));
-                continue;
-            }
-            let Some(duration_ms) = target
-                .duration_ms
-                .or_else(|| detect_track_duration_ms(&source_audio))
-            else {
-                failed += 1;
-                warnings.push(logging::log_text(
-                    Level::Error,
-                    "usb-repair",
-                    "usb.repair.empty-analysis.duration-unknown",
-                    &tr::repair_warning_empty_analysis_length_unknown(source_audio.display()),
-                ));
-                continue;
-            };
-            let base_dir = target.analysis_dir;
-            let bundle_paths = AnlzBundlePaths {
+            draws.push((empty_path_text, source_audio, target));
+        }
+
+        // Analysed by the analysis pipeline, under its worker cap. The
+        // databases' BPM is kept and its first beat placed; with none, one
+        // is detected.
+        let settings = DrawSettings::load(self)?;
+        let results = settings.map(
+            draws,
+            |(path_text, audio, target)| {
+                let analysis = analyze_stick_audio(&audio, target.bpm, false, settings);
+                (path_text, audio, target, analysis)
+            },
+            &mut |_| {},
+        );
+        for (empty_path_text, source_audio, target, analysis) in results {
+            let base_dir = &target.analysis_dir;
+            let paths = AnlzBundlePaths {
                 dat_path: base_dir.join("ANLZ0000.DAT"),
                 ext_path: base_dir.join("ANLZ0000.EXT"),
                 twoex_path: base_dir.join("ANLZ0000.2EX"),
             };
-            if let Err(err) = write_generated_anlz_bundle(
-                &waveform,
-                &bundle_paths,
-                &target.track_path,
-                target.bpm,
-                duration_ms,
-            ) {
-                failed += 1;
-                warnings.push(logging::log_text(
-                    Level::Error,
-                    "usb-repair",
+            let result = analysis.and_then(|analysis| {
+                write_stick_bundle(&analysis, &paths, &target.track_path, &source_audio)
+            });
+            let (code, line) = match result {
+                Ok(()) => {
+                    fixed += 1;
+                    writes += 3;
+                    continue;
+                }
+                Err(DrawError::Unreadable) => (
+                    "usb.repair.empty-analysis.analyze-failed",
+                    tr::repair_warning_empty_analysis_unreadable(source_audio.display()),
+                ),
+                Err(DrawError::LengthUnknown) => (
+                    "usb.repair.empty-analysis.duration-unknown",
+                    tr::repair_warning_empty_analysis_length_unknown(source_audio.display()),
+                ),
+                Err(DrawError::Write(err)) => (
                     "usb.repair.empty-analysis.write-failed",
-                    &tr::repair_warning_empty_analysis_write_failed(&empty_path_text, err),
-                ));
-                continue;
-            }
-            // The seek index rekordbox writes (MP3 PVBR, FLAC PVB2).
-            add_seek_index_to_new_bundle(&bundle_paths.dat_path, &source_audio);
-            fixed += 1;
-            writes += 3;
+                    tr::repair_warning_empty_analysis_write_failed(&empty_path_text, err),
+                ),
+            };
+            failed += 1;
+            warnings.push(logging::log_text(Level::Error, "usb-repair", code, &line));
         }
 
         Ok((fixed, skipped, failed, writes))
@@ -1184,10 +948,11 @@ impl BackendService {
         let mut manifest_tracks = Vec::<ExportManifestTrack>::new();
         let mut analysed = 0usize;
         let mut without_analysis = 0usize;
+        let mut found = Vec::new();
         for rel in files {
             // The ANLZ path hash and the DB rows both expect `/Contents/...`.
-            let rel = &rel.replace('\\', "/");
-            let Some(abs) = resolve_usb_side_path(usb_root, rel) else {
+            let rel = rel.replace('\\', "/");
+            let Some(abs) = resolve_usb_side_path(usb_root, &rel) else {
                 continue;
             };
             let scanned = match scan_audio_file(&abs) {
@@ -1197,40 +962,57 @@ impl BackendService {
                         Level::Warn,
                         "usb-repair",
                         "usb.repair.unindexed-audio.read-failed",
-                        &tr::repair_warning_unindexed_unreadable(rel, err),
+                        &tr::repair_warning_unindexed_unreadable(&rel, err),
                     ));
                     continue;
                 }
             };
+            // Its own bundle, when it has one: never another track's.
+            let has_bundle = analysis_bundle_paths_for_track(usb_root, &rel).0.is_file();
+            found.push((rel, abs, scanned, has_bundle));
+        }
 
-            // Its own bundle, or the next free `ANLZnnnn`: never another track's.
+        // No bundle on the USB: the file is analysed as a new library track
+        // is (BPM, first beat, key the tags lack, waveform), under analysis's
+        // worker cap, so the track has its analysis like any exported one.
+        let settings = DrawSettings::load(self)?;
+        let draws = found
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, _, _, has_bundle))| !has_bundle)
+            .map(|(index, (_, abs, scanned, _))| (index, abs.clone(), scanned.tonality.is_none()))
+            .collect::<Vec<_>>();
+        let mut analyses = settings
+            .map(
+                draws,
+                |(index, abs, detect_key)| {
+                    (index, analyze_stick_audio(&abs, None, detect_key, settings))
+                },
+                &mut |_| {},
+            )
+            .into_iter()
+            .filter_map(|(index, analysis)| Some((index, analysis.ok()?)))
+            .collect::<HashMap<_, _>>();
+
+        for (index, (rel, abs, scanned, _)) in found.into_iter().enumerate() {
+            let rel = &rel;
+            // Written one at a time: the next free `ANLZnnnn` depends on the
+            // bundles written before it.
             let (dat_path, ext_path, twoex_path) = analysis_bundle_paths_for_track(usb_root, rel);
-            let duration_ms = detect_track_duration_ms(&abs);
-            // No bundle on the USB: analyse the file as the empty-analysis fix
-            // does, so the track has its waveform and analysis path like any
-            // exported one.
-            if !dat_path.is_file()
-                && let Some(duration_ms) = duration_ms
-            {
-                let waveform = build_waveform_preview_from_audio(
-                    &abs,
-                    crate::service::WAVEFORM_PREVIEW_BINS,
-                    2_000_000,
-                )
-                .unwrap_or_else(|_| WaveformData::empty());
-                let bundle_paths = AnlzBundlePaths {
+            let mut detected_key = None;
+            if let Some(analysis) = analyses.remove(&index) {
+                let paths = AnlzBundlePaths {
                     dat_path: dat_path.clone(),
                     ext_path: ext_path.clone(),
                     twoex_path,
                 };
-                if !waveform.peaks.is_empty()
-                    && write_generated_anlz_bundle(&waveform, &bundle_paths, rel, None, duration_ms)
-                        .is_ok()
-                {
-                    add_seek_index_to_new_bundle(&dat_path, &abs);
+                if write_stick_bundle(&analysis, &paths, rel, &abs).is_ok() {
                     analysed += 1;
+                    detected_key = analysis.core.key;
                 }
             }
+            let duration_ms = detect_track_duration_ms(&abs);
+            let key = scanned.tonality.clone().or(detected_key);
             let (waveform_path, bpm, first_beat_ms, cues) = if dat_path.is_file() {
                 let dat = std::fs::read(&dat_path).unwrap_or_default();
                 let cue_bytes = std::fs::read(&ext_path).unwrap_or_else(|_| dat.clone());
@@ -1283,7 +1065,7 @@ impl BackendService {
                 artist: scanned.artist,
                 album: scanned.album,
                 bpm,
-                key: scanned.tonality,
+                key,
                 source_path: rel.clone(),
                 exported_path: rel.clone(),
                 file_timestamp_at,

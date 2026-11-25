@@ -1,16 +1,17 @@
 //! Track analysis: BPM detection, key detection, waveform generation, cover art.
 
 use super::anlz::{
-    AnlzBundlePaths, WaveformData, atomic_write_bytes, fill_mp3_pvbr,
+    AnlzBundlePaths, WaveformData, atomic_write_bytes, fill_mp3_pvbr, pwv4_payload,
     write_generated_anlz_bundle_with_first_beat,
 };
+use super::anlz_read::row_waveform_from_pwv4;
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum, first_beat_secs};
 use super::export_helpers::{
     KeptAnalysis, LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash,
 };
 use super::{
-    BackendService, LibrarySources, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS,
-    has_core_analysis_fields, track_has_core_analysis_for_source_status,
+    BackendService, LibrarySources, SETTING_UI_ANALYSIS_ENGINE, has_core_analysis_fields,
+    track_has_core_analysis_for_source_status,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
@@ -645,10 +646,20 @@ fn waveform_preview_if_persisted(
     waveform: &WaveformData,
     waveform_peaks_path: &Option<String>,
 ) -> Option<Vec<u8>> {
-    waveform_peaks_path
-        .as_ref()
-        .map(|_| downsample_waveform_peaks(&waveform.peaks, WAVEFORM_PREVIEW_BINS))
+    waveform_peaks_path.as_ref().map(|_| row_waveform(waveform))
 }
+
+/// The track tables' small waveform of `waveform`: built from the `PWV4` the
+/// bundle writer writes for it, so the row shows during analysis exactly what
+/// it shows once read back from the file.
+fn row_waveform(waveform: &WaveformData) -> Vec<u8> {
+    row_waveform_from_pwv4(&pwv4_payload(waveform))
+}
+
+/// The fewest bins a waveform is drawn with, whatever the track's length: the
+/// preview chunks (`PWAV`'s 400 entries, `PWV4`'s 1,200) are resampled from
+/// them, so a short track still gets a bin per entry.
+const MIN_WAVEFORM_BINS: usize = 2400;
 
 pub(crate) fn waveform_detail_entries_for_duration(duration_ms: u64) -> usize {
     (((duration_ms as f64 / 1000.0) * ANLZ_DETAIL_BINS_PER_SECOND).ceil() as usize)
@@ -657,30 +668,7 @@ pub(crate) fn waveform_detail_entries_for_duration(duration_ms: u64) -> usize {
 }
 
 pub(crate) fn waveform_detail_bins_for_duration(duration_ms: u64) -> usize {
-    waveform_detail_entries_for_duration(duration_ms).max(WAVEFORM_PREVIEW_BINS)
-}
-
-fn downsample_waveform_peaks(peaks: &[u8], bins: usize) -> Vec<u8> {
-    if bins == 0 || peaks.is_empty() {
-        return Vec::new();
-    }
-    if peaks.len() == bins {
-        return peaks.to_vec();
-    }
-    (0..bins)
-        .map(|i| {
-            let start = i * peaks.len() / bins;
-            let mut end = ((i + 1) * peaks.len()) / bins;
-            if end <= start {
-                end = (start + 1).min(peaks.len());
-            }
-            peaks[start.min(peaks.len().saturating_sub(1))..end.min(peaks.len())]
-                .iter()
-                .copied()
-                .max()
-                .unwrap_or(0)
-        })
-        .collect()
+    waveform_detail_entries_for_duration(duration_ms).max(MIN_WAVEFORM_BINS)
 }
 
 fn resolve_persisted_artwork(path: &Path, artwork_dir: &Path, track_id: &str) -> Option<String> {
@@ -1020,95 +1008,86 @@ fn analyze_local_track_with_updates(
         )));
     }
 
-    // A file with no decodable audio track fails here -- it must not be
-    // "analyzed" into a waveform drawn from its raw bytes.
-    let DecodedAudio {
-        samples,
-        sample_rate,
-        duration_ms,
-        waveform,
-    } = decode_audio_with_waveform(
-        &path,
-        BPM_KEY_MAX_SAMPLES,
-        waveform_detail_bins_for_duration,
-    )?;
-    timing.finish_stage("decode");
-
     // Each piece is sent as soon as it is known, in the row's column order:
     // the cover, then the waveform and the length (from the decode), then BPM
     // / key after their detection, the slow part. The analysis bundle needs
     // the BPM and first beat, so it is written only after that.
-    let persisted_artwork = resolve_persisted_artwork(&path, artwork_dir, track_id);
-    if persisted_artwork.is_some() {
-        on_update(TrackPartialUpdate {
-            artwork_path: persisted_artwork.clone(),
-            ..TrackPartialUpdate::default()
-        });
-    }
-    timing.finish_stage("artwork and notification");
-
-    // The waveform's detail entries are a time axis: with no known length
-    // there is no waveform, rather than one stretched to a made-up length.
-    let waveform = waveform.unwrap_or_else(WaveformData::empty);
-    if !waveform.peaks.is_empty() {
-        on_update(TrackPartialUpdate {
-            waveform_preview: Some(downsample_waveform_peaks(
-                &waveform.peaks,
-                WAVEFORM_PREVIEW_BINS,
-            )),
-            ..TrackPartialUpdate::default()
-        });
-    }
-    if duration_ms.is_some() {
-        on_update(TrackPartialUpdate {
-            duration_ms,
-            ..TrackPartialUpdate::default()
-        });
-    }
-    timing.finish_stage("duration, waveform and notifications");
-
-    let bpm_key_result = detect_bpm_key(engine, &samples, sample_rate, bpm_min, bpm_max)?;
-    timing.finish_stage("BPM and key");
+    let mut persisted_artwork = None;
+    let core = analyze_audio_core(
+        &path,
+        &CoreRequest {
+            kept_bpm: kept.bpm,
+            kept_first_beat_ms: *kept_first_beat_ms,
+            existing_first_beat_ms: *existing_first_beat_ms,
+            detect_key: kept.key.is_none(),
+            detection_required: true,
+            bpm_min,
+            bpm_max,
+            engine,
+        },
+        &mut |waveform, duration_ms| {
+            timing.finish_stage("decode");
+            persisted_artwork = resolve_persisted_artwork(&path, artwork_dir, track_id);
+            if persisted_artwork.is_some() {
+                on_update(TrackPartialUpdate {
+                    artwork_path: persisted_artwork.clone(),
+                    ..TrackPartialUpdate::default()
+                });
+            }
+            if !waveform.peaks.is_empty() {
+                on_update(TrackPartialUpdate {
+                    waveform_preview: Some(row_waveform(waveform)),
+                    ..TrackPartialUpdate::default()
+                });
+            }
+            if duration_ms.is_some() {
+                on_update(TrackPartialUpdate {
+                    duration_ms,
+                    ..TrackPartialUpdate::default()
+                });
+            }
+            timing.finish_stage("artwork, duration, waveform and notifications");
+        },
+    )?;
+    timing.finish_stage("BPM, key and first beat");
+    let CoreAnalysis {
+        waveform,
+        duration_ms,
+        bpm,
+        key: detected_key,
+        first_beat_ms,
+        first_beat_estimated,
+    } = core;
     // A kept BPM / key wins over the detection, in the DB and in the beat grid
     // written below. `bpm_analyzer` / `key_source` stay unset for a kept value
     // so the column keeps saying where it came from; a detected one replaces
     // the old source, or a later import would take the key for its own.
-    let bpm = kept.bpm.or(bpm_key_result.bpm);
     let bpm_analyzer = bpm
         .filter(|_| kept.bpm.is_none())
         .map(|_| engine.bpm_analyzer().to_string());
-    let key = kept.key.clone().or(bpm_key_result.key);
+    let key = kept.key.clone().or(detected_key);
     let key_source = key
         .as_ref()
         .filter(|_| kept.key.is_none())
         .map(|_| engine.bpm_analyzer().to_string());
-    let (first_beat_ms, first_beat_estimated) = first_beat_for_saved_bpm(
-        &samples,
-        sample_rate,
-        kept.bpm,
-        bpm_key_result.first_beat_ms,
-        *existing_first_beat_ms,
-        *kept_first_beat_ms,
-    );
-    timing.finish_stage("first beat");
     let bundle_paths = local_analysis_bundle_paths(waveform_dir, track_id, file_path);
     let waveform_peaks_path =
         if let Some(duration_ms) = duration_ms.filter(|_| !waveform.peaks.is_empty()) {
             // Cues (if the track was previously edited) are baked into the cache
             // by `save_track_analysis_edits`; a fresh analysis writes an empty cue
             // list and the next save/export re-applies them.
-            write_generated_anlz_bundle_with_first_beat(
-                &waveform,
+            write_track_bundle(
+                &TrackBundle {
+                    waveform: &waveform,
+                    track_path: "",
+                    bpm,
+                    duration_ms,
+                    first_beat_ms,
+                    cues: &[],
+                },
                 &bundle_paths,
-                "",
-                bpm,
-                duration_ms,
-                first_beat_ms,
-                &[],
+                &path,
             )?;
-            // MP3s get rekordbox's seek index; a file it can't be reproduced
-            // for exactly keeps the empty one (logged by `fill_mp3_pvbr`).
-            let _ = fill_mp3_pvbr(&bundle_paths.dat_path, &path);
             Some(bundle_paths.dat_path.to_string_lossy().to_string())
         } else {
             None
@@ -1193,6 +1172,199 @@ fn first_beat_for_saved_bpm(
     }
 }
 
+/// What [`analyze_audio_core`] keeps instead of detecting, and how it detects
+/// the rest.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CoreRequest {
+    /// A BPM that wins over the detection. With it and no key wanted, nothing
+    /// is detected: the audio is only decoded, and the first beat placed.
+    pub(crate) kept_bpm: Option<f64>,
+    /// A first beat that wins over placing one.
+    pub(crate) kept_first_beat_ms: Option<u32>,
+    /// The first beat to fall back on when the audio gives none.
+    pub(crate) existing_first_beat_ms: Option<u32>,
+    pub(crate) detect_key: bool,
+    /// Whether a failed detection fails the analysis. Library analysis
+    /// needs a BPM; a USB repair still draws the waveform of a file whose
+    /// BPM can't be found (silence), with no beat grid.
+    pub(crate) detection_required: bool,
+    pub(crate) bpm_min: u32,
+    pub(crate) bpm_max: u32,
+    pub(crate) engine: AnalysisEngine,
+}
+
+/// One audio file's analysis, whatever it is for: a library track, or a file
+/// on a USB.
+#[derive(Debug, Clone)]
+pub(crate) struct CoreAnalysis {
+    /// Drawn over the whole track at detail resolution; empty with no known
+    /// length.
+    pub(crate) waveform: WaveformData,
+    pub(crate) duration_ms: Option<u64>,
+    /// The kept BPM, else the detected one.
+    pub(crate) bpm: Option<f64>,
+    /// Detected; `None` when not asked for.
+    pub(crate) key: Option<String>,
+    pub(crate) first_beat_ms: Option<u32>,
+    /// Whether this analysis placed the first beat.
+    pub(crate) first_beat_estimated: bool,
+}
+
+/// The analysis pipeline's core, which needs no library: decodes `path` once,
+/// draws its waveform from all of it, detects what isn't kept and places the
+/// first beat. `on_decoded` gets the waveform and length as soon as the decode
+/// is done, before the (slow) detection.
+pub(crate) fn analyze_audio_core(
+    path: &Path,
+    request: &CoreRequest,
+    on_decoded: &mut dyn FnMut(&WaveformData, Option<u64>),
+) -> BackendResult<CoreAnalysis> {
+    // A file with no decodable audio track fails here -- it must not be
+    // "analyzed" into a waveform drawn from its raw bytes.
+    let DecodedAudio {
+        samples,
+        sample_rate,
+        duration_ms,
+        waveform,
+    } = decode_audio_with_waveform(path, BPM_KEY_MAX_SAMPLES, waveform_detail_bins_for_duration)?;
+    // The waveform's detail entries are a time axis: with no known length
+    // there is no waveform, rather than one stretched to a made-up length.
+    let waveform = waveform.unwrap_or_else(WaveformData::empty);
+    on_decoded(&waveform, duration_ms);
+
+    let detected = if request.kept_bpm.is_some() && !request.detect_key {
+        BpmKeyResult::default()
+    } else {
+        match detect_bpm_key(
+            request.engine,
+            &samples,
+            sample_rate,
+            request.bpm_min,
+            request.bpm_max,
+        ) {
+            Ok(detected) => detected,
+            Err(err) if request.detection_required => return Err(err),
+            Err(_) => BpmKeyResult::default(),
+        }
+    };
+    let (first_beat_ms, first_beat_estimated) = first_beat_for_saved_bpm(
+        &samples,
+        sample_rate,
+        request.kept_bpm,
+        detected.first_beat_ms,
+        request.existing_first_beat_ms,
+        request.kept_first_beat_ms,
+    );
+    Ok(CoreAnalysis {
+        waveform,
+        duration_ms,
+        bpm: request.kept_bpm.or(detected.bpm),
+        key: detected.key.filter(|_| request.detect_key),
+        first_beat_ms,
+        first_beat_estimated,
+    })
+}
+
+/// What goes into an analysis bundle, besides the seek index.
+pub(crate) struct TrackBundle<'a> {
+    pub(crate) waveform: &'a WaveformData,
+    /// The `PPTH`; empty for the library's own bundles.
+    pub(crate) track_path: &'a str,
+    pub(crate) bpm: Option<f64>,
+    pub(crate) duration_ms: u64,
+    pub(crate) first_beat_ms: Option<u32>,
+    pub(crate) cues: &'a [crate::service::anlz::AnlzCue],
+}
+
+/// The one writer of a new analysis bundle: waveforms, beat grid and cues,
+/// and for an MP3 rekordbox's seek index (`PVBR`), built from `audio`. A file
+/// it can't be reproduced for exactly keeps the empty one (logged by
+/// `fill_mp3_pvbr`). A FLAC's `PVB2` is not written: its long-track rule
+/// isn't exact, so the USB repair adds it, as an opt-in fix.
+pub(crate) fn write_track_bundle(
+    bundle: &TrackBundle<'_>,
+    paths: &AnlzBundlePaths,
+    audio: &Path,
+) -> BackendResult<()> {
+    write_generated_anlz_bundle_with_first_beat(
+        bundle.waveform,
+        paths,
+        bundle.track_path,
+        bundle.bpm,
+        bundle.duration_ms,
+        bundle.first_beat_ms,
+        bundle.cues,
+    )?;
+    let _ = fill_mp3_pvbr(&paths.dat_path, audio);
+    Ok(())
+}
+
+/// The engine and BPM range library analysis uses, from the settings: what
+/// analysis outside a library job (the USB repairs) detects with.
+pub(crate) fn analysis_settings(conn: &rusqlite::Connection) -> (AnalysisEngine, u32, u32) {
+    let engine = resolve_analysis_engine(conn, None);
+    let range: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![crate::service::SETTING_UI_ANALYSIS_BPM_RANGE],
+            |row| row.get(0),
+        )
+        .ok();
+    let (bpm_min, bpm_max) = resolve_analysis_bpm_range(range.as_deref(), None, None);
+    (engine, bpm_min, bpm_max)
+}
+
+/// Runs `work` on every item, as many at once as library analysis runs
+/// tracks with `engine` (its memory-based worker cap), and returns the
+/// results in the items' order. `on_done` is called on this thread as each
+/// finishes, with the count done so far.
+pub(crate) fn map_under_analysis_cap<T, R>(
+    items: Vec<T>,
+    engine: AnalysisEngine,
+    work: impl Fn(T) -> R + Sync,
+    on_done: &mut dyn FnMut(usize),
+) -> Vec<R>
+where
+    T: Send,
+    R: Send,
+{
+    let total = items.len();
+    if total == 0 {
+        return Vec::new();
+    }
+    let workers = analysis_capacity(engine).min(total);
+    let queue = std::sync::Mutex::new(items.into_iter().enumerate());
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, R)>();
+    let mut results: Vec<Option<R>> = (0..total).map(|_| None).collect();
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let tx = tx.clone();
+            let queue = &queue;
+            let work = &work;
+            scope.spawn(move || {
+                loop {
+                    let next = queue
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .next();
+                    let Some((index, item)) = next else {
+                        return;
+                    };
+                    if tx.send((index, work(item))).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(tx);
+        for (done, (index, result)) in rx.iter().enumerate() {
+            results[index] = Some(result);
+            on_done(done + 1);
+        }
+    });
+    results.into_iter().flatten().collect()
+}
+
 fn duration_ms_from_decoded(sample_count: usize, sample_rate: u32) -> Option<u64> {
     if sample_count == 0 || sample_rate == 0 {
         return None;
@@ -1224,17 +1396,18 @@ pub(crate) fn write_waveform_bundle_for_audio(
             audio.display()
         )));
     }
-    write_generated_anlz_bundle_with_first_beat(
-        &waveform,
+    write_track_bundle(
+        &TrackBundle {
+            waveform: &waveform,
+            track_path: "",
+            bpm: None,
+            duration_ms,
+            first_beat_ms: None,
+            cues: &[],
+        },
         paths,
-        "",
-        None,
-        duration_ms,
-        None,
-        &[],
-    )?;
-    let _ = fill_mp3_pvbr(&paths.dat_path, audio);
-    Ok(())
+        audio,
+    )
 }
 
 pub(crate) fn detect_track_duration_ms(path: &Path) -> Option<u64> {
@@ -1743,6 +1916,7 @@ fn discover_cover_art_in_dir(dir: &Path) -> Option<PathBuf> {
     None
 }
 
+#[cfg(test)]
 pub(crate) fn build_waveform_preview_from_audio(
     path: &Path,
     bins: usize,
@@ -2227,7 +2401,6 @@ mod tests {
         waveform_detail_entries_for_duration, waveform_preview_if_persisted,
     };
     use crate::error::BackendError;
-    use crate::service::WAVEFORM_PREVIEW_BINS;
     use crate::service::anlz::WaveformData;
     use crate::service::export_helpers::{KeptAnalysis, stable_u32_hash};
     use rusqlite::Connection;
@@ -2904,14 +3077,14 @@ mod tests {
         assert_eq!(waveform_detail_entries_for_duration(30_000), 4_504);
         assert_eq!(
             waveform_detail_bins_for_duration(8_000),
-            WAVEFORM_PREVIEW_BINS,
-            "short tracks still keep enough local bins for UI preview"
+            super::MIN_WAVEFORM_BINS,
+            "short tracks still keep enough bins for the preview chunks"
         );
         assert_eq!(waveform_detail_bins_for_duration(180_000), 27_004);
     }
 
     #[test]
-    fn persisted_waveform_preview_is_downsampled_from_detail_cache() {
+    fn the_row_waveform_during_analysis_is_the_one_read_back_from_the_file() {
         let detail_bins = waveform_detail_bins_for_duration(180_000);
         let waveform =
             WaveformData::from_peaks((0..detail_bins).map(|i| ((i * 37) % 101) as u8).collect());
@@ -2919,8 +3092,17 @@ mod tests {
         let preview = waveform_preview_if_persisted(&waveform, &Some("/tmp/ANLZ0000.DAT".into()))
             .expect("preview");
 
-        assert_eq!(preview.len(), WAVEFORM_PREVIEW_BINS);
-        assert!(preview.iter().any(|&v| v > 0));
+        let ext =
+            crate::service::anlz::build_anlz_ext_file(&waveform, "", None, 180_000, None, &[]);
+        assert_eq!(
+            Some(preview.clone()),
+            crate::service::anlz_read::row_waveform_from_anlz_bytes(&ext)
+        );
+        assert_eq!(
+            preview.len(),
+            crate::service::anlz_read::ROW_WAVEFORM_ENTRIES * 4
+        );
+        assert_eq!(waveform_preview_if_persisted(&waveform, &None), None);
     }
 
     #[test]

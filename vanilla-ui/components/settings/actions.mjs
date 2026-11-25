@@ -116,6 +116,8 @@ export function createThemeManager(ctx) {
     WAVEFORM_COLORS.base = wc.base;
     WAVEFORM_COLORS.mid = wc.mid;
     WAVEFORM_COLORS.peak = wc.peak;
+    WAVEFORM_COLORS.hue = wc.hue;
+    WAVEFORM_COLORS.isDark = wc.isDark;
     renderWaveformsIn(document);
   }
 

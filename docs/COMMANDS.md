@@ -156,8 +156,8 @@ aren't lost.
 - `scan_mixxx_db`
 - `browse_source_files` — lists the library as its sources are set (below);
   the request carries no folder or library filter. The page's rows carry
-  their waveforms (`waveformPreview`, or `waveformColorData` for rekordbox
-  tracks), read for that page only, as a USB page's are.
+  their waveforms (`waveformPreview`: entries of height, low, mid, high,
+  read from each bundle's `PWV4`), for that page only, as a USB page's are.
 - `get_library_sources` → `{ folders, rekordboxDbEnabled, mixxxDbEnabled,
   rekordboxDbFullyAnalyzed, mixxxDbFullyAnalyzed, everConfigured,
   filterStatusText, filtering }`, each folder `{ path, enabled, missing,

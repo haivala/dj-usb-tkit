@@ -1,19 +1,26 @@
-//! Reading ANLZ analysis files: chunk payloads and the waveform previews
-//! the track tables draw, from the library's or the stick's files.
+//! Reading ANLZ analysis files: chunk payloads and the waveform the track
+//! tables draw, from the library's or the stick's files.
 
-use crate::service::WAVEFORM_PREVIEW_BINS;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+/// Entries in the track tables' small waveform. Each is four values, 0-127:
+/// the height, then the low, mid and high band, which the UI turns into
+/// shades of the theme's colour.
+pub(crate) const ROW_WAVEFORM_ENTRIES: usize = 600;
+
+/// The track tables' small waveform of the bundle at `path`, read from what
+/// the bundle holds: its `PWV4` (the `.EXT`'s colour preview, rekordbox's or
+/// this app's), else the heights of its `PWV3`, `PWAV` or `PWV2` with no
+/// bands. Nothing is drawn from audio here, so the row always shows the
+/// file.
 pub(crate) fn load_waveform_preview_from_analysis_path(path: &Path) -> Option<Vec<u8>> {
     for candidate in waveform_preview_candidates(path) {
         let Ok(bytes) = std::fs::read(&candidate) else {
             continue;
         };
-        if let Some(peaks) = extract_waveform_preview_from_anlz_bytes(&bytes, WAVEFORM_PREVIEW_BINS)
-            && !peaks.is_empty()
-        {
-            return Some(peaks);
+        if let Some(preview) = row_waveform_from_anlz_bytes(&bytes) {
+            return Some(preview);
         }
     }
     None
@@ -50,12 +57,6 @@ pub(crate) fn waveform_preview_candidates(path: &Path) -> Vec<PathBuf> {
     candidates
 }
 
-/// Extract the raw PWV4 payload from a desktop library ANLZ `.EXT` file (no conversion).
-/// Returns the 1200 × 6 byte payload, or None if the file/chunk is absent.
-pub(crate) fn read_pwv4_from_anlz(dat_path: &Path) -> Option<Vec<u8>> {
-    read_ext_chunk(dat_path, b"PWV4")
-}
-
 /// Extract the raw PWV5 colour-detail waveform payload from a desktop library
 /// ANLZ `.EXT` file (no conversion). 2 bytes/entry, BE u16:
 /// `R(3) | G(3) | B(3) | Height(5) | _(2)`. Entry count is duration-derived
@@ -86,23 +87,50 @@ pub(crate) fn pwv5_from_ext_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
         .map(<[u8]>::to_vec)
 }
 
-pub(crate) fn extract_waveform_preview_from_anlz_bytes(
-    bytes: &[u8],
-    bins: usize,
-) -> Option<Vec<u8>> {
-    // Prefer single-byte-per-level formats (PWV3, PWAV, PWV2) because
-    // downsample_waveform_payload extracts amplitude via `b & 0x1F` per byte.
-    // Multi-byte formats (PWV5=2B, PWV4=6B per level) need dedicated decoders
-    // and would produce garbage with byte-level extraction.
+/// The track tables' small waveform from one ANLZ file's bytes
+/// ([`load_waveform_preview_from_analysis_path`]); `None` when it holds no
+/// waveform, or only silence.
+pub(crate) fn row_waveform_from_anlz_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+    if let Some(payload) = anlz_chunk_payload(bytes, b"PWV4") {
+        let preview = row_waveform_from_pwv4(payload);
+        if preview.chunks(4).any(|entry| entry[0] > 0) {
+            return Some(preview);
+        }
+    }
+    // One byte per level, the height in its low 5 bits.
     for tag in [b"PWV3", b"PWAV", b"PWV2"] {
         if let Some(payload) = anlz_chunk_payload(bytes, tag) {
-            let peaks = downsample_waveform_payload(payload, bins.max(1));
-            if !peaks.is_empty() {
-                return Some(peaks);
+            let preview = downsample_waveform_payload(payload, ROW_WAVEFORM_ENTRIES)
+                .into_iter()
+                .flat_map(|percent| [((u16::from(percent) * 127) / 100) as u8, 0, 0, 0])
+                .collect::<Vec<_>>();
+            if preview.chunks(4).any(|entry| entry[0] > 0) {
+                return Some(preview);
             }
         }
     }
     None
+}
+
+/// A `PWV4` payload (six lanes per entry: height, two shading lanes, then
+/// low, mid and high) as the track tables' small waveform: at most
+/// [`ROW_WAVEFORM_ENTRIES`] entries of height, low, mid, high, each the
+/// loudest of the entries it covers. Read only: the file is never changed.
+pub(crate) fn row_waveform_from_pwv4(payload: &[u8]) -> Vec<u8> {
+    let entries = payload.chunks_exact(6).collect::<Vec<_>>();
+    let n = entries.len();
+    let count = ROW_WAVEFORM_ENTRIES.min(n);
+    let mut out = Vec::with_capacity(count * 4);
+    for i in 0..count {
+        let start = i * n / count;
+        let end = ((i + 1) * n / count).max(start + 1).min(n);
+        let loudest = entries[start..end]
+            .iter()
+            .max_by_key(|entry| entry[0])
+            .expect("a window holds at least one entry");
+        out.extend_from_slice(&[loudest[0], loudest[3], loudest[4], loudest[5]]);
+    }
+    out
 }
 
 /// An ANLZ chunk's tag, header length and total length from its 12-byte
@@ -377,19 +405,40 @@ mod tests {
             &[],
         );
 
-        // extract_waveform_preview_from_anlz_bytes should find PWAV and decode it
-        let preview = extract_waveform_preview_from_anlz_bytes(&dat_bytes, 50);
-        assert!(preview.is_some(), "should extract preview from DAT file");
-        let preview = preview.unwrap();
-        assert_eq!(preview.len(), 50);
-        // Values should be in 0-100 range and not all zero
+        // A .DAT has no PWV4: the heights of its PWAV, with no bands.
+        let preview = row_waveform_from_anlz_bytes(&dat_bytes).expect("preview from DAT");
+        assert_eq!(preview.len(), ROW_WAVEFORM_ENTRIES * 4);
+        assert!(preview.chunks(4).any(|entry| entry[0] > 0));
         assert!(
-            preview.iter().any(|&v| v > 0),
-            "preview should have non-zero values"
+            preview
+                .chunks(4)
+                .all(|entry| entry[0] <= 127 && entry[1..] == [0, 0, 0])
         );
-        assert!(
-            preview.iter().all(|&v| v <= 100),
-            "all values should be <= 100"
+    }
+
+    #[test]
+    fn the_row_waveform_is_the_ext_pwv4_with_its_bands() {
+        use crate::service::anlz::{WaveformData, build_anlz_ext_file, pwv4_payload};
+
+        let peaks: Vec<u8> = (0..2400).map(|i| (i * 37 % 90) as u8 + 5).collect();
+        let waveform = WaveformData::from_peaks(peaks);
+        let ext = build_anlz_ext_file(&waveform, "", None, 180_000, None, &[]);
+        let preview = row_waveform_from_anlz_bytes(&ext).expect("preview from EXT");
+        // What the file holds, as analysis shows it before the file is read.
+        assert_eq!(preview, row_waveform_from_pwv4(&pwv4_payload(&waveform)));
+        assert_eq!(preview.len(), ROW_WAVEFORM_ENTRIES * 4);
+        // Each entry is the loudest of its two PWV4 entries, with its bands.
+        let pwv4 = anlz_chunk_payload(&ext, b"PWV4").expect("PWV4");
+        let first = &pwv4[..12];
+        let loudest = if first[6] > first[0] {
+            &first[6..]
+        } else {
+            &first[..6]
+        };
+        assert_eq!(
+            preview[..4],
+            [loudest[0], loudest[3], loudest[4], loudest[5]]
         );
+        assert!(preview.chunks(4).any(|entry| entry[1..] != [0, 0, 0]));
     }
 }

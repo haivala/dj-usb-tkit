@@ -656,7 +656,6 @@ pub(super) fn sample_track(id: &str, file_path: &str) -> Track {
         artwork_data_url: None,
         waveform_peaks_path: None,
         waveform_preview: None,
-        waveform_color_data: None,
         created_at: "2024-01-01T00:00:00Z".to_string(),
         updated_at: "2024-01-01T00:00:00Z".to_string(),
         rekordbox_db_source: false,

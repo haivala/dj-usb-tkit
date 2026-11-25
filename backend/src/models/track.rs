@@ -50,8 +50,9 @@ pub struct Track {
     pub artwork_path: Option<String>,
     pub artwork_data_url: Option<String>,
     pub waveform_peaks_path: Option<String>,
+    /// The track tables' small waveform: entries of four values, 0-127
+    /// (height, low, mid, high band), read from the track's bundle.
     pub waveform_preview: Option<Vec<u8>>,
-    pub waveform_color_data: Option<Vec<u8>>,
     pub created_at: String,
     pub updated_at: String,
     pub rekordbox_db_source: bool,

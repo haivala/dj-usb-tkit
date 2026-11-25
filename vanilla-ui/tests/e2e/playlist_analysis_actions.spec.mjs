@@ -34,7 +34,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
           filePath: "/USB/Contents/Artist USB/USB Ready.mp3",
           usbAnalysisPath: "/USB/PIONEER/USBANLZ/P001/TEST/ANLZ0000.DAT",
           waveformPeaksPath: "/USB/PIONEER/USBANLZ/P001/TEST/ANLZ0000.DAT",
-          waveformPreview: [10, 20, 30],
+          waveformPreview: [10, 60, 20, 5, 20, 30, 40, 10, 30, 10, 20, 60],
           fileSizeBytes: 2 * 1024 ** 3,
           durationMs: 180000,
           bpm: 128,
@@ -48,7 +48,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
     // The analysis holds until the test releases it, so its transient
     // "analyzing" row state is guaranteed observable.
     let releaseAnalysis = null;
-    const analyzed = { durationMs: 180000, waveformPeaksPath: "/tmp/local-missing.DAT", waveformPreview: [5, 10, 20], bpm: 128, analysisReady: true };
+    const analyzed = { durationMs: 180000, waveformPeaksPath: "/tmp/local-missing.DAT", waveformPreview: [5, 60, 20, 5, 10, 30, 40, 10, 20, 10, 20, 60], bpm: 128, analysisReady: true };
     const job = { jobId: "job-analysis-mock", jobType: "analysis", stage: "analyze_new_tracks" };
     backend.install((command, request) => {
       if (command !== "analyze_new_tracks") return undefined;
@@ -155,7 +155,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
         name: "Ready Playlist",
         tracks: [{
           id: "local-ready-1", title: "Local Ready", artist: "Artist A", album: "Album A", filePath: "/music/local-ready.mp3",
-          waveformPeaksPath: "/tmp/local-ready.dat", waveformPreview: [10, 20, 30], durationMs: 180000, bpm: 128, key: "8A",
+          waveformPeaksPath: "/tmp/local-ready.dat", waveformPreview: [10, 60, 20, 5, 20, 30, 40, 10, 30, 10, 20, 60], durationMs: 180000, bpm: 128, key: "8A",
           analysisReady: true
         }]
       }]
@@ -194,7 +194,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
         tracks: [
           {
             id: "local-ready-entry", localTrackId: "local-ready-1", title: "Local Ready", artist: "Artist A", album: "Album A",
-            filePath: "/music/local-ready.mp3", waveformPeaksPath: "/tmp/local-ready.dat", waveformPreview: [10, 20, 30],
+            filePath: "/music/local-ready.mp3", waveformPeaksPath: "/tmp/local-ready.dat", waveformPreview: [10, 60, 20, 5, 20, 30, 40, 10, 30, 10, 20, 60],
             durationMs: 180000, bpm: 128, key: "8A", analysisReady: true
           },
           {
@@ -250,8 +250,8 @@ test("selecting a playlist with tracks right after an empty one still paints its
           id: "pl-full",
           name: "Full Playlist",
           tracks: [
-            { id: "t1", title: "Song A", artist: "Artist", album: "Album", filePath: "/music/a.mp3", waveformPeaksPath: "/tmp/a.dat", waveformPreview: [8, 20, 42, 65, 30, 55], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-            { id: "t2", title: "Song B", artist: "Artist", album: "Album", filePath: "/music/b.mp3", waveformPeaksPath: "/tmp/b.dat", waveformPreview: [7, 19, 43, 61, 34, 57], durationMs: 180000, bpm: 122, key: "9A", analysisReady: true }
+            { id: "t1", title: "Song A", artist: "Artist", album: "Album", filePath: "/music/a.mp3", waveformPeaksPath: "/tmp/a.dat", waveformPreview: [8, 60, 20, 5, 20, 40, 40, 10, 42, 30, 40, 20, 65, 10, 20, 60, 30, 50, 30, 10, 55, 5, 30, 70], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+            { id: "t2", title: "Song B", artist: "Artist", album: "Album", filePath: "/music/b.mp3", waveformPeaksPath: "/tmp/b.dat", waveformPreview: [7, 60, 20, 5, 19, 40, 40, 10, 43, 30, 40, 20, 61, 10, 20, 60, 34, 50, 30, 10, 57, 5, 30, 70], durationMs: 180000, bpm: 122, key: "9A", analysisReady: true }
           ]
         }
       ]

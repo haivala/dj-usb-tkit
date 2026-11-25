@@ -741,8 +741,8 @@ test("library row", async ({ page }) => {
       track("usb-off", { fileSource: { kind: "usb", missing: true, tooltip: "USB not connected: /stick/a.mp3" } }),
       track("local", {
         fileSource: { kind: "local", missing: false, tooltip: "In local library: /music/b.mp3" },
-        // PWV4 colour data only: still drawn on a canvas.
-        waveformColorData: [1, 2, 3, 4, 5, 6], waveformPeaksPath: "/x/ANLZ0000.EXT",
+        // The backend's waveform: entries of height, low, mid, high.
+        waveformPreview: [40, 90, 20, 5, 60, 10, 30, 90], waveformPeaksPath: "/x/ANLZ0000.EXT",
       }),
       track("autofix", { formatExt: "wav", formatCompat: { severity: "autofix", badge: "WAV", tooltip: "Will be automatically converted to standard PCM on export." } }),
       track("warn", { formatExt: "wav", formatCompat: { severity: "warn", badge: "WAV", tooltip: "44.1 kHz · 16-bit — cannot be safely converted" } }),

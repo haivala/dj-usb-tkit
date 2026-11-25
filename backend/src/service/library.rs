@@ -976,7 +976,6 @@ impl BackendService {
                 artwork_data_url: None,
                 waveform_peaks_path: None,
                 waveform_preview: None,
-                waveform_color_data: None,
                 created_at: now.clone(),
                 updated_at: now,
                 rekordbox_db_source: false,
@@ -1554,7 +1553,6 @@ pub(crate) fn row_to_track(
         artwork_data_url,
         waveform_peaks_path,
         waveform_preview: None,
-        waveform_color_data: None,
         created_at: row.get(17)?,
         updated_at: row.get(18)?,
         rekordbox_db_source: is_rekordbox_db,
@@ -1577,18 +1575,12 @@ pub(crate) fn row_to_track(
 }
 
 /// The row's waveform for the track tables, read from its analysis file:
-/// master.db tracks the PWV4 colour data from the .EXT when there is one,
-/// every other track (or a master.db one without it) the greyscale preview.
+/// Every track's small waveform, read from its bundle the same way whoever
+/// drew it (rekordbox or this app): see `load_waveform_preview_from_analysis_path`.
 pub(crate) fn load_waveform_previews(track: &mut Track) {
     let Some(path) = track.waveform_peaks_path.as_deref().map(Path::new) else {
         return;
     };
-    if track.rekordbox_db_source {
-        track.waveform_color_data = read_pwv4_from_anlz(path);
-        if track.waveform_color_data.is_some() {
-            return;
-        }
-    }
     track.waveform_preview = load_waveform_preview_from_analysis_path(path);
 }
 

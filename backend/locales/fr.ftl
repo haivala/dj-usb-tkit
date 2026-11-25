@@ -532,7 +532,7 @@ diagnostics-check-path-agreement-history-only = { $count ->
 diagnostics-check-beat-grid = Format des beatgrids
 diagnostics-check-beat-grid-not-exported = aucun morceau de cette clé USB n'a été exporté par cette application
 diagnostics-check-beat-grid-current = toutes les beatgrids que cette application a écrites sur cette clé USB sont au format actuel
-diagnostics-check-beat-grid-outdated = Morceaux dont la beatgrid est dans un format obsolète que certains lecteurs (p. ex. le XDJ-AZ) refusent, si bien que le Beat Sync n'y est pas disponible : { $count } ; p. ex. { $examples } ; réexportez ou lancez la réparation (fix_beat_grid_header) pour corriger
+diagnostics-check-beat-grid-outdated = Morceaux dont la beatgrid est dans un format obsolète que certains lecteurs (p. ex. le XDJ-AZ) refusent, si bien que le Beat Sync n'y est pas disponible : { $count } ; p. ex. { $examples } ; réexportez ou lancez la réparation (update_app_analysis_files) pour corriger
 diagnostics-check-pdb-analysis = Références d'analyse PDB
 diagnostics-check-pdb-analysis-detail = { $with }/{ $total } lignes de morceaux avec chemin d'analyse ; { $refs ->
     [one] { $refs } référence de bundle unique
@@ -752,11 +752,8 @@ repair-overview-unindexed = Place les fichiers audio qui ne sont dans aucune pla
 repair-overview-duplicate-copies = Supprime les copies en trop de fichiers audio qui ne sont dans aucune playlist.
 repair-overview-missing-audio = Retire les morceaux dont le fichier audio n'est plus sur la clé USB. L'historique de lecture les conserve.
 repair-overview-empty-analysis = Reconstruit les formes d'onde et beatgrids manquantes.
-repair-overview-shared-analysis = Donne leur propre forme d'onde aux morceaux qui affichent celle d'un autre morceau.
-repair-overview-analysis-path = Étiquette les fichiers de forme d'onde pour que les lecteurs choisissent toujours le bon.
+repair-overview-app-analysis = Met à jour les formes d'onde, beatgrids et autres données d'analyse écrites par d'anciennes versions de l'application, pour que les lecteurs affichent la forme d'onde de chaque morceau et que le Beat Sync fonctionne.
 repair-overview-bpm-key = Fait afficher le même BPM et la même tonalité à tous les lecteurs.
-repair-overview-beat-grid = Met à jour les beatgrids des anciennes versions de l'application pour que le Beat Sync fonctionne sur tous les lecteurs.
-repair-overview-mp3-seek = Ajoute les données dont les lecteurs ont besoin pour sauter à n'importe quel point des morceaux MP3.
 repair-overview-flac-seek = Ajoute les données dont les lecteurs ont besoin pour sauter à n'importe quel point des morceaux FLAC.
 repair-overview-engine = Reconstruit la bibliothèque Denon / Numark et la tient à jour désormais. Les modifications faites sur ces lecteurs eux-mêmes sont remplacées.
 repair-overview-other = Corrige d'autres erreurs dans la base de données des lecteurs.
@@ -776,14 +773,8 @@ repair-fix-empty-analysis = Corriger les fichiers d'analyse vides
 repair-fix-empty-analysis-description = Régénère les bundles DAT/EXT/2EX manquants ou vides quand l'audio source est retrouvable.
 repair-fix-bpm-key = Corriger les écarts de BPM/tonalité
 repair-fix-bpm-key-description = Reconstruit la beatgrid ANLZ et règle le BPM et la tonalité de l'eDB d'après la ligne PDB de chaque morceau, pour que tous les lecteurs lisent le même BPM et la même tonalité. Les formes d'onde, les cues et le premier temps sont conservés. Voir le Journal des événements pour les morceaux.
-repair-fix-shared-analysis = Donner leurs propres fichiers d'analyse aux morceaux
-repair-fix-shared-analysis-description = Morceaux utilisant le fichier d'analyse d'un autre morceau : { $count }. Les lecteurs peuvent afficher à la place la forme d'onde et la beatgrid de cet autre morceau. Chacun reçoit son propre fichier dans son dossier (ANLZ0001 et suivants, comme les nomme rekordbox), analysé depuis son audio avec son BPM ; le morceau propriétaire du fichier le garde. Les anciens cues restent avec l'autre morceau. Voir le Journal des événements pour la liste.
-repair-fix-analysis-path = Ajouter le chemin du morceau aux fichiers d'analyse
-repair-fix-analysis-path-description = Fichiers d'analyse qui ne nomment pas leur morceau (PPTH) : { $count }. Les lecteurs utilisent ce chemin pour trouver le fichier d'un morceau quand deux morceaux tombent dans le même dossier par hachage. Écrit le chemin du morceau dans chacun ; rien d'autre ne change. Voir le Journal des événements pour la liste.
-repair-fix-beat-grid = Corriger la beatgrid
-repair-fix-beat-grid-description = Réécrit au format de rekordbox les beatgrids des versions de l'application antérieures à 0.3.7 : la valeur d'en-tête du .DAT décalée de deux octets, et la grille étendue du .EXT sans sa somme de contrôle ni ses temps au-dessous de la milliseconde. Certains lecteurs (p. ex. le XDJ-AZ) refusent le Beat Sync sur celles-ci. Les positions des temps restent à moins de 1 ms ; les cues et les formes d'onde sont conservés.
-repair-fix-mp3-seek = Ajouter les données de recherche MP3 manquantes
-repair-fix-mp3-seek-description = Lit chaque MP3 de la clé USB et écrit l'index de recherche que rekordbox écrit pour lui (PVBR dans le .DAT), octet pour octet comme rekordbox. Les beatgrids, les cues et les formes d'onde sont conservés. Les fichiers dont l'index ne peut pas être reproduit exactement sont ignorés et nommés dans le Journal des événements.
+repair-fix-app-analysis = Mettre à jour les fichiers d'analyse de l'application
+repair-fix-app-analysis-description = Morceaux dont le fichier d'analyse, écrit par une ancienne version de l'application, est obsolète : { $count }. Chacun reçoit ce qui lui manque : la forme d'onde de la bibliothèque (tirée de son audio quand le morceau n'est pas dans la bibliothèque) à la place d'une forme grossière ou étirée, son propre fichier quand il partage celui d'un autre morceau, le chemin du morceau (PPTH) d'après lequel les lecteurs le retrouvent, la beatgrid au format de rekordbox et l'index de recherche MP3 (PVBR). Un morceau de la bibliothèque dont la forme d'onde n'est pas encore tracée est d'abord analysé. Le BPM, les temps, les cues et ce qu'ont écrit les lecteurs sont conservés ; les fichiers d'analyse de rekordbox ne sont jamais modifiés. Voir le Journal des événements pour la liste.
 repair-fix-flac-seek = Ajouter les données de recherche FLAC manquantes
 repair-fix-flac-seek-description = Lit chaque FLAC de la clé USB et écrit un index de recherche (PVB2 dans le .EXT). Pour les morceaux longs, environ 98 % de ses entrées correspondent à celles de rekordbox ; les autres sont décalées d'une trame. Les beatgrids, les cues et les formes d'onde sont conservés. Les fichiers qui ne se lisent pas proprement sont ignorés et nommés dans le Journal des événements.
 repair-fix-ec-conflict = Réparer le conflit de pointeur d'écriture de table
@@ -954,7 +945,6 @@ repair-progress-applying-file = USB : application de { $fix } — { $file }
 repair-warning-bpm-key-mismatch = Écart de BPM/tonalité : { $path } ({ $values })
 repair-warning-shared-analysis = fichier d'analyse partagé : { $path } utilisé par { $tracks } ; gardé par { $owner }
 repair-warning-shared-analysis-no-owner = fichier d'analyse partagé : { $path } utilisé par { $tracks } ; gardé par aucun morceau (chacun reçoit le sien)
-repair-warning-analysis-without-track-path = fichier d'analyse sans chemin de morceau : { $path } ({ $track })
 repair-warning-seek-data-unfixable-replace = les données de recherche { $format } ne peuvent pas être ajoutées ({ $reason } ; remplacez-le par une copie intacte) : { $path }
 repair-warning-seek-data-unfixable-report = les données de recherche { $format } ne peuvent pas être ajoutées ({ $reason } ; merci de signaler ce fichier (les détails du format, pas l'audio) pour que ses données de recherche puissent être prises en charge) : { $path }
 repair-warning-missing-audio-scan-skipped = recherche d'audio manquant ignorée : le dossier Contents est absent ou vide (copie des bases seules)
@@ -971,6 +961,17 @@ repair-warning-save-failed = Échec de l'enregistrement des bases de données r�
 repair-warning-duplicate-audio-removed = fichier audio en double supprimé : { $path }
 repair-warning-beat-grid-length-unknown = beatgrid non reconstruite : durée du morceau inconnue pour { $path }
 repair-warning-analysis-separated = propre fichier d'analyse pour { $track } : { $path }
+repair-warning-app-analysis = fichier d'analyse obsolète : { $track } ({ $reasons })
+repair-app-analysis-reason-shared = partage le fichier d'un autre morceau
+repair-app-analysis-reason-repair-drawn = forme d'onde grossière d'une réparation antérieure
+repair-app-analysis-reason-stretched = forme d'onde étirée par l'analyse avant 0.6.7
+repair-app-analysis-reason-grid = beatgrid au format d'avant 0.3.7
+repair-app-analysis-reason-track-path = sans chemin de morceau
+repair-app-analysis-reason-mp3-seek = sans données de recherche MP3
+repair-warning-app-analysis-unreadable = fichier d'analyse non mis à jour : impossible d'analyser l'audio de { $track }
+repair-warning-app-analysis-library-failed = fichier d'analyse non mis à jour : la bibliothèque n'a pas pu analyser { $track }
+repair-warning-app-analysis-write-failed = fichier d'analyse non mis à jour pour { $track } : { $error }
+repair-warning-app-analysis-check-failed = fichiers d'analyse de l'application non vérifiés : { $error }
 repair-warning-beat-grid-not-constant = beatgrid non réécrite (pas une grille à tempo constant) : { $path }
 repair-warning-seek-data-skipped-replace = données de recherche { $format } non ajoutées ({ $reason }) : { $path } ; remplacez-le par une copie intacte
 repair-warning-seek-data-skipped-report = données de recherche { $format } non ajoutées ({ $reason }) : { $path } ; merci de signaler ce fichier (les détails du format, pas l'audio) pour que ses données de recherche puissent être prises en charge
@@ -1022,14 +1023,6 @@ repair-outcome-detail-duplicate-copies = { $count ->
     [one] { $count } fichier supprimé
    *[other] { $count } fichiers supprimés
 }
-repair-outcome-detail-shared-analysis = { $count ->
-    [one] { $count } morceau a reçu un nouveau fichier d'analyse
-   *[other] { $count } morceaux ont reçu un nouveau fichier d'analyse
-}, { $kept } ont gardé l'original
-repair-outcome-detail-analysis-path = morceau nommé dans { $count ->
-    [one] { $count } fichier d'analyse
-   *[other] { $count } fichiers d'analyse
-}
 repair-outcome-detail-bpm-key = { $grids ->
     [one] { $grids } beatgrid reconstruite
    *[other] { $grids } beatgrids reconstruites
@@ -1037,10 +1030,10 @@ repair-outcome-detail-bpm-key = { $grids ->
     [one] { $rows } ligne eDB mise à jour
    *[other] { $rows } lignes eDB mises à jour
 }
-repair-outcome-detail-beat-grid = { $count ->
-    [one] { $count } bundle corrigé
-   *[other] { $count } bundles corrigés
-}
+repair-outcome-detail-app-analysis = { $updated ->
+    [one] { $updated } fichier d'analyse mis à jour
+   *[other] { $updated } fichiers d'analyse mis à jour
+}, { $separated } nouveaux, { $skipped } ignorés, { $failed } en échec
 repair-outcome-detail-engine = réglage activé, reconstruite ({ $tracks ->
     [one] { $tracks } morceau
    *[other] { $tracks } morceaux
