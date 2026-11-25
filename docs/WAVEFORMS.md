@@ -292,7 +292,7 @@ it before that builder was removed). Track analysis, a transcode's bundle and th
 all decode this way, through one core (`analyze_audio_core` in `analysis.rs`): it needs no
 library row, keeps a BPM it is given (detecting nothing when it is also given no key to find)
 and places the first beat. One writer (`write_track_bundle`) writes every new bundle with the
-MP3 seek index. Before 0.6.7 the repairs drew their own 2,400-bin waveform from the first
+MP3 seek index. Up to 0.6.6 the repairs drew their own 2,400-bin waveform from the first
 2,000,000 samples (about 45 s) and stretched it over the track;
 `update_app_analysis_files` finds and replaces those.
 

@@ -83,6 +83,7 @@ merging and rewriting both databases to match — see "Repair Flow" below.
 | Analysis integrity | PDB/eDB analysis-path references exist in database rows |
 | Shared analysis files (under Analysis integrity) | Database-only: warns when several PDB track rows point at the same analysis bundle, so players can show one track's waveform and beat grid for another. The Event Log lists each bundle and its tracks. Points to `update_app_analysis_files`; the repair preview also reads each bundle's `PPTH` (see "Analysis file ownership") |
 | Beat grid format (under Analysis integrity) | Always shown. Warns about tracks whose latest export on the stick was written by an app version before 0.3.7 (an export-log record without `appVersion`) and whose `.DAT` still has the old `PQTZ` header. Only those tracks' `.DAT` files are read, and only their first 4 KB. Passes with "no tracks on this USB were exported by this app" when the stick has no export log. When the log can't be read, every track's `.DAT` is checked (first 4 KB each) instead. Points to `update_app_analysis_files` or a re-export |
+| Long-track waveforms (under Analysis integrity) | Always shown. Warns about tracks at least as long as analysis up to 0.6.6 decoded (24M samples, about 9 minutes at 44.1 kHz) whose waveform it drew stretched: the stick's export log lists them in an export by 0.6.6 or earlier and in no `waveform-redrawn` record (see "App-written analysis files"). Reads only the export log and the PDB or eDB; works on a stick with either database. Points to `update_app_analysis_files` |
 | Playlist resolution | playlist rows resolve to tracks across PDB and eDB |
 | Engine DJ library | Without `Engine Library/Database2/m.db`: a passing "Not on this USB" note while "Write Engine DJ library" is off, saying to turn it on before using the USB in an Engine player; nothing while it's on. With one: warns when "Write Engine DJ library" is off, and when `m.db`'s `lastRekordBoxLibraryImportReadCounter` differs from the `export.pdb` header sequence (e.g. after an export from rekordbox itself). Points to `keep_engine_library_up_to_date` |
 
@@ -176,17 +177,26 @@ bundle can have. Nothing is decoded to find them:
   versions wrote (the export log says which tracks; see "Beat grid format");
 - an MP3 `PVBR` with a zero sample total (app bundles from before 0.3.7;
   rekordbox's always have the total);
-- a waveform a USB repair drew before 0.6.7: 2,400 bins stretched to the
+- a waveform a USB repair drew up to 0.6.6: 2,400 bins stretched to the
   detail length (`peaks_to_levels`), so its `PWV3` is constant over each of
   the 2,400 index buckets. rekordbox and analysis draw each entry from its
   own stretch of audio, so theirs never are. A track under about 18 s has
   too few entries to tell, and a waveform that hardly changes from bin to bin
   (silence) isn't told apart either; both are left alone;
-- a waveform stretched by analysis before 0.6.7: a track this app exported
-  (its row carries the app's `masterDbId`) at least as long as analysis then
-  decoded (24M samples, about 9 minutes at 44.1 kHz), whose detail waveforms
-  differ from the library's. Only a library waveform to compare with finds
-  one.
+- a waveform stretched by analysis up to 0.6.6: a track at least as long
+  as analysis then decoded (24M samples, about 9 minutes at 44.1 kHz; the
+  PDB's or eDB's length and sample rate) that the stick's export log says a
+  version up to 0.6.6 exported, from whichever machine, and that no
+  `waveform-redrawn` record lists (`waveforms_maybe_stretched`). Such a
+  waveform has the right length and entry count, only its content is the
+  first 9 minutes spread over the track, so the bundle alone can't tell; and
+  each install has its own `masterDbId`, so the row can't either. A later
+  export reuses the stick's files, so an export by 0.7.0 doesn't clear it.
+  Once the repair has replaced a track's waveform it appends one
+  `waveform-redrawn` record (its own `mode`, the current `appVersion`)
+  listing the tracks, so no machine offers it again; every reader of exports
+  skips those records. The diagnostics' "Long-track waveforms" check (under
+  Analysis integrity) reports the same tracks from the export log alone.
 
 The new waveform comes from the library track the stick's track is, matched
 exactly: the track export wrote that file from (the row's
@@ -197,8 +207,9 @@ artist) and length, when only one has it. Anything looser counts as not in
 the library: a wrong match would write another version's waveform for good.
 A library track without a waveform yet is analyzed first by library
 analysis (its coordinator, so its worker cap and pause apply); a transcode
-whose waveform bundle is gone gets it drawn from its file. A track that
-isn't in the library gets its waveform drawn from the stick's audio by the
+whose waveform bundle is gone gets it drawn from its file. Neither finding
+needs the library: a track that isn't in it gets its waveform drawn from the
+stick's audio by the
 analysis pipeline, with the stick's BPM, in the same analysis queue
 (`analyze_audio_files`); it isn't added to the library.
 Only the waveform chunks change (`PWAV`, `PWV2`…`PWV7`, `PWVC`): BPM, beat

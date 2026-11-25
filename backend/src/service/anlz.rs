@@ -608,8 +608,8 @@ pub(crate) fn with_waveform_chunks(file: &[u8], source: &[u8]) -> Option<Vec<u8>
     Some(out)
 }
 
-/// The waveform chunks of ANLZ bytes, in file order: what two bundles are
-/// compared by to tell whether they show the same waveform.
+/// The waveform chunks of ANLZ bytes, in file order.
+#[cfg(test)]
 pub(crate) fn waveform_chunks(data: &[u8]) -> Vec<&[u8]> {
     super::anlz_read::anlz_chunks(data)
         .filter(|chunk| WAVEFORM_TAGS.contains(&&chunk.tag))
@@ -626,7 +626,7 @@ const STRETCHED_PWV3_MIN_REPEATS: usize = 256;
 /// Whether an `.EXT`'s `PWV3` is a waveform of `bins` bins stretched to its
 /// detail length: each entry the same as the first one of its bin
 /// (`peaks_to_levels` / `bands_to_levels` pick bin `i * bins / count`), as
-/// the USB repairs before 0.6.7 drew them. rekordbox and this app's analysis
+/// the USB repairs up to 0.6.6 drew them. rekordbox and this app's analysis
 /// draw every entry from its own stretch of audio, so theirs never are.
 /// `None` without a `PWV3`, or with too few entries to tell (a track under
 /// about 18 s).
@@ -3670,10 +3670,10 @@ mod tests {
 
     #[test]
     fn a_waveform_of_2400_bins_stretched_to_the_detail_length_is_told_apart() {
-        // What the USB repairs drew with before 0.6.7.
+        // What the USB repairs drew with up to 0.6.6.
         let bins = 2400;
         let duration_ms = 222_000;
-        // What the USB repairs drew before 0.6.7.
+        // What the USB repairs drew up to 0.6.6.
         let drawn = build_anlz_ext_file(&varied_waveform(bins), "", None, duration_ms, None, &[]);
         assert_eq!(pwv3_stretched_from_bins(&drawn, bins), Some(true));
         // What analysis (and rekordbox) draw: one value per detail entry.

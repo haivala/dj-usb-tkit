@@ -373,20 +373,20 @@ fn fill_cached_mp3_seek_indexes(
     })
 }
 
-/// The mono samples analysis decoded before 0.6.7, waveform included. Fixed
+/// The mono samples analysis decoded up to 0.6.6, waveform included. Fixed
 /// here: it says which waveforms that version cut, whatever the analysis cap
 /// (`BPM_KEY_MAX_SAMPLES`) becomes.
-const DECODE_CAP_BEFORE_0_6_7: i64 = 24_000_000;
+const DECODE_CAP_UP_TO_0_6_6: i64 = 24_000_000;
 
-/// Whether analysis before 0.6.7 decoded only part of audio this long:
+/// Whether analysis up to 0.6.6 decoded only part of audio this long:
 /// `duration_ms` at `sample_rate_hz` (48 kHz when unknown, the lower length)
 /// reaches the decode cap, about 9 minutes at 44.1 kHz.
 fn reached_decode_cap(duration_ms: i64, sample_rate_hz: Option<i64>) -> bool {
     let rate = sample_rate_hz.filter(|rate| *rate > 0).unwrap_or(48_000);
-    duration_ms > 0 && duration_ms.saturating_mul(rate) / 1000 >= DECODE_CAP_BEFORE_0_6_7
+    duration_ms > 0 && duration_ms.saturating_mul(rate) / 1000 >= DECODE_CAP_UP_TO_0_6_6
 }
 
-/// `0.6.7-long-track-waveforms`: analysis before 0.6.7 drew a track longer
+/// `0.6.7-long-track-waveforms`: analysis up to 0.6.6 drew a track longer
 /// than its decode cap as the first part of its audio stretched over its
 /// whole length (docs/WAVEFORMS.md "Decode Bounds"). Such a track's cached
 /// bundle is deleted and the track marked for analysis, which draws it again
@@ -676,7 +676,7 @@ mod tests {
         assert_eq!(ids.len(), MIGRATIONS.len());
     }
 
-    // Before 0.6.7, analysis drew a track longer than its decode cap as its
+    // Up to 0.6.6, analysis drew a track longer than its decode cap as its
     // first part stretched: those cached bundles go and the tracks need
     // analysis again; shorter tracks, other apps' bundles and tracks with no
     // known length stay. Long transcodes lose their waveform bundle.

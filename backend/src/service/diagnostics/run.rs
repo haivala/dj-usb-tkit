@@ -450,6 +450,23 @@ impl BackendService {
                 beat_grid_status,
                 beat_grid_detail,
             ));
+            let stretched =
+                crate::service::repair::tracks_with_maybe_stretched_waveforms(&usb_root, parsed);
+            let (long_status, long_detail) = diagnose_long_track_waveforms(&stretched);
+            if matches!(long_status, DiagStatus::Warn) {
+                raw_warnings.push(logging::log_text(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.long-track-waveforms",
+                    &long_detail,
+                ));
+            }
+            analysis_integrity.checks.push(DiagCheck::new(
+                tr::diagnostics_check_long_waveforms(),
+                long_status,
+                long_detail,
+            ));
+            note_stage("long-track waveform check");
             analysis_integrity.status = DiagStatus::worst_of(
                 &analysis_integrity
                     .checks

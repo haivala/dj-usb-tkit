@@ -404,6 +404,29 @@ pub(super) fn diagnose_beat_grid_format(
     )
 }
 
+/// The "Long-track waveforms" check: tracks longer than analysis up to
+/// 0.6.6 decoded (about 9 minutes) whose waveform it drew, stretched, and
+/// that no repair has replaced since. Found from the export log alone.
+pub(super) fn diagnose_long_track_waveforms(
+    found: &[&crate::pdb_reader::PdbTrackRow],
+) -> (DiagStatus, crate::i18n::Text) {
+    if found.is_empty() {
+        return (DiagStatus::Pass, tr::diagnostics_check_long_waveforms_ok());
+    }
+    (
+        DiagStatus::Warn,
+        tr::diagnostics_check_long_waveforms_stretched(
+            found.len(),
+            found
+                .iter()
+                .take(3)
+                .map(|row| row.track_file_path.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    )
+}
+
 /// `edb_content_rows` is the eDB's `content` row count when it could be read;
 /// with no tracks there are no analysis refs to miss.
 /// The outer `None` of `pdb` / `edb_playlist_tracks` means the stick has no

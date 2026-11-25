@@ -20,6 +20,7 @@ use backend::pdb_reader::parse_pdb;
 use common::fixture_audio_path;
 use parity_fixture::{
     copy_audio_fixture, seed_tracks_as_analyzed, setup_clean_strict_parity_fixture,
+    setup_clean_strict_parity_fixture_with_length,
     setup_clean_strict_parity_fixture_with_local_key,
 };
 use tempfile::{TempDir, tempdir};
@@ -7500,8 +7501,8 @@ fn detail_waveform(dat: &Path) -> Vec<u8> {
         .to_vec()
 }
 
-/// The fixture's exported track, its bundle replaced by one a repair before
-/// 0.6.7 drew (2,400 bins stretched over 180 s) with a hot cue. Returns its
+/// The fixture's exported track, its bundle replaced by one a repair up to
+/// 0.6.6 drew (2,400 bins stretched over 180 s) with a hot cue. Returns its
 /// `.DAT`, its bytes and the library bundle's `.DAT`.
 fn setup_repair_drawn_bundle() -> (TempDir, BackendCommands, PathBuf, PathBuf, Vec<u8>, PathBuf) {
     use backend::service::anlz::{
@@ -7654,4 +7655,146 @@ fn repair_has_the_library_analyze_a_track_before_copying_its_waveform() {
         .expect("library row");
     let library_dat = PathBuf::from(library_dat.expect("the library analyzed the track"));
     assert_eq!(detail_waveform(&dat), detail_waveform(&library_dat));
+}
+
+// ── update_app_analysis_files: long-track waveforms ─────────────────────────
+
+/// The "Long-track waveforms" check: (status, detail).
+fn long_waveforms_check(backend: &BackendCommands, usb: &Path) -> (String, String) {
+    analysis_check(backend, usb, "Long-track waveforms").expect("long-track waveforms check")
+}
+
+/// The fixture with a 10-minute track, exported by this build (still called
+/// 0.6.6: its export is one whose waveform may be stretched), with a
+/// detailed waveform in the library.
+fn setup_long_track() -> (TempDir, BackendCommands, PathBuf, PathBuf, PathBuf) {
+    use backend::service::anlz::{build_anlz_2ex_file, build_anlz_dat_file, build_anlz_ext_file};
+    let (root, backend, usb, _playlist) = setup_clean_strict_parity_fixture_with_length(600_000);
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    assert_eq!(parsed.tracks[0].duration_seconds, Some(600));
+    let conn = rusqlite::Connection::open(root.path().join("data").join("backend.db"))
+        .expect("open library");
+    let library_dat: String = conn
+        .query_row("SELECT waveform_peaks_path FROM tracks", [], |row| {
+            row.get(0)
+        })
+        .expect("library bundle");
+    let library_dat = PathBuf::from(library_dat);
+    let detail = varied_waveform(90_004, 3);
+    fs::write(
+        &library_dat,
+        build_anlz_dat_file(&detail, "", Some(120.0), 600_000, Some(250), &[]),
+    )
+    .expect("write library DAT");
+    fs::write(
+        library_dat.with_extension("EXT"),
+        build_anlz_ext_file(&detail, "", Some(120.0), 600_000, Some(250), &[]),
+    )
+    .expect("write library EXT");
+    fs::write(
+        library_dat.with_extension("2EX"),
+        build_anlz_2ex_file(&detail, "", 600_000),
+    )
+    .expect("write library 2EX");
+    // The stick's bundle: what analysis up to 0.6.6 drew, the first 9
+    // minutes spread over all 10.
+    let dat = find_exported_anlz_dat(&usb);
+    let track_path = parsed.tracks[0].track_file_path.clone();
+    let stretched = varied_waveform(90_004, 11);
+    fs::write(
+        &dat,
+        build_anlz_dat_file(
+            &stretched,
+            &track_path,
+            Some(120.0),
+            600_000,
+            Some(250),
+            &[],
+        ),
+    )
+    .expect("write DAT");
+    fs::write(
+        dat.with_extension("EXT"),
+        build_anlz_ext_file(
+            &stretched,
+            &track_path,
+            Some(120.0),
+            600_000,
+            Some(250),
+            &[],
+        ),
+    )
+    .expect("write EXT");
+    fs::write(
+        dat.with_extension("2EX"),
+        build_anlz_2ex_file(&stretched, &track_path, 600_000),
+    )
+    .expect("write 2EX");
+    assert_ne!(detail_waveform(&dat), detail_waveform(&library_dat));
+    (root, backend, usb, dat, library_dat)
+}
+
+fn export_log_modes(usb: &Path) -> Vec<String> {
+    let log = fs::read_to_string(
+        usb.join(".dj-usb-tkit")
+            .join("dj_usb_tkit_export_log.v1.json"),
+    )
+    .expect("export log");
+    let value: serde_json::Value = serde_json::from_str(&log).expect("parse log");
+    value["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .map(|record| record["mode"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+#[test]
+fn a_long_track_old_versions_drew_stretched_is_redrawn_once_and_logged() {
+    let (_root, backend, usb, dat, library_dat) = setup_long_track();
+    let (status, detail) = long_waveforms_check(&backend, &usb);
+    assert_eq!(status, "Warn", "{detail}");
+    assert!(detail.contains(": 1;"), "{detail}");
+
+    apply_app_analysis_fix(&backend, &usb);
+    assert_eq!(detail_waveform(&dat), detail_waveform(&library_dat));
+    assert_eq!(
+        export_log_modes(&usb).last().map(String::as_str),
+        Some("waveform-redrawn")
+    );
+    let (status, detail) = long_waveforms_check(&backend, &usb);
+    assert_eq!(status, "Pass", "{detail}");
+}
+
+#[test]
+fn a_long_track_is_redrawn_on_a_usb_with_only_an_edb() {
+    let (_root, backend, usb, dat, library_dat) = setup_long_track();
+    fs::remove_file(vendor_db_dir(&usb).join("export.pdb")).expect("remove PDB");
+    let (status, detail) = long_waveforms_check(&backend, &usb);
+    assert_eq!(status, "Warn", "{detail}");
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["update_app_analysis_files".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data").data;
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|line| line.starts_with("Update Analysis Files From This App:")),
+        "{:#?} {:#?} {:#?} {:#?}",
+        data.applied_fixes,
+        data.failed_fixes,
+        data.skipped_fixes,
+        data.proposed_fixes
+            .iter()
+            .map(|f| &f.id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(detail_waveform(&dat), detail_waveform(&library_dat));
+    let (status, detail) = long_waveforms_check(&backend, &usb);
+    assert_eq!(status, "Pass", "{detail}");
 }

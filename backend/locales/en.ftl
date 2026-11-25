@@ -706,6 +706,10 @@ diagnostics-check-beat-grid-not-exported = no tracks on this USB were exported b
 diagnostics-check-beat-grid-current = every beat grid this app wrote to this USB is in the current format
 # $count: the tracks. $examples: up to three of their paths, joined with ", ".
 diagnostics-check-beat-grid-outdated = Tracks with a beat grid in an outdated format that some players (e.g. the XDJ-AZ) reject, so Beat Sync is unavailable on them: { $count }; e.g. { $examples }; re-export or run the repair (update_app_analysis_files) to fix
+diagnostics-check-long-waveforms = Long-track waveforms
+diagnostics-check-long-waveforms-ok = no track longer than about 9 minutes has a waveform analysis up to 0.6.6 drew
+# $count: the tracks. $examples: up to three of their paths, joined with ", ".
+diagnostics-check-long-waveforms-stretched = Tracks longer than about 9 minutes whose waveform analysis up to 0.6.6 drew stretched, so the sound shows later than it plays and the end is missing: { $count }; e.g. { $examples }; run the repair (update_app_analysis_files) to fix
 diagnostics-check-pdb-analysis = PDB analysis refs
 # $with: the track rows with an analysis path. $total: all track rows. $refs: the different analysis files they point to.
 diagnostics-check-pdb-analysis-detail = { $with }/{ $total } track rows with analysis paths; { $refs ->
@@ -1270,7 +1274,7 @@ repair-warning-analysis-separated = own analysis file for { $track }: { $path }
 repair-warning-app-analysis = analysis file out of date: { $track } ({ $reasons })
 repair-app-analysis-reason-shared = shares another track's file
 repair-app-analysis-reason-repair-drawn = coarse waveform from an earlier repair
-repair-app-analysis-reason-stretched = waveform stretched by analysis before 0.6.7
+repair-app-analysis-reason-stretched = waveform stretched by analysis up to 0.6.6
 repair-app-analysis-reason-grid = beat grid in the pre-0.3.7 format
 repair-app-analysis-reason-track-path = no track path
 repair-app-analysis-reason-mp3-seek = no MP3 seek data

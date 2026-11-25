@@ -84,6 +84,7 @@ pub(super) const DISPLAY_LAYOUT: [DisplaySection; 8] = [
         labels: &[
             tr::diagnostics_check_pdb_analysis,
             tr::diagnostics_check_beat_grid,
+            tr::diagnostics_check_long_waveforms,
         ],
     },
     DisplaySection {

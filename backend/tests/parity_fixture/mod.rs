@@ -1,5 +1,7 @@
 //! A USB with one exported playlist that passes strict parity, built through the app's
 //! commands. Needs `mod common;` and `mod library_sources;` in the test crate.
+// Shared by several test crates: each uses only some of it.
+#![allow(dead_code)]
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,6 +41,21 @@ pub use common::copy_audio_fixture;
 
 pub fn setup_clean_strict_parity_fixture_with_local_key(
     local_key: Option<&str>,
+) -> (TempDir, BackendCommands, PathBuf, String) {
+    setup_clean_strict_parity_fixture_with(local_key, None)
+}
+
+/// The clean fixture with its track `duration_ms` long in the library, so the
+/// export writes that length to the USB.
+pub fn setup_clean_strict_parity_fixture_with_length(
+    duration_ms: u64,
+) -> (TempDir, BackendCommands, PathBuf, String) {
+    setup_clean_strict_parity_fixture_with(None, Some(duration_ms))
+}
+
+fn setup_clean_strict_parity_fixture_with(
+    local_key: Option<&str>,
+    duration_ms: Option<u64>,
 ) -> (TempDir, BackendCommands, PathBuf, String) {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
@@ -86,6 +103,15 @@ pub fn setup_clean_strict_parity_fixture_with_local_key(
         .collect::<Vec<_>>();
     assert_eq!(track_ids.len(), 1);
     seed_tracks_as_analyzed(&data_dir, &track_ids);
+    if let Some(duration_ms) = duration_ms {
+        let conn =
+            rusqlite::Connection::open(data_dir.join("backend.db")).expect("open backend db");
+        conn.execute(
+            "UPDATE tracks SET duration_ms = ?1, sample_rate_hz = 44100",
+            rusqlite::params![duration_ms as i64],
+        )
+        .expect("seed track length");
+    }
     if let Some(key_name) = local_key {
         let db_path = data_dir.join("backend.db");
         let conn = rusqlite::Connection::open(&db_path).expect("open backend db");

@@ -2978,7 +2978,7 @@ fn app_analysis_check_finds_repair_drawn_waveforms_and_where_to_take_new_ones() 
     let service = BackendService::new(data.path()).expect("service");
     let library = data.path().join("music");
     let seconds = 222;
-    let drawn = varied_waveform(PRE_0_6_7_REPAIR_WAVEFORM_BINS, 0);
+    let drawn = varied_waveform(REPAIR_WAVEFORM_BINS_UP_TO_0_6_6, 0);
     let detail = varied_waveform(
         crate::service::analysis::waveform_detail_entries_for_duration(222_000),
         5,
@@ -3078,8 +3078,34 @@ fn app_analysis_check_finds_repair_drawn_waveforms_and_where_to_take_new_ones() 
     );
 }
 
+/// Writes the stick's export log: one record per (mode, version, paths).
+fn write_export_log(usb_root: &Path, records: &[(&str, &str, &[&str])]) {
+    use crate::service::export_log::{UsbExportLog, UsbExportLogRecord, export_log_path};
+    let log = UsbExportLog {
+        schema_version: 1,
+        records: records
+            .iter()
+            .map(|(mode, version, paths)| UsbExportLogRecord {
+                playlist_id: "p".to_string(),
+                playlist_name: "P".to_string(),
+                exported_at: "2026-11-01T10:00:00+02:00".to_string(),
+                export_date: "2026-11-01".to_string(),
+                mode: mode.to_string(),
+                app_version: version.to_string(),
+                track_fingerprints: paths
+                    .iter()
+                    .map(|path| track_identity_key(path, "", "", None))
+                    .collect(),
+            })
+            .collect(),
+    };
+    let path = export_log_path(usb_root);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, serde_json::to_string(&log).unwrap()).unwrap();
+}
+
 #[test]
-fn app_analysis_check_finds_stretched_exports_by_the_library_waveform() {
+fn app_analysis_check_finds_stretched_exports_from_the_export_log() {
     let (_td, usb_root) = test_usb_root();
     let data = tempdir().expect("data dir");
     let service = BackendService::new(data.path()).expect("service");
@@ -3089,65 +3115,67 @@ fn app_analysis_check_finds_stretched_exports_by_the_library_waveform() {
     let entries = |seconds: u32| {
         crate::service::analysis::waveform_detail_entries_for_duration(u64::from(seconds) * 1000)
     };
-    let stretched = varied_waveform(entries(long), 0);
-    let current = varied_waveform(entries(long), 9);
+    let waveform = varied_waveform(entries(long), 0);
 
-    // 1: the library draws it differently -> copied.
-    let t1 = stick_track(&usb_root, 1, long, &stretched, Some(81));
+    // 1: in the library -> its waveform is copied.
+    let t1 = stick_track(&usb_root, 1, long, &waveform, Some(81));
     library_track(
         &service,
         "L1",
         &library.join("1.wav"),
         long,
-        Some(&current),
+        Some(&waveform),
         Some(81),
     );
-    // 2: the same as the library's -> nothing to do.
-    let t2 = stick_track(&usb_root, 2, long, &current, Some(82));
-    library_track(
-        &service,
-        "L2",
-        &library.join("2.wav"),
-        long,
-        Some(&current),
-        Some(82),
-    );
+    // 2: not in the library -> drawn from the stick's audio.
+    let t2 = stick_track(&usb_root, 2, long, &waveform, None);
     // 3: the library hasn't drawn it again yet -> analyzed first.
-    let t3 = stick_track(&usb_root, 3, long, &stretched, Some(83));
+    let t3 = stick_track(&usb_root, 3, long, &waveform, Some(83));
     library_track(&service, "L3", &library.join("3.wav"), long, None, Some(83));
-    // 4: no longer in the library: nothing to compare with.
-    let t4 = stick_track(&usb_root, 4, long, &stretched, Some(84));
-    // 5: shorter than the cap: never stretched.
-    let t5 = stick_track(
+    // 4: a repair redrew it already -> nothing to do.
+    let t4 = stick_track(&usb_root, 4, long, &waveform, None);
+    // 5: exported only by 0.7.0 -> drawn whole.
+    let t5 = stick_track(&usb_root, 5, long, &waveform, None);
+    // 6: shorter than the cap -> never stretched.
+    let t6 = stick_track(&usb_root, 6, 200, &varied_waveform(entries(200), 0), None);
+    // 7: never exported by this app (no log record) -> not this app's.
+    let t7 = stick_track(&usb_root, 7, long, &waveform, None);
+    let paths = |rows: &[&PdbTrackRow]| {
+        rows.iter()
+            .map(|row| row.track_file_path.clone())
+            .collect::<Vec<_>>()
+    };
+    let old = paths(&[&t1, &t2, &t3, &t4, &t6]);
+    let old = old.iter().map(String::as_str).collect::<Vec<_>>();
+    write_export_log(
         &usb_root,
-        5,
-        200,
-        &varied_waveform(entries(200), 0),
-        Some(85),
-    );
-    library_track(
-        &service,
-        "L5",
-        &library.join("5.wav"),
-        200,
-        Some(&varied_waveform(entries(200), 9)),
-        Some(85),
+        &[
+            // Another machine's export: its masterDbId isn't this app's.
+            ("additive", "0.6.4", &old),
+            ("additive", "0.7.0", &[t5.track_file_path.as_str()]),
+            ("waveform-redrawn", "0.6.6", &[t4.track_file_path.as_str()]),
+        ],
     );
 
     let parsed = ParsedPdb {
-        tracks: vec![t1, t2, t3, t4, t5],
+        tracks: vec![t1, t2, t3, t4, t5, t6, t7],
         ..ParsedPdb::default()
     };
     let found = app_bundle_updates(&service, &usb_root, &parsed);
+    let source = |id: u32| found.get(&id).and_then(|u| u.waveform.clone());
     assert_eq!(
-        found.get(&1).and_then(|u| u.waveform.clone()),
+        source(1),
         Some((
             WaveformFault::Stretched,
             WaveformSource::Library(data.path().join("analysis/waveforms/L1.DAT"))
         ))
     );
     assert_eq!(
-        found.get(&3).and_then(|u| u.waveform.clone()),
+        source(2),
+        Some((WaveformFault::Stretched, WaveformSource::Draw))
+    );
+    assert_eq!(
+        source(3),
         Some((
             WaveformFault::Stretched,
             WaveformSource::AnalyzeLibrary("L3".to_string())
@@ -3156,8 +3184,16 @@ fn app_analysis_check_finds_stretched_exports_by_the_library_waveform() {
     let mut rest = found
         .keys()
         .copied()
-        .filter(|id| ![1, 3].contains(id))
+        .filter(|id| ![1, 2, 3].contains(id))
         .collect::<Vec<_>>();
     rest.sort_unstable();
     assert!(rest.is_empty(), "{rest:?}");
+
+    // The diagnostics find the same tracks, from the log alone.
+    let mut diagnosed = tracks_with_maybe_stretched_waveforms(&usb_root, &parsed)
+        .into_iter()
+        .map(|row| row.id)
+        .collect::<Vec<_>>();
+    diagnosed.sort_unstable();
+    assert_eq!(diagnosed, vec![1, 2, 3]);
 }

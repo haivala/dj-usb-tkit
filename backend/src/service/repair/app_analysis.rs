@@ -8,14 +8,14 @@ use crate::i18n::tr;
 use crate::service::analysis::{
     CoreAnalysis, CoreRequest, FileAnalysis, TrackBundle, analysis_settings, write_track_bundle,
 };
-use crate::service::anlz::{pwv3_stretched_from_bins, waveform_chunks, with_waveform_chunks};
+use crate::service::anlz::{pwv3_stretched_from_bins, with_waveform_chunks};
 use std::path::PathBuf;
 
-/// The bins the USB repairs drew a waveform with before 0.6.7, stretched to
+/// The bins the USB repairs drew a waveform with up to 0.6.6, stretched to
 /// the detail length: what `update_app_analysis_files` recognizes their
 /// bundles by. A record of what those versions wrote, so it never follows
 /// any size the app draws or shows waveforms at now.
-pub(super) const PRE_0_6_7_REPAIR_WAVEFORM_BINS: usize = 2400;
+pub(super) const REPAIR_WAVEFORM_BINS_UP_TO_0_6_6: usize = 2400;
 
 /// A USB file for [`BackendService::analyze_stick_files`].
 pub(super) struct StickAudio {
@@ -181,12 +181,13 @@ fn bundle_files(dat: &Path) -> [PathBuf; 3] {
 /// Why a bundle's waveform is replaced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WaveformFault {
-    /// Drawn by a USB repair before 0.6.7: 2,400 bins stretched to the
+    /// Drawn by a USB repair up to 0.6.6: 2,400 bins stretched to the
     /// detail length ([`pwv3_stretched_from_bins`]).
     RepairDrawn,
-    /// Exported before 0.6.7, longer than analysis then decoded: its first
-    /// part stretched over its whole length. Found by comparing it with the
-    /// library's.
+    /// Exported up to 0.6.6, longer than analysis then decoded: its first
+    /// part stretched over its whole length. Found from the stick's export
+    /// log ([`WaveformCheck::maybe_stretched`]); once replaced, the log
+    /// records it (`waveform-redrawn`).
     Stretched,
 }
 
@@ -422,24 +423,145 @@ fn library_waveform_source(
     )
 }
 
-/// Whether the waveforms of two bundles' `.EXT`s differ (the `.EXT` holds
-/// the detail waveforms a stretched one shows in). Unreadable counts as
-/// different.
-fn waveforms_differ(stick_dat: &Path, library_dat: &Path) -> bool {
-    let read = |dat: &Path| std::fs::read(dat.with_extension("EXT")).ok();
-    match (read(stick_dat), read(library_dat)) {
-        (Some(stick), Some(library)) => waveform_chunks(&stick) != waveform_chunks(&library),
-        _ => true,
-    }
+/// `waveforms_maybe_stretched` of the stick's export log; none without one.
+fn maybe_stretched_fingerprints(usb_root: &Path) -> HashSet<String> {
+    crate::service::export_log::load_export_log(usb_root)
+        .ok()
+        .flatten()
+        .map(|log| crate::service::export_log::waveforms_maybe_stretched(&log))
+        .unwrap_or_default()
 }
 
-/// Whether a USB track is at least as long as analysis before 0.6.7
+fn is_maybe_stretched(
+    fingerprints: &HashSet<String>,
+    row: &crate::pdb_reader::PdbTrackRow,
+) -> bool {
+    longer_than_old_decode_cap(row)
+        && fingerprints.contains(&track_identity_key(&row.track_file_path, "", "", None))
+}
+
+/// The USB tracks whose waveform analysis up to 0.6.6 may have drawn
+/// stretched ([`WaveformCheck::maybe_stretched`]), for the diagnostics'
+/// "Long-track waveforms" check. Reads only the export log.
+pub(crate) fn tracks_with_maybe_stretched_waveforms<'p>(
+    usb_root: &Path,
+    parsed: &'p ParsedPdb,
+) -> Vec<&'p crate::pdb_reader::PdbTrackRow> {
+    let fingerprints = maybe_stretched_fingerprints(usb_root);
+    parsed
+        .tracks
+        .iter()
+        .filter(|row| is_maybe_stretched(&fingerprints, row))
+        .collect()
+}
+
+/// Whether a USB track is at least as long as analysis up to 0.6.6
 /// decoded: longer ones it drew stretched.
 fn longer_than_old_decode_cap(row: &crate::pdb_reader::PdbTrackRow) -> bool {
     let rate = u64::from(row.sample_rate_hz.filter(|r| *r > 0).unwrap_or(44_100));
     row.duration_seconds.is_some_and(|s| {
         u64::from(s) * rate >= crate::service::analysis::BPM_KEY_MAX_SAMPLES as u64
     })
+}
+
+/// The one test of whether a USB track's waveform is one an earlier
+/// version drew wrong, and where its new one comes from: used by
+/// `update_app_analysis_files` and by the diagnostics' "Long-track waveforms"
+/// check, so the two always agree.
+pub(crate) struct WaveformCheck<'a> {
+    usb_root: &'a Path,
+    parsed: &'a ParsedPdb,
+    app_master_db_id: Option<u32>,
+    /// Tracks the stick's export log says an app version up to 0.6.6
+    /// exported, on whichever machine, and no repair has redrawn since
+    /// (`waveforms_maybe_stretched`).
+    maybe_stretched: HashSet<String>,
+    library_conn: r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+    data_dir: PathBuf,
+    /// Loaded at the first track that needs it.
+    library: Option<LibraryIndex>,
+}
+
+impl<'a> WaveformCheck<'a> {
+    pub(crate) fn new(
+        service: &BackendService,
+        usb_root: &'a Path,
+        parsed: &'a ParsedPdb,
+        app_master_db_id: Option<u32>,
+    ) -> BackendResult<Self> {
+        let maybe_stretched = maybe_stretched_fingerprints(usb_root);
+        Ok(Self {
+            usb_root,
+            parsed,
+            app_master_db_id,
+            maybe_stretched,
+            library_conn: service.db.connect()?,
+            data_dir: service.db.data_dir(),
+            library: None,
+        })
+    }
+
+    /// Whether `row`'s waveform may be one analysis up to 0.6.6 drew
+    /// stretched: at least as long as it decoded (24M samples, about 9
+    /// minutes at 44.1 kHz), and the export log says a version up to 0.6.6
+    /// exported it with no repair redrawing it since. The bundle alone can't
+    /// tell: a stretched waveform has the right length and entry count.
+    fn maybe_stretched(&self, row: &crate::pdb_reader::PdbTrackRow) -> bool {
+        is_maybe_stretched(&self.maybe_stretched, row)
+    }
+
+    /// Where the library keeps `row`'s waveform, when it is in the library.
+    fn library_source(
+        &mut self,
+        row: &crate::pdb_reader::PdbTrackRow,
+    ) -> BackendResult<Option<WaveformSource>> {
+        if self.library.is_none() {
+            self.library = Some(LibraryIndex::load(&self.library_conn)?);
+        }
+        let audio =
+            crate::service::usb::root::resolve_usb_side_path(self.usb_root, &row.track_file_path);
+        Ok(self
+            .library
+            .as_ref()
+            .and_then(|index| index.find(self.parsed, row, self.app_master_db_id, audio.as_deref()))
+            .and_then(|(track, transcode)| {
+                library_waveform_source(&self.library_conn, &self.data_dir, track, transcode)
+            }))
+    }
+
+    /// Where a [`Self::maybe_stretched`] track's new waveform comes from:
+    /// the library's when it has the track, else the stick's audio.
+    fn stretched(
+        &mut self,
+        row: &crate::pdb_reader::PdbTrackRow,
+    ) -> BackendResult<Option<WaveformSource>> {
+        if !self.maybe_stretched(row) {
+            return Ok(None);
+        }
+        Ok(Some(
+            self.library_source(row)?.unwrap_or(WaveformSource::Draw),
+        ))
+    }
+
+    /// What `row`'s bundle at `dat` needs instead of its waveform, if
+    /// anything: a USB repair up to 0.6.6 drew it, or analysis up to 0.6.6
+    /// drew it stretched.
+    fn check(
+        &mut self,
+        row: &crate::pdb_reader::PdbTrackRow,
+        dat: &Path,
+    ) -> BackendResult<Option<(WaveformFault, WaveformSource)>> {
+        let repair_drawn = read_anlz_chunks(&dat.with_extension("EXT"), &[*b"PWV3"])
+            .and_then(|ext| pwv3_stretched_from_bins(&ext, REPAIR_WAVEFORM_BINS_UP_TO_0_6_6))
+            == Some(true);
+        if repair_drawn {
+            let source = self.library_source(row)?.unwrap_or(WaveformSource::Draw);
+            return Ok(Some((WaveformFault::RepairDrawn, source)));
+        }
+        Ok(self
+            .stretched(row)?
+            .map(|source| (WaveformFault::Stretched, source)))
+    }
 }
 
 /// What [`BackendService::detect_app_bundle_updates`] reads besides the PDB:
@@ -521,9 +643,7 @@ impl BackendService {
             .iter()
             .map(|m| (audio_path_key(&m.track_path), m))
             .collect::<HashMap<_, _>>();
-        let mut library: Option<LibraryIndex> = None;
-        let library_conn = self.db.connect()?;
-        let data_dir = self.db.data_dir();
+        let mut waveforms = WaveformCheck::new(self, usb_root, parsed, app_master_db_id)?;
         for row in &parsed.tracks {
             if non_owners.contains(&row.id) {
                 continue;
@@ -542,46 +662,7 @@ impl BackendService {
                 update.mp3_seek = Some((*target).clone());
             }
 
-            let repair_drawn = read_anlz_chunks(&dat.with_extension("EXT"), &[*b"PWV3"])
-                .and_then(|ext| pwv3_stretched_from_bins(&ext, PRE_0_6_7_REPAIR_WAVEFORM_BINS))
-                == Some(true);
-            let exported_long = app_master_db_id.is_some()
-                && row.master_db_id == app_master_db_id
-                && longer_than_old_decode_cap(row);
-            if !repair_drawn && !exported_long {
-                continue;
-            }
-            if library.is_none() {
-                library = Some(LibraryIndex::load(&library_conn)?);
-            }
-            let audio =
-                crate::service::usb::root::resolve_usb_side_path(usb_root, &row.track_file_path);
-            let source = library
-                .as_ref()
-                .and_then(|index| index.find(parsed, row, app_master_db_id, audio.as_deref()))
-                .and_then(|(track, transcode)| {
-                    library_waveform_source(&library_conn, &data_dir, track, transcode)
-                });
-            let waveform = if repair_drawn {
-                Some((
-                    WaveformFault::RepairDrawn,
-                    source.unwrap_or(WaveformSource::Draw),
-                ))
-            } else {
-                // A stretched waveform can't be told from the bundle alone:
-                // only a library waveform to compare with finds it.
-                match source {
-                    Some(WaveformSource::Library(library_dat)) => {
-                        waveforms_differ(&dat, &library_dat).then_some((
-                            WaveformFault::Stretched,
-                            WaveformSource::Library(library_dat),
-                        ))
-                    }
-                    Some(other) => Some((WaveformFault::Stretched, other)),
-                    None => None,
-                }
-            };
-            if let Some(waveform) = waveform
+            if let Some(waveform) = waveforms.check(row, &dat)?
                 && let Some(update) = get(&mut updates, &rows, row.id, &dat)
             {
                 update.waveform = Some(waveform);
@@ -707,10 +788,25 @@ impl BackendService {
         warnings: &mut Vec<WarningEntry>,
         on_event: &mut dyn FnMut(SeekApplyEvent),
     ) -> BackendResult<AppBundleOutcome> {
-        let pdb_path = staging::required_pdb(usb_root)?;
-        let mut pdb_bytes = std::fs::read(&pdb_path)?;
-        let page_size = pdb_page_size(&pdb_bytes)?;
-        let parsed = crate::pdb_reader::parse_pdb_bytes(&pdb_bytes)?;
+        // Whichever databases the stick has: the PDB's tracks when it has
+        // one, else the eDB's; a moved bundle is repointed in both.
+        let pdb_path = staging::UsbDatabases::of(usb_root)?
+            .pdb()
+            .map(Path::to_path_buf);
+        let mut edb = EdbRw::shared_or_open(edb_conn, usb_root);
+        let (mut pdb_bytes, parsed) = match &pdb_path {
+            Some(path) => {
+                let bytes = std::fs::read(path)?;
+                let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
+                (Some(bytes), parsed)
+            }
+            None => {
+                let handle = edb
+                    .as_mut()
+                    .ok_or_else(|| BackendError::NotFound(tr::usb_error_no_player_database()))?;
+                (None, crate::edb::edb_as_parsed_pdb(handle.conn())?)
+            }
+        };
         let outdated_grids =
             crate::service::diagnostics::detect_outdated_beat_grids(usb_root, &parsed)
                 .unwrap_or_default()
@@ -841,6 +937,8 @@ impl BackendService {
         // (track path, new USB-relative `.DAT` path) for the eDB.
         let mut moved = Vec::<(String, String)>::new();
         let mut meter = crate::progress::SpeedMeter::new();
+        // Tracks whose stretched waveform was replaced, for the export log.
+        let mut redrawn = Vec::<String>::new();
         for (index, update) in updates.iter().enumerate() {
             on_event(SeekApplyEvent::ItemDone { done: index, total });
             if failures.contains_key(&update.track_id) {
@@ -953,6 +1051,9 @@ impl BackendService {
             };
             match written() {
                 Ok((changed, seek)) => {
+                    if matches!(update.waveform, Some((WaveformFault::Stretched, _))) {
+                        redrawn.push(update.track_path.clone());
+                    }
                     if changed || seek == SeekAdded::Written {
                         outcome.updated += 1;
                     } else if seek == SeekAdded::Skipped {
@@ -965,17 +1066,22 @@ impl BackendService {
             }
         }
 
-        if !mutations.is_empty() {
+        if !mutations.is_empty()
+            && let (Some(path), Some(bytes)) = (&pdb_path, pdb_bytes.as_mut())
+        {
+            let page_size = pdb_page_size(bytes)?;
             crate::pdb_writer::mutate_tracks_in_place(
-                &mut pdb_bytes,
+                bytes,
                 &mutations,
                 PdbLayoutProfile::DEFAULT,
                 page_size,
             )?;
-            std::fs::write(&pdb_path, &pdb_bytes)?;
+            std::fs::write(path, bytes)?;
         }
+        // So no machine offers to replace them again.
+        crate::service::export_log::append_waveform_redrawn_record(usb_root, &redrawn)?;
         if !moved.is_empty()
-            && let Some(mut handle) = EdbRw::shared_or_open(edb_conn, usb_root)
+            && let Some(handle) = edb.as_mut()
             && table_exists(handle.conn(), "content")
         {
             repoint_edb_analysis_paths(handle.conn(), &moved)?;

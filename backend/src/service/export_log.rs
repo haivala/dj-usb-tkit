@@ -50,6 +50,22 @@ fn default_export_mode() -> String {
     "unknown".to_string()
 }
 
+/// The `mode` of a record that isn't an export: the USB repair
+/// (`update_app_analysis_files`) replaced the waveforms analysis up to
+/// 0.6.6 drew stretched, for the tracks it lists. Every reader of exports
+/// leaves these records out.
+pub(crate) const WAVEFORM_REDRAWN_MODE: &str = "waveform-redrawn";
+
+/// The last version whose analysis drew a long track's waveform stretched;
+/// 0.7.0 draws it whole.
+const LAST_STRETCHING_VERSION: (u32, u32, u32) = (0, 6, 6);
+
+impl UsbExportLogRecord {
+    fn is_export(&self) -> bool {
+        self.mode != WAVEFORM_REDRAWN_MODE
+    }
+}
+
 impl Default for UsbExportLog {
     fn default() -> Self {
         Self {
@@ -100,10 +116,13 @@ pub(crate) fn has_export_log_record(usb_root: &Path, exported_at: &str) -> Optio
 
 /// `exportedAt` of the drive's newest log record.
 pub(crate) fn latest_export_log_record_at(usb_root: &Path) -> Option<String> {
-    load_export_log(usb_root)
-        .ok()
-        .flatten()
-        .and_then(|log| log.records.last().map(|record| record.exported_at.clone()))
+    load_export_log(usb_root).ok().flatten().and_then(|log| {
+        log.records
+            .iter()
+            .rev()
+            .find(|record| record.is_export())
+            .map(|record| record.exported_at.clone())
+    })
 }
 
 pub(crate) fn load_export_log(usb_root: &Path) -> BackendResult<Option<UsbExportLog>> {
@@ -149,7 +168,7 @@ pub(crate) fn apply_history_dates_from_export_log(
     }
 
     let mut latest_by_fingerprint = HashMap::<Vec<String>, (String, String)>::new();
-    for record in &log.records {
+    for record in log.records.iter().filter(|record| record.is_export()) {
         if record.track_fingerprints.is_empty() || record.export_date.trim().is_empty() {
             continue;
         }
@@ -249,7 +268,7 @@ pub(crate) fn fingerprints_last_exported_before_versioning(
     log: &UsbExportLog,
 ) -> std::collections::HashSet<String> {
     let mut latest = HashMap::<&str, (&str, bool)>::new();
-    for record in &log.records {
+    for record in log.records.iter().filter(|record| record.is_export()) {
         let sort_key = if record.exported_at.trim().is_empty() {
             record.export_date.as_str()
         } else {
@@ -270,6 +289,73 @@ pub(crate) fn fingerprints_last_exported_before_versioning(
         .filter(|(_, (_, unversioned))| *unversioned)
         .map(|(fingerprint, _)| fingerprint.to_string())
         .collect()
+}
+
+/// Fingerprints of the tracks whose waveform on this stick analysis up to
+/// 0.6.6 may have drawn stretched: some export on the stick, from whichever
+/// machine, was by a version up to 0.6.6 (a record without `app_version`
+/// is from before 0.3.7), and no [`WAVEFORM_REDRAWN_MODE`] record lists
+/// them (only versions that replace such waveforms write one). A later export reuses the analysis files already on
+/// the stick, so what such a version wrote stays until the repair replaces
+/// it. Whether a track is long enough to have been stretched is the
+/// caller's check.
+pub(crate) fn waveforms_maybe_stretched(log: &UsbExportLog) -> std::collections::HashSet<String> {
+    let redrawn = log
+        .records
+        .iter()
+        .filter(|record| !record.is_export())
+        .flat_map(|record| record.track_fingerprints.iter())
+        .collect::<std::collections::HashSet<_>>();
+    log.records
+        .iter()
+        .filter(|record| record.is_export())
+        .filter(|record| {
+            app_version_number(&record.app_version).is_none_or(|v| v <= LAST_STRETCHING_VERSION)
+        })
+        .flat_map(|record| record.track_fingerprints.iter())
+        .filter(|fingerprint| !redrawn.contains(fingerprint))
+        .cloned()
+        .collect()
+}
+
+/// Records on the stick that the repair replaced the stretched waveforms of
+/// `track_paths` (USB paths), so no machine offers to replace them again.
+pub(crate) fn append_waveform_redrawn_record(
+    usb_root: &Path,
+    track_paths: &[String],
+) -> BackendResult<()> {
+    if track_paths.is_empty() {
+        return Ok(());
+    }
+    let mut log = load_export_log(usb_root)?.unwrap_or_default();
+    let exported_at = chrono::Local::now().to_rfc3339();
+    let export_date = exported_at
+        .split('T')
+        .next()
+        .unwrap_or(exported_at.as_str())
+        .to_string();
+    log.records.push(UsbExportLogRecord {
+        playlist_id: String::new(),
+        playlist_name: String::new(),
+        exported_at,
+        export_date,
+        mode: WAVEFORM_REDRAWN_MODE.to_string(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        track_fingerprints: fingerprints_in_order(
+            track_paths
+                .iter()
+                .map(|path| track_identity_key(path, "", "", None)),
+        ),
+    });
+    save_export_log(usb_root, &log)
+}
+
+/// `"0.6.6"` (or `"0.7.0-rc.1"`, its pre-release ignored) as numbers; `None`
+/// for a record without a version, or one that doesn't read.
+fn app_version_number(version: &str) -> Option<(u32, u32, u32)> {
+    let core = version.trim().split(['-', '+']).next()?;
+    let mut parts = core.split('.').map(|part| part.parse::<u32>().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
 }
 
 fn history_track_fingerprints(tracks: &[UsbTrack]) -> Vec<String> {
@@ -312,9 +398,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        UsbExportLog, UsbExportLogRecord, append_export_log_record,
+        UsbExportLog, UsbExportLogRecord, WAVEFORM_REDRAWN_MODE, append_export_log_record,
         apply_history_dates_from_export_log, build_export_log_record, export_log_path,
         fingerprints_last_exported_before_versioning, legacy_export_log_path, load_export_log,
+        waveforms_maybe_stretched,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::service::export_helpers::{ExportManifest, ExportManifestTrack, ExportPlaylistData};
@@ -743,6 +830,36 @@ mod tests {
             "mode":"additive","trackFingerprints":["fp"]}]}"#;
         let parsed: UsbExportLog = serde_json::from_str(old).unwrap();
         assert_eq!(parsed.records[0].app_version, "");
+    }
+
+    #[test]
+    fn waveforms_exported_by_0_6_6_or_earlier_are_suspect_until_a_redrawn_record_lists_them() {
+        let record = |mode: &str, version: &str, fingerprints: &[&str]| UsbExportLogRecord {
+            playlist_id: "p".to_string(),
+            playlist_name: "P".to_string(),
+            exported_at: String::new(),
+            export_date: String::new(),
+            mode: mode.to_string(),
+            app_version: version.to_string(),
+            track_fingerprints: fingerprints.iter().map(|f| f.to_string()).collect(),
+        };
+        let log = UsbExportLog {
+            schema_version: 1,
+            records: vec![
+                record("additive", "", &["path:/a"]),
+                record("additive", "0.6.6", &["path:/b", "path:/e"]),
+                record("additive", "0.7.0-rc.1", &["path:/c"]),
+                // A later export reuses the old files: still suspect.
+                record("additive", "0.7.0", &["path:/b", "path:/d"]),
+                // Whatever version a build calls itself, its record counts.
+                record(WAVEFORM_REDRAWN_MODE, "0.6.6", &["path:/e"]),
+            ],
+        };
+        let mut found = waveforms_maybe_stretched(&log)
+            .into_iter()
+            .collect::<Vec<_>>();
+        found.sort();
+        assert_eq!(found, vec!["path:/a", "path:/b"]);
     }
 
     #[test]
