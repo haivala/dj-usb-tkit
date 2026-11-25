@@ -96,7 +96,7 @@ impl BackendService {
         }
         Ok(FetchUsbPlaylistsData {
             items,
-            tree: super::playlist_tree::tree_rows(&walked),
+            tree: super::playlist_tree::tree_rows(&walked, &pending),
             order_edit,
             order_edit_blocked_text: Self::usb_order_edit_blocked_text(usb_root),
             stats: resolved.stats.clone(),

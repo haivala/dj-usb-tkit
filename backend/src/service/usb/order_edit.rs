@@ -16,7 +16,7 @@
 //! [`apply_pending_order`], the same function that orders the view, so what
 //! the view shows is what gets written.
 
-use super::playlist_tree;
+use super::playlist_tree::{self, MoveRefusal, PendingTree, Placement, UsbTreeNode};
 use super::root::{can_write_file_at, has_write_access, resolve_usb_root};
 use super::staging::{SessionBackup, UsbDatabases, UsbWriteGuard};
 use super::text::canonicalize_playlist_name;
@@ -27,15 +27,17 @@ use crate::models::{
     MoveUsbPlaylistRequest, MoveUsbPlaylistTrackRequest, SortUsbPlaylistTracksRequest,
     UsbOrderEditData, UsbOrderEditRequest, UsbOrderEditState, UsbPlaylist, UsbTrack, WarningEntry,
 };
-use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, parse_pdb_bytes, pdb_page_size};
+use crate::pdb_reader::{
+    ParsedPdb, PdbPlaylistEntryRow, PdbPlaylistTreeRow, PlaylistPath, PlaylistTree,
+    parse_pdb_bytes, pdb_page_size,
+};
+use crate::pdb_writer::{PdbPlaylistTreeSortOrderPatch, patch_playlist_tree_sort_orders_in_place};
 use crate::service::BackendService;
 use crate::service::diagnostics::{
     FieldNoteParity, RatingColourParity, build_usb_parity_comparison,
 };
 use crate::service::export_helpers::canonicalize_track_path_identity;
-use crate::service::repair::{
-    restore_pdb_playlist_sort_orders, write_edb_playlist_order, write_edb_playlist_track_order,
-};
+use crate::service::repair::write_edb_playlist_track_order;
 use crate::utils::warning_text;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -49,12 +51,8 @@ const BACKUP_REASON: &str = "Before order edit";
 /// The pending order: what a save would write.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct PendingOrder {
-    /// Per folder (`UsbTreeNode::id`, [`TOP`] for the top level) whose
-    /// items were moved, its items' ids (playlists and folders) in the new
-    /// order. A folder back in the stick's order has none.
-    ///
-    /// [`TOP`]: super::playlist_tree::TOP
-    playlists: HashMap<String, Vec<String>>,
+    /// The playlists' and folders' pending places.
+    tree: PendingTree,
     /// Per edited playlist (`UsbPlaylist::id`), the media path key
     /// ([`track_order_key`]) of each of its rows in the new order.
     tracks: HashMap<String, Vec<String>>,
@@ -62,7 +60,7 @@ struct PendingOrder {
 
 impl PendingOrder {
     fn is_empty(&self) -> bool {
-        self.playlists.is_empty() && self.tracks.is_empty()
+        self.tree.is_empty() && self.tracks.is_empty()
     }
 
     /// Stores `keys` as `playlist_id`'s order, or drops it when it is the
@@ -126,7 +124,7 @@ pub(crate) fn track_order_key(track: &UsbTrack) -> String {
 }
 
 /// Moves `rows[from]` to just before `rows[before]`, or to the end.
-fn move_before<T>(rows: &mut Vec<T>, from: usize, before: Option<usize>) {
+pub(crate) fn move_before<T>(rows: &mut Vec<T>, from: usize, before: Option<usize>) {
     let item = rows.remove(from);
     let to = match before {
         Some(before) if before > from => before - 1,
@@ -175,7 +173,7 @@ fn order_edit_state(edit: &UsbOrderEdit) -> UsbOrderEditState {
     let mut edited_playlist_ids: Vec<String> = edit.pending.tracks.keys().cloned().collect();
     edited_playlist_ids.sort();
     let count = edited_playlist_ids.len();
-    let editing_text = match (!edit.pending.playlists.is_empty(), count) {
+    let editing_text = match (!edit.pending.tree.is_empty(), count) {
         (false, 0) => tr::usb_order_edit_editing(),
         (false, count) => tr::usb_order_edit_editing_changed(count),
         (true, 0) => tr::usb_order_edit_editing_list_changed(),
@@ -189,89 +187,189 @@ fn order_edit_state(edit: &UsbOrderEdit) -> UsbOrderEditState {
     }
 }
 
-/// Checks, on the staged copies, that the PDB and the eDB agree on the order
-/// the edit changed: each edited playlist's tracks (those both databases
-/// list) and, when the list was reordered, each moved playlist's place. The
-/// comparison is the parity report's (`build_usb_parity_comparison`), read
-/// only for those playlists. A mismatch fails the save before any write-back,
-/// with a hint at the strict parity repair.
+/// Where the save puts one row of a database's playlist tree: its place
+/// among its folder's items and, when it moved, its folder's row id (0: the
+/// top level). `name` is the item's, for messages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RowPlace {
+    position: u32,
+    parent: Option<u32>,
+    name: String,
+}
+
+/// Each item's row id in one database's playlist tree (`rows`), by tree id
+/// (`UsbTreeNode::id`): a folder by its path, as the tree pairs folders; a
+/// playlist by `playlist_tree_id`.
+fn rows_by_tree_id(
+    rows: &[PdbPlaylistTreeRow],
+    playlist_tree_id: impl Fn(&PdbPlaylistTreeRow, &PlaylistPath) -> Option<String>,
+) -> HashMap<String, u32> {
+    let tree = PlaylistTree::new(rows);
+    rows.iter()
+        .filter_map(|row| {
+            let path = tree.path(row);
+            let id = if row.is_folder {
+                let mut segments = path.folders;
+                segments.push(path.name);
+                playlist_tree::folder_id(&segments)
+            } else {
+                playlist_tree_id(row, &path)?
+            };
+            Some((id, row.id))
+        })
+        .collect()
+}
+
+/// The rows the save places in one database (`database`, for messages):
+/// every item of each folder in the pending order, numbered from 0, folders
+/// and playlists together, as rekordbox and export number them. A moved
+/// item also gets its new folder's row. Refused when this database holds a
+/// moved item but not its new folder.
+fn row_places(
+    pending: &PendingTree,
+    nodes: &[UsbTreeNode],
+    rows: &HashMap<String, u32>,
+    database: &str,
+) -> BackendResult<HashMap<u32, RowPlace>> {
+    let name_of = |id: &str| {
+        nodes
+            .iter()
+            .find(|node| node.id == id)
+            .map_or_else(|| id.to_string(), |node| node.name.clone())
+    };
+    let mut places = HashMap::new();
+    for (folder, ids) in &pending.order {
+        for (position, id) in (0u32..).zip(ids) {
+            let Some(&row) = rows.get(id) else {
+                continue;
+            };
+            let parent = match pending.parents.get(id) {
+                None => None,
+                Some(to) if to == playlist_tree::TOP => Some(0),
+                Some(to) => Some(*rows.get(to).ok_or_else(|| {
+                    BackendError::Validation(tr::usb_order_edit_folder_missing(
+                        name_of(id),
+                        name_of(to),
+                        database,
+                    ))
+                })?),
+            };
+            debug_assert!(parent.is_none() || pending.parents[id] == *folder);
+            places.insert(
+                row,
+                RowPlace {
+                    position,
+                    parent,
+                    name: name_of(id),
+                },
+            );
+        }
+    }
+    Ok(places)
+}
+
+/// Writes `places` (by eDB `playlist_id`) to the eDB's playlist tree, in the
+/// caller's transaction: `sequenceNo` and, for a moved row,
+/// `playlist_id_parent`, both as export writes them. Returns the rows
+/// changed.
+fn write_edb_playlist_places(
+    tx: &rusqlite::Transaction<'_>,
+    places: &HashMap<u32, RowPlace>,
+) -> BackendResult<usize> {
+    let mut updated = 0;
+    for (id, place) in places {
+        updated += tx.execute(
+            "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 \
+             AND sequenceNo IS NOT ?1",
+            rusqlite::params![i64::from(place.position), i64::from(*id)],
+        )?;
+        if let Some(parent) = place.parent {
+            updated += tx.execute(
+                "UPDATE playlist SET playlist_id_parent = ?1 WHERE playlist_id = ?2 \
+                 AND playlist_id_parent IS NOT ?1",
+                rusqlite::params![i64::from(parent), i64::from(*id)],
+            )?;
+        }
+    }
+    Ok(updated)
+}
+
+/// The names of the rows of `rows` (one database's tree, as saved) that
+/// aren't where `places` put them.
+fn misplaced(rows: &[PdbPlaylistTreeRow], places: &HashMap<u32, RowPlace>) -> Vec<String> {
+    let saved: HashMap<u32, &PdbPlaylistTreeRow> = rows.iter().map(|row| (row.id, row)).collect();
+    places
+        .iter()
+        .filter(|(id, place)| {
+            saved.get(id).is_none_or(|row| {
+                row.sort_order != place.position
+                    || place.parent.is_some_and(|parent| parent != row.parent_id)
+            })
+        })
+        .map(|(_, place)| place.name.clone())
+        .collect()
+}
+
+/// Checks, on the staged copies, that the save wrote what the edit asked
+/// for: every placed row in each database at its place, in its folder, and
+/// each edited playlist's tracks in the same order in the PDB and the eDB
+/// (those both list; the parity report's comparison,
+/// `build_usb_parity_comparison`, read only for those playlists). A
+/// mismatch fails the save before any write-back, with a hint at the strict
+/// parity repair.
 fn verify_saved_order(
     usb_root: &Path,
     pending: &PendingOrder,
-    parsed: &ParsedPdb,
+    parsed: Option<&ParsedPdb>,
+    pdb_places: &HashMap<u32, RowPlace>,
+    edb_places: &HashMap<u32, RowPlace>,
 ) -> BackendResult<()> {
-    let conn = UsbDatabases::of(usb_root)?
-        .open_edb_writable()
-        .ok_or_else(|| BackendError::Validation(tr::usb_order_edit_edb_open_failed()))?;
-    let edb_playlists = crate::edb::read_edb(&conn, usb_root, crate::edb::EdbRead::ALL)
-        .map(|library| library.resolved_playlists(usb_root))
-        .unwrap_or_default();
-    let edb_tree = crate::edb::read_edb_playlist_tree(&conn)?;
-    drop(conn);
-    // Each moved folder's place, where both databases have the folder.
-    let folder_places =
-        |rows: &[crate::pdb_reader::PdbPlaylistTreeRow]| -> HashMap<String, (String, u32)> {
-            let tree = crate::pdb_reader::PlaylistTree::new(rows);
-            rows.iter()
-                .filter(|row| row.is_folder)
-                .map(|row| {
-                    let path = tree.path(row);
-                    let display = path.display();
-                    let mut segments = path.folders;
-                    segments.push(path.name);
-                    (
-                        playlist_tree::folder_id(&segments),
-                        (display, row.sort_order),
-                    )
-                })
-                .collect()
-        };
-    let pdb_folders = folder_places(&parsed.playlist_tree);
-    let edb_folders = folder_places(&edb_tree);
-    let mut differing_folders: Vec<String> = pending
-        .playlists
-        .values()
-        .flatten()
-        .filter_map(|id| match (pdb_folders.get(id), edb_folders.get(id)) {
-            (Some((name, pdb)), Some((_, edb))) if pdb != edb => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
-    let (_, _, details, _) = build_usb_parity_comparison(
-        parsed,
-        &edb_playlists,
-        &RatingColourParity::default(),
-        &FieldNoteParity::default(),
-        None,
-    );
-    let names_of = |id: &str| -> HashSet<String> {
-        edb_playlist_names(id, Some(parsed)).into_iter().collect()
-    };
-    let track_edited: HashSet<String> = pending.tracks.keys().flat_map(|id| names_of(id)).collect();
-    let moved: HashSet<String> = pending
-        .playlists
-        .values()
-        .flatten()
-        .flat_map(|id| names_of(id))
-        .collect();
-    let mut differing: Vec<String> = details
-        .iter()
-        .filter(|detail| {
-            let key = canonicalize_playlist_name(&detail.name);
-            let tracks_differ = track_edited.contains(&key) && detail.order_mismatch;
-            let place_differs = moved.contains(&key)
-                && detail.pdb_sort_order.is_some()
-                && detail.edb_sort_order.is_some()
-                && !detail.sort_order_match;
-            tracks_differ || place_differs
-        })
-        .map(|detail| detail.name.clone())
-        .collect();
-    differing.append(&mut differing_folders);
+    let mut differing = Vec::new();
+    if let Some(parsed) = parsed {
+        differing.extend(misplaced(&parsed.playlist_tree, pdb_places));
+    }
+    if UsbDatabases::of(usb_root)?.edb().is_some() {
+        let conn = UsbDatabases::of(usb_root)?
+            .open_edb_writable()
+            .ok_or_else(|| BackendError::Validation(tr::usb_order_edit_edb_open_failed()))?;
+        differing.extend(misplaced(
+            &crate::edb::read_edb_playlist_tree(&conn)?,
+            edb_places,
+        ));
+        if let Some(parsed) = parsed
+            && !pending.tracks.is_empty()
+        {
+            let edb_playlists = crate::edb::read_edb(&conn, usb_root, crate::edb::EdbRead::ALL)
+                .map(|library| library.resolved_playlists(usb_root))
+                .unwrap_or_default();
+            let (_, _, details, _) = build_usb_parity_comparison(
+                parsed,
+                &edb_playlists,
+                &RatingColourParity::default(),
+                &FieldNoteParity::default(),
+                None,
+            );
+            let track_edited: HashSet<String> = pending
+                .tracks
+                .keys()
+                .flat_map(|id| edb_playlist_names(id, Some(parsed)))
+                .collect();
+            differing.extend(
+                details
+                    .iter()
+                    .filter(|detail| {
+                        detail.order_mismatch
+                            && track_edited.contains(&canonicalize_playlist_name(&detail.name))
+                    })
+                    .map(|detail| detail.name.clone()),
+            );
+        }
+    }
     if differing.is_empty() {
         return Ok(());
     }
     differing.sort();
+    differing.dedup();
     Err(BackendError::Validation(tr::usb_order_edit_verify_failed(
         differing.join(", "),
     )))
@@ -331,16 +429,13 @@ impl BackendService {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The pending order of the folders whose items `usb_root`'s edit moved
-    /// (see `PendingOrder::playlists`); empty without one.
-    pub(crate) fn pending_usb_playlist_order(
-        &self,
-        usb_root: &Path,
-    ) -> HashMap<String, Vec<String>> {
+    /// The pending places of `usb_root`'s edit's playlists and folders;
+    /// empty without one.
+    pub(crate) fn pending_usb_playlist_order(&self, usb_root: &Path) -> PendingTree {
         self.order_edit_slot()
             .as_ref()
             .filter(|edit| edit.usb_root == usb_root)
-            .map(|edit| edit.pending.playlists.clone())
+            .map(|edit| edit.pending.tree.clone())
             .unwrap_or_default()
     }
 
@@ -458,9 +553,11 @@ impl BackendService {
         })
     }
 
-    /// Moves a playlist or a folder among its folder's items in the pending
-    /// order: before `before_playlist_id`, after `after_playlist_id`, or to
-    /// the folder's end. Refused for an item of another folder.
+    /// Moves a playlist or a folder (with what it holds) in the pending
+    /// order: into `into_folder_id` (at its end), before
+    /// `before_playlist_id`, after `after_playlist_id` (in that item's
+    /// folder), or to its own folder's end. See [`PendingTree::moved`] for
+    /// what is refused.
     pub fn move_usb_playlist(
         &self,
         req: MoveUsbPlaylistRequest,
@@ -469,59 +566,41 @@ impl BackendService {
         self.require_usb_order_edit(&usb_root)?;
         let resolved = self.usb_playlists_resolved(&usb_root)?;
         let nodes = &resolved.tree;
-        let not_found = |id: &str| BackendError::NotFound(tr::error_usb_playlist_not_found(id));
-        let parent = playlist_tree::parent_of(nodes, &req.playlist_id)
-            .ok_or_else(|| not_found(&req.playlist_id))?;
-        for other in [&req.before_playlist_id, &req.after_playlist_id]
-            .into_iter()
-            .flatten()
-        {
-            match playlist_tree::parent_of(nodes, other) {
-                None => return Err(not_found(other)),
-                Some(other_parent) if other_parent != parent => {
-                    return Err(BackendError::Validation(
-                        tr::usb_order_edit_move_other_folder(),
-                    ));
-                }
-                Some(_) => {}
-            }
-        }
-        let ids = |pending: &HashMap<String, Vec<String>>| -> Vec<String> {
-            playlist_tree::children_in_order(nodes, parent, pending)
-                .into_iter()
-                .map(|node| node.id.clone())
-                .collect()
+        let placement = match (
+            &req.into_folder_id,
+            &req.before_playlist_id,
+            &req.after_playlist_id,
+        ) {
+            (Some(folder), _, _) => Placement::Inside(folder),
+            (None, Some(before), _) => Placement::Before(before),
+            (None, None, Some(after)) => Placement::After(after),
+            (None, None, None) => Placement::End,
         };
-        let base = ids(&HashMap::new());
         let mut data = self.change_usb_order_edit(&usb_root, |pending| {
-            let mut order = ids(&pending.playlists);
-            let position = |order: &[String], id: &str| {
-                order
-                    .iter()
-                    .position(|other| other == id)
-                    .ok_or_else(|| not_found(id))
-            };
-            let from = position(&order, &req.playlist_id)?;
-            let before = match (&req.before_playlist_id, &req.after_playlist_id) {
-                (Some(before), _) => Some(position(&order, before)?),
-                (None, Some(after)) => {
-                    let at = position(&order, after)? + 1;
-                    (at < order.len()).then_some(at)
-                }
-                (None, None) => None,
-            };
-            move_before(&mut order, from, before);
-            if order == base {
-                pending.playlists.remove(parent);
-            } else {
-                pending.playlists.insert(parent.to_string(), order);
-            }
+            pending.tree = pending
+                .tree
+                .moved(nodes, &req.playlist_id, placement)
+                .map_err(|refusal| match refusal {
+                    MoveRefusal::NotFound(id) => {
+                        BackendError::NotFound(tr::error_usb_playlist_not_found(&id))
+                    }
+                    MoveRefusal::NotAFolder => {
+                        BackendError::Validation(tr::usb_order_edit_move_into_playlist())
+                    }
+                    MoveRefusal::IntoItself => {
+                        BackendError::Validation(tr::usb_order_edit_move_into_itself())
+                    }
+                    MoveRefusal::NameTaken(name) => {
+                        BackendError::Validation(tr::usb_order_edit_move_name_taken(name))
+                    }
+                })?;
             Ok(())
         })?;
         let pending = self.pending_usb_playlist_order(&usb_root);
-        data.tree = Some(playlist_tree::tree_rows(&playlist_tree::walk(
-            nodes, &pending,
-        )));
+        data.tree = Some(playlist_tree::tree_rows(
+            &playlist_tree::walk(nodes, &pending),
+            &pending,
+        ));
         Ok(data)
     }
 
@@ -735,45 +814,20 @@ impl BackendService {
         };
         let parsed = parsed.as_ref();
 
-        // Playlist order: in each moved folder, every item's place, folders
-        // and playlists numbered together as rekordbox numbers them, the same
-        // in both databases.
-        let pdb_folder_ids: HashMap<String, u32> = parsed
-            .map(|parsed| {
-                let tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
-                parsed
-                    .playlist_tree
-                    .iter()
-                    .filter(|row| row.is_folder)
-                    .map(|row| {
-                        let path = tree.path(row);
-                        let mut segments = path.folders;
-                        segments.push(path.name);
-                        (playlist_tree::folder_id(&segments), row.id)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut pdb_sort = HashMap::<u32, u32>::new();
-        let mut edb_sort = HashMap::<String, u32>::new();
-        let mut edb_folder_sort = HashMap::<String, u32>::new();
-        for ids in pending.playlists.values() {
-            for (position, id) in (0u32..).zip(ids) {
-                if let Some(folder) = pdb_folder_ids.get(id) {
-                    pdb_sort.insert(*folder, position);
-                }
-                if id.starts_with(playlist_tree::FOLDER_PREFIX) {
-                    edb_folder_sort.insert(id.clone(), position);
-                    continue;
-                }
-                if let Some(pdb_id) = pdb_playlist_id(id) {
-                    pdb_sort.insert(pdb_id, position);
-                }
-                for name in edb_playlist_names(id, parsed) {
-                    edb_sort.insert(name, position);
-                }
+        // Playlist places, from the stick's tree (what the moves used): each
+        // item's row in each database, found before anything is written,
+        // since a move changes the paths the rows are paired by.
+        let resolved = self.usb_playlists_resolved(usb_root)?;
+        let nodes = &resolved.tree;
+        let pdb_places = match parsed {
+            Some(parsed) => {
+                let rows = rows_by_tree_id(&parsed.playlist_tree, |row, _| {
+                    Some(format!("usb-pl-{}", row.id))
+                });
+                row_places(&pending.tree, nodes, &rows, "PDB")?
             }
-        }
+            None => HashMap::new(),
+        };
 
         // Track order in the PDB, from its own entries: each mapped to its
         // track's path and ordered by the pending list, renumbered from the
@@ -827,25 +881,50 @@ impl BackendService {
         }
         let mut pdb_changed = false;
         if let Some((_, bytes)) = pdb.as_mut() {
-            let sorted = restore_pdb_playlist_sort_orders(bytes, &pdb_sort)?;
             let page_size = pdb_page_size(bytes)?;
+            let patches: Vec<PdbPlaylistTreeSortOrderPatch> = pdb_places
+                .iter()
+                .map(|(id, place)| PdbPlaylistTreeSortOrderPatch {
+                    id: *id,
+                    sort_order: place.position,
+                    parent_id: place.parent,
+                })
+                .collect();
+            let placed = patch_playlist_tree_sort_orders_in_place(bytes, &patches, page_size)?;
             let entries = crate::pdb_writer::patch_t08_entry_indices_in_place(
                 bytes,
                 &entry_patches,
                 page_size,
             );
-            pdb_changed = sorted + entries > 0;
+            pdb_changed = placed + entries > 0;
         }
 
         // The eDB, from its own rows, in one transaction.
         on_progress(40, 100, &tr::usb_progress_order_edit_edb().render());
         let mut edb_changed = false;
+        let mut edb_places = HashMap::new();
         if databases.edb().is_some() {
             let conn = session
                 .edb()?
                 .ok_or_else(|| BackendError::Validation(tr::usb_order_edit_edb_open_failed()))?;
             let tx = conn.transaction()?;
-            let mut updated = write_edb_playlist_order(&tx, &edb_sort, &edb_folder_sort)?;
+            // An eDB playlist is the tree's item whose path key it has.
+            let tree_id_by_key: HashMap<String, &str> = nodes
+                .iter()
+                .filter(|node| node.kind == crate::models::PlaylistTreeKind::Playlist)
+                .flat_map(|node| {
+                    edb_playlist_names(&node.id, parsed)
+                        .into_iter()
+                        .map(|key| (key, node.id.as_str()))
+                })
+                .collect();
+            let rows = rows_by_tree_id(&crate::edb::read_edb_playlist_tree(&tx)?, |_, path| {
+                tree_id_by_key.get(&path.key()).map(|id| id.to_string())
+            });
+            edb_places = row_places(&pending.tree, nodes, &rows, "eDB")?;
+            // Track order first: it finds playlists by their path, which
+            // the places below may change.
+            let mut updated = 0;
             for (playlist_id, order) in &pending.tracks {
                 let names: HashSet<String> = edb_playlist_names(playlist_id, parsed)
                     .into_iter()
@@ -856,6 +935,7 @@ impl BackendService {
                     });
                 })?;
             }
+            updated += write_edb_playlist_places(&tx, &edb_places)?;
             tx.commit()?;
             session.close_edb()?;
             edb_changed = updated > 0;
@@ -864,18 +944,89 @@ impl BackendService {
             std::fs::write(path, bytes)?;
         }
 
-        // Nothing reaches the stick unless both databases now hold the same
-        // order for what the edit changed.
-        if let Some((_, bytes)) = &pdb
-            && databases.edb().is_some()
-            && (pdb_changed || edb_changed)
-        {
+        // Nothing reaches the stick unless the databases now hold what the
+        // edit asked for, the same in both.
+        if pdb_changed || edb_changed {
             on_progress(60, 100, &tr::usb_progress_order_edit_verify().render());
-            verify_saved_order(usb_root, pending, &parse_pdb_bytes(bytes)?)?;
+            let saved = pdb
+                .as_ref()
+                .map(|(_, bytes)| parse_pdb_bytes(bytes))
+                .transpose()?;
+            verify_saved_order(usb_root, pending, saved.as_ref(), &pdb_places, &edb_places)?;
         }
 
         on_progress(70, 100, &tr::usb_progress_order_edit_write_back().render());
         session.commit()?;
         Ok(pdb_changed || edb_changed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path(folders: &[&str], name: &str) -> PlaylistPath {
+        PlaylistPath {
+            folders: folders.iter().map(|f| f.to_string()).collect(),
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_move_into_a_folder_one_database_lacks_is_refused_there() {
+        let nodes = playlist_tree::build_usb_tree(
+            [(path(&[], "Sets"), 0)],
+            [
+                ("usb-pl-2".to_string(), path(&[], "Top"), 1),
+                ("usb-pl-3".to_string(), path(&["Sets"], "Warm"), 0),
+            ],
+        );
+        let sets = playlist_tree::folder_id(&["Sets".to_string()]);
+        let tree = PendingTree::default()
+            .moved(&nodes, "usb-pl-2", Placement::Inside(&sets))
+            .expect("into Sets");
+        // A database with all three rows: each placed, "Top" in "Sets".
+        let rows = HashMap::from([
+            (sets.clone(), 1),
+            ("usb-pl-2".to_string(), 2),
+            ("usb-pl-3".to_string(), 3),
+        ]);
+        let places = row_places(&tree, &nodes, &rows, "PDB").expect("placed");
+        assert_eq!(places[&2].parent, Some(1));
+        assert_eq!((places[&2].position, places[&3].position), (1, 0));
+        assert_eq!(places[&3].parent, None);
+        // One without the folder can't take "Top" into it.
+        let rows = HashMap::from([("usb-pl-2".to_string(), 2)]);
+        let err = row_places(&tree, &nodes, &rows, "eDB").expect_err("no Sets row");
+        let message = err.english();
+        assert!(
+            message.contains("Top") && message.contains("Sets") && message.contains("eDB"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn the_save_check_names_a_row_not_where_the_save_put_it() {
+        let row = |id, parent_id, sort_order| PdbPlaylistTreeRow {
+            id,
+            parent_id,
+            sort_order,
+            is_folder: false,
+            name: String::new(),
+        };
+        let place = |position, parent, name: &str| RowPlace {
+            position,
+            parent,
+            name: name.to_string(),
+        };
+        let places = HashMap::from([(2, place(1, Some(1), "Top")), (3, place(0, None, "Warm"))]);
+        // As placed: "Warm" keeps whatever folder it is in.
+        assert!(misplaced(&[row(2, 1, 1), row(3, 7, 0)], &places).is_empty());
+        // "Top" left in its old folder, though at its new place.
+        assert_eq!(misplaced(&[row(2, 0, 1), row(3, 1, 0)], &places), ["Top"]);
+        // A row that's gone, or at another place.
+        let mut names = misplaced(&[row(3, 1, 5)], &places);
+        names.sort();
+        assert_eq!(names, ["Top", "Warm"]);
     }
 }

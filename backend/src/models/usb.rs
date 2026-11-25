@@ -510,8 +510,9 @@ pub struct UsbOrderEditRequest {
     pub usb_root: Option<String>,
 }
 
-/// Moves a USB playlist to just before `before_playlist_id` in the pending
-/// playlist order, or to the end when that is `None`.
+/// Moves a USB playlist or folder in the pending playlist order: into a
+/// folder, before or after another item (into that item's folder), or to
+/// its own folder's end when none is given.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MoveUsbPlaylistRequest {
@@ -519,12 +520,15 @@ pub struct MoveUsbPlaylistRequest {
     pub usb_root: Option<String>,
     /// A playlist's or a folder's id (`UsbPlaylistTreeRow::id`).
     pub playlist_id: String,
-    /// The item (in the same folder) it goes before; none: the folder's end.
+    /// The item it goes before, in that item's folder.
     #[serde(default)]
     pub before_playlist_id: Option<String>,
-    /// Instead: the item (in the same folder) it goes after.
+    /// Instead: the item it goes after, in that item's folder.
     #[serde(default)]
     pub after_playlist_id: Option<String>,
+    /// Instead: the folder it goes into, at the end.
+    #[serde(default)]
+    pub into_folder_id: Option<String>,
 }
 
 /// One row of the USB view's playlist list: a folder or a playlist.

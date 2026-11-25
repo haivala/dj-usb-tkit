@@ -897,19 +897,28 @@ playlists, and the tracks in each of them, in a new order: the backend holds
 the pending order (`begin_usb_order_edit`, `move_usb_playlist`,
 `move_usb_playlist_track`, `sort_usb_playlist_tracks`) and
 `commit_usb_order_edit` writes it, after one backup, in one pass per
-database, each saved to the USB once. The list is the stick's tree, and an
-item moves only among its own folder's items: as rekordbox numbers them,
-each moved folder's items, folders and playlists together, get the places
-0..n in its new order.
+database, each saved to the USB once. The list is the stick's tree; an item
+moves within its folder or into another one (a folder with what it holds).
+As rekordbox and export number them, the items of each folder the edit
+changed, folders and playlists together, get the places 0..n in its new
+order, the folder an item left and the one it went to alike.
 
 Those places go to both databases: `t07.sort_order` for each item with a PDB
-row, through the same in-place byte patcher strict-repair order restoration
-uses (`patch_playlist_tree_sort_orders_in_place`), and eDB
-`playlist.sequenceNo` for each item with an eDB row, matched by folder path
-and name as the list read pairs them (`write_edb_playlist_order`). An item in
-only one database is reordered there. Before anything is written back, the
-staged copies are checked to agree: each moved playlist's place, by the parity
-report, and each moved folder's `sort_order` against its `sequenceNo`.
+row and, for a moved item, `t07.parent_id` (offset `0x00`; 0 at the top
+level), through the in-place byte patcher export uses for sort orders
+(`patch_playlist_tree_sort_orders_in_place`); and eDB `playlist.sequenceNo`
+and, for a moved item, `playlist.playlist_id_parent` (an integer, 0 at the
+top level, as export writes it). Each item's row in each database is found
+from the stick's tree before anything is written, folders by path and eDB
+playlists by their path key, since a move changes the paths the rows pair
+by. An item in only one database is placed there; a moved item whose new
+folder has no row in a database that holds the item stops the save before
+any write, pointing at the strict parity repair. A moved row ends up the
+same, field for field, as export writes an item in that folder
+(`edit_order_moves_write_the_rows_export_writes`), so moves need no hardware
+test of their own. Before anything is written back, the staged copies are
+checked: every placed row at its place and in its folder in each database,
+and each edited playlist's tracks in the same order, by the parity report.
 `fetch_usb_playlists` orders each folder's items by the PDB's places, and the
 eDB's for the items only it holds.
 

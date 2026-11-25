@@ -6,8 +6,10 @@
 //! column editor) as JSON.
 //!
 //! With a `<usb_spec.json>` (`{ usbRoot, usbName, brokenUsbRoot, playlists:
-//! [{ name, titles }] }`) it also names the USB `usbName` and exports those
-//! playlists to `usbRoot`, in order (recording each one's playlist id), and
+//! [{ name, titles, folder? }] }`) it also names the USB `usbName` and exports those
+//! playlists to `usbRoot`, in order (recording each one's playlist id), each
+//! made in the library folder `folder` when it has one (made once, at the top
+//! level; a playlist goes in at the folder's top), and
 //! adds the USB views' responses under `usb`: the USB playlists and their
 //! tracks, history, player menu and diagnostics, each export's progress
 //! messages and result, and -- for a copy of the USB at `brokenUsbRoot` with
@@ -132,6 +134,36 @@ fn main() {
         .unwrap_or_else(|e| fail("write output", e));
 }
 
+/// The playlist `spec` names (`{ name, folder? }`), made empty in the
+/// library: in the top-level folder `folder` when given, which is made the
+/// first time it's named.
+fn create_playlist(svc: &BackendService, spec: &Value) -> String {
+    let folder_id = spec["folder"].as_str().map(|name| {
+        let state = svc
+            .playlists_state()
+            .unwrap_or_else(|e| fail("playlists_state", e));
+        state
+            .folders
+            .iter()
+            .find(|folder| folder.name == name && folder.parent_id.is_none())
+            .map(|folder| folder.id.clone())
+            .unwrap_or_else(|| {
+                svc.create_playlist_folder(request(
+                    "create_playlist_folder",
+                    json!({ "name": name }),
+                ))
+                .unwrap_or_else(|e| fail("create_playlist_folder", e))
+                .folder_id
+            })
+    });
+    svc.create_playlist(request(
+        "create_playlist",
+        json!({ "name": spec["name"], "folderId": folder_id }),
+    ))
+    .unwrap_or_else(|e| fail("create_playlist", e))
+    .playlist_id
+}
+
 fn dump_usb(
     svc: &BackendService,
     spec: &Value,
@@ -152,9 +184,7 @@ fn dump_usb(
     let mut exports = serde_json::Map::new();
     for playlist in spec["playlists"].as_array().expect("playlists") {
         let name = playlist["name"].as_str().expect("playlist name");
-        let created = svc
-            .create_playlist(request("create_playlist", json!({ "name": name })))
-            .unwrap_or_else(|e| fail("create_playlist", e));
+        let playlist_id = create_playlist(svc, playlist);
         let track_ids = playlist["titles"]
             .as_array()
             .expect("titles")
@@ -164,7 +194,7 @@ fn dump_usb(
         svc.add_library_selection_to_playlist(request(
             "add_library_selection_to_playlist",
             json!({
-                "playlistId": created.playlist_id,
+                "playlistId": playlist_id,
                 "sourceRoots": [source_dir],
                 "trackIds": track_ids
             }),
@@ -176,7 +206,7 @@ fn dump_usb(
                 "export_to_usb",
                 json!({
                     "usbRoot": usb_root,
-                    "playlistId": created.playlist_id,
+                    "playlistId": playlist_id,
                     "options": {
                         "includeArtwork": true,
                         "includeAnalysis": true,
@@ -193,7 +223,7 @@ fn dump_usb(
         exports.insert(
             name.to_string(),
             json!({
-                "playlistId": created.playlist_id,
+                "playlistId": playlist_id,
                 "progress": progress,
                 "response": response("export_to_usb", result),
             }),
@@ -308,9 +338,7 @@ fn dump_batch_export(
         }),
     ))
     .unwrap_or_else(|e| fail("add_library_selection_to_playlist", e));
-    let empty = svc
-        .create_playlist(request("create_playlist", json!({ "name": spec["empty"] })))
-        .unwrap_or_else(|e| fail("create_playlist", e));
+    let empty = create_playlist(svc, &json!({ "name": spec["empty"] }));
     let overview = response(
         "get_batch_export_overview",
         svc.get_batch_export_overview(request(
@@ -321,7 +349,7 @@ fn dump_batch_export(
     // Asked after the change: the earlier dumps still have it up to date.
     let export_status = response("playlists_state", svc.playlists_state());
     json!({
-        "emptyPlaylistId": empty.playlist_id,
+        "emptyPlaylistId": empty,
         "overview": overview,
         "exportStatus": export_status,
     })
@@ -411,12 +439,7 @@ fn dump_audio_formats(
     );
 
     let playlist = &spec["playlist"];
-    let created = svc
-        .create_playlist(request(
-            "create_playlist",
-            json!({ "name": playlist["name"] }),
-        ))
-        .unwrap_or_else(|e| fail("create_playlist", e));
+    let playlist_id = create_playlist(svc, playlist);
     let track_ids = playlist["titles"]
         .as_array()
         .expect("titles")
@@ -426,7 +449,7 @@ fn dump_audio_formats(
     svc.add_library_selection_to_playlist(request(
         "add_library_selection_to_playlist",
         json!({
-            "playlistId": created.playlist_id,
+            "playlistId": playlist_id,
             "sourceRoots": [source_dir],
             "trackIds": track_ids
         }),
@@ -436,14 +459,14 @@ fn dump_audio_formats(
         "get_playlist_tracks",
         svc.get_playlist_tracks(request(
             "get_playlist_tracks",
-            json!({ "playlistId": created.playlist_id, "usbRoot": usb_root }),
+            json!({ "playlistId": playlist_id, "usbRoot": usb_root }),
         )),
     );
     let space = response(
         "get_playlist_export_space",
         svc.get_playlist_export_space(request(
             "get_playlist_export_space",
-            json!({ "playlistId": created.playlist_id, "usbRoot": usb_root }),
+            json!({ "playlistId": playlist_id, "usbRoot": usb_root }),
         )),
     );
     // Asked after the playlist exists: the dump beside the diagnostics predates it.
@@ -451,7 +474,7 @@ fn dump_audio_formats(
     json!({
         "allTicked": all_ticked,
         "unticked": unticked,
-        "playlistId": created.playlist_id,
+        "playlistId": playlist_id,
         "playlistTracks": tracks,
         "exportSpace": space,
         "exportStatus": export_status,

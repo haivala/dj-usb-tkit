@@ -183,5 +183,3 @@ and its PDB import counter (`lastRekordBoxLibraryImportReadCounter` /
 player has read such a library yet. Next time an eDB-only stick is near the
 Mixstream Pro, check that it opens the library without importing anything
 and shows the tracks, playlists and cues.
-
-## playlist reorder does no allow move to another folder in USB playlists

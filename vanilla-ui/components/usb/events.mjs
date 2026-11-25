@@ -233,7 +233,6 @@ export function bindUsbEvents(ctx) {
   bindTreeDragMove(el.usbPlaylists, {
     handleSelector: "[data-usb-drag-handle]",
     itemSelector: "li",
-    siblingsOnly: true,
     // It reports its own failure (and re-reads the real order).
     onMove: (item, target, placement) => moveUsbPlaylistInOrder(ctx, item, target, placement),
   });

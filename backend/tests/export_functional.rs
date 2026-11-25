@@ -5469,6 +5469,7 @@ fn usb_order_edit_persists_order_and_keeps_parity() {
                 playlist_id: id.clone(),
                 before_playlist_id: None,
                 after_playlist_id: None,
+                into_folder_id: None,
             }),
             "move playlist",
         );
@@ -8355,13 +8356,17 @@ fn usb_tree_id(backend: &BackendCommands, usb: &Path, name: &str, depth: usize) 
 }
 
 #[test]
-fn edit_order_moves_folders_and_playlists_within_their_folder_in_both_databases() {
+fn edit_order_moves_folders_and_playlists_in_both_databases() {
     let root = tempdir().expect("temp root");
     let usb = root.path().join("usb");
     let (backend, ids, _) = batch_export_setup(
         root.path(),
         &usb,
-        &[("Warm", &["One"]), ("Peak", &["Two"]), ("Top", &["Three"])],
+        &[
+            ("Warm", &["One"]),
+            ("Peak", &["Two"]),
+            ("Top", &["Three", "One"]),
+        ],
     );
     let sets = library_folder(&backend, "Sets", None);
     let inner = library_folder(&backend, "Inner", Some(&sets));
@@ -8393,6 +8398,7 @@ fn edit_order_moves_folders_and_playlists_within_their_folder_in_both_databases(
             playlist_id: item.to_string(),
             before_playlist_id: before.map(str::to_string),
             after_playlist_id: after.map(str::to_string),
+            into_folder_id: None,
         })
     };
     assert!(backend.begin_usb_order_edit(order()).ok, "begin order edit");
@@ -8406,11 +8412,19 @@ fn edit_order_moves_folders_and_playlists_within_their_folder_in_both_databases(
         mv(&inner_id, None, Some(&warm_id)).ok,
         "move Inner after Warm"
     );
-    let refused = mv(&top_id, Some(&warm_id), None);
-    assert!(!refused.ok, "moved into another folder: {refused:?}");
+    // Into another folder and back: nothing of it is left to save.
+    assert!(mv(&top_id, Some(&warm_id), None).ok, "move Top into Sets");
+    assert!(mv(&top_id, Some(&sets_id), None).ok, "move Top back");
+    let refused = backend.move_usb_playlist(MoveUsbPlaylistRequest {
+        usb_root: usb_root.clone(),
+        playlist_id: sets_id.clone(),
+        into_folder_id: Some(inner_id.clone()),
+        ..MoveUsbPlaylistRequest::default()
+    });
+    assert!(!refused.ok, "moved into a folder it holds: {refused:?}");
     assert_eq!(
         refused.error.expect("error").message,
-        "Items move only within their own folder"
+        "A folder can't go into itself or a folder it holds"
     );
     let expected = ["Top", "Sets", "  Warm", "  Inner", "    Peak"];
     assert_eq!(
@@ -8431,12 +8445,204 @@ fn edit_order_moves_folders_and_playlists_within_their_folder_in_both_databases(
         usb_playlist_names_in_order(&backend, &usb),
         ["Top", "Sets / Warm", "Sets / Inner / Peak"]
     );
-    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+    let diagnostics_pass = || {
+        let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+            usb_root: usb_root.clone(),
+        });
+        let report = diagnostics.data.expect("diagnostics data").data;
+        assert!(
+            matches!(report.overall_status, backend::models::DiagStatus::Pass),
+            "{report:#?}"
+        );
+    };
+    diagnostics_pass();
+
+    // Into other folders: "Inner", with what it holds, out to the top level
+    // after "Top"; "Top" into "Sets", at its end.
+    assert!(backend.begin_usb_order_edit(order()).ok, "begin order edit");
+    let inner_id = usb_tree_id(&backend, &usb, "Inner", 1);
+    let top_id = usb_tree_id(&backend, &usb, "Top", 0);
+    assert!(mv(&inner_id, None, Some(&top_id)).ok, "move Inner out");
+    let into = backend.move_usb_playlist(MoveUsbPlaylistRequest {
         usb_root: usb_root.clone(),
+        playlist_id: top_id.clone(),
+        into_folder_id: Some(sets_id.clone()),
+        ..MoveUsbPlaylistRequest::default()
     });
-    let report = diagnostics.data.expect("diagnostics data").data;
-    assert!(
-        matches!(report.overall_status, backend::models::DiagStatus::Pass),
-        "{report:#?}"
+    assert!(into.ok, "move Top into Sets: {into:?}");
+    // In the same edit, Top's tracks put the other way round: the save
+    // finds the playlist by its old path for them, then moves it.
+    let top_files = names(&usb_view_rows(&backend, &usb, &top_id));
+    assert_eq!(top_files.len(), 2, "{top_files:?}");
+    move_usb_row(&backend, &usb, &top_id, &top_files[1], Some(&top_files[0]));
+    let top_expected: Vec<String> = top_files.iter().rev().cloned().collect();
+    let expected = ["Inner", "  Peak", "Sets", "  Warm", "  Top"];
+    assert_eq!(
+        usb_tree_lines(&backend, &usb),
+        expected,
+        "pending tree shown"
     );
+    let committed = backend.commit_usb_order_edit(order());
+    assert!(committed.ok, "commit moves: {committed:?}");
+    assert_eq!(
+        usb_tree_lines(&backend, &usb),
+        expected,
+        "saved tree read back"
+    );
+    assert_eq!(
+        usb_playlist_names_in_order(&backend, &usb),
+        ["Inner / Peak", "Sets / Warm", "Sets / Top"]
+    );
+    assert_eq!(names(&usb_view_rows(&backend, &usb, &top_id)), top_expected);
+    let (pdb_order, distinct) = pdb_playlist_files(&usb, "Top");
+    assert_eq!(pdb_order, top_expected, "PDB order by entry_index");
+    assert!(distinct);
+    assert_eq!(
+        edb_playlist_files(&usb, "Top"),
+        top_expected,
+        "eDB order by sequenceNo"
+    );
+    diagnostics_pass();
+}
+
+/// A stick's playlist tree, row by row, with ids replaced by names so two
+/// sticks compare: the PDB's `t07` fields, and every column of the eDB's
+/// `playlist` rows.
+fn playlist_tree_shape(usb: &Path) -> (Vec<String>, Vec<String>) {
+    let db_dir = usb.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+    let parsed = parse_pdb(&db_dir.join("export.pdb")).expect("parse PDB");
+    let pdb_name = |id: u32| {
+        parsed
+            .playlist_tree
+            .iter()
+            .find(|row| row.id == id)
+            .map_or_else(|| id.to_string(), |row| row.name.clone())
+    };
+    let mut pdb: Vec<String> = parsed
+        .playlist_tree
+        .iter()
+        .map(|row| {
+            format!(
+                "{} in {} at {}, folder {}",
+                row.name,
+                pdb_name(row.parent_id),
+                row.sort_order,
+                row.is_folder
+            )
+        })
+        .collect();
+    pdb.sort();
+
+    let conn = open_edb(&db_dir.join("exportLibrary.db"));
+    let names: std::collections::HashMap<i64, String> = conn
+        .prepare("SELECT playlist_id, name FROM playlist")
+        .expect("prepare names")
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("query names")
+        .collect::<Result<_, _>>()
+        .expect("names");
+    let mut stmt = conn
+        .prepare("SELECT * FROM playlist")
+        .expect("prepare rows");
+    let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+    let mut edb: Vec<String> = stmt
+        .query_map([], |row| {
+            let fields: Vec<String> = columns
+                .iter()
+                .enumerate()
+                .map(|(at, column)| {
+                    let value: rusqlite::types::Value = row.get(at)?;
+                    let text = match (&value, column.as_str()) {
+                        (
+                            rusqlite::types::Value::Integer(id),
+                            "playlist_id" | "playlist_id_parent",
+                        ) => names.get(id).cloned().unwrap_or_else(|| id.to_string()),
+                        _ => format!("{value:?}"),
+                    };
+                    Ok(format!("{column}={text}"))
+                })
+                .collect::<Result<_, rusqlite::Error>>()?;
+            Ok(fields.join(" "))
+        })
+        .expect("query rows")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    edb.sort();
+    (pdb, edb)
+}
+
+/// What a move between folders writes has export's shape, so it needs no
+/// hardware test of its own: a stick fixed by Edit order holds the same
+/// playlist tree rows, in both databases, as one exported that way.
+#[test]
+fn edit_order_moves_write_the_rows_export_writes() {
+    // A library with "Sets", one playlist in it and one at the top level,
+    // exported to a stick.
+    let exported = |root: &Path, in_sets: &str| -> (BackendCommands, PathBuf) {
+        let usb = root.join("usb");
+        let (backend, ids, _) =
+            batch_export_setup(root, &usb, &[("Warm", &["One"]), ("Top", &["Two"])]);
+        let sets = library_folder(&backend, "Sets", None);
+        move_into_folder(&backend, &ids[in_sets], &sets);
+        let all = backend
+            .list_playlists()
+            .data
+            .expect("playlists")
+            .playlists
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
+        let result = export_batch(&backend, &usb, all, true, false);
+        assert!(result.ok, "batch export failed: {result:?}");
+        (backend, usb)
+    };
+    let wanted_root = tempdir().expect("temp root");
+    let (wanted_backend, wanted) = exported(wanted_root.path(), "Top");
+    let moved_root = tempdir().expect("temp root");
+    let (backend, moved) = exported(moved_root.path(), "Warm");
+    let wanted_lines = usb_tree_lines(&wanted_backend, &wanted);
+    assert_eq!(wanted_lines, ["Sets", "  Top", "Warm"]);
+    assert_eq!(usb_tree_lines(&backend, &moved), ["Sets", "  Warm", "Top"]);
+
+    // The other stick, put the same way by Edit order.
+    let usb_root = Some(moved.to_string_lossy().to_string());
+    let order = || UsbOrderEditRequest {
+        usb_root: usb_root.clone(),
+    };
+    assert!(backend.begin_usb_order_edit(order()).ok, "begin order edit");
+    let sets_id = usb_tree_id(&backend, &moved, "Sets", 0);
+    let warm_id = usb_tree_id(&backend, &moved, "Warm", 1);
+    let top_id = usb_tree_id(&backend, &moved, "Top", 0);
+    for (item, request) in [
+        (
+            "Top into Sets",
+            MoveUsbPlaylistRequest {
+                playlist_id: top_id,
+                into_folder_id: Some(sets_id.clone()),
+                ..MoveUsbPlaylistRequest::default()
+            },
+        ),
+        (
+            "Warm out after Sets",
+            MoveUsbPlaylistRequest {
+                playlist_id: warm_id,
+                after_playlist_id: Some(sets_id),
+                ..MoveUsbPlaylistRequest::default()
+            },
+        ),
+    ] {
+        let moved = backend.move_usb_playlist(MoveUsbPlaylistRequest {
+            usb_root: usb_root.clone(),
+            ..request
+        });
+        assert!(moved.ok, "move {item}: {moved:?}");
+    }
+    let committed = backend.commit_usb_order_edit(order());
+    assert!(committed.ok, "commit moves: {committed:?}");
+    assert_eq!(usb_tree_lines(&backend, &moved), wanted_lines);
+
+    let (wanted_pdb, wanted_edb) = playlist_tree_shape(&wanted);
+    let (moved_pdb, moved_edb) = playlist_tree_shape(&moved);
+    assert_eq!(moved_pdb, wanted_pdb, "PDB t07 rows");
+    assert_eq!(moved_edb, wanted_edb, "eDB playlist rows");
 }

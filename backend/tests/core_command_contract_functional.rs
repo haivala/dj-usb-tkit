@@ -844,6 +844,7 @@ fn usb_order_edit_moves_need_an_edit_and_ids_on_the_usb() {
             playlist_id: "usb-pl-name-not-on-this-usb".to_string(),
             before_playlist_id: None,
             after_playlist_id: None,
+            into_folder_id: None,
         })
     };
 

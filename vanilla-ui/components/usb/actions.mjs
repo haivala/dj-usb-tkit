@@ -1122,7 +1122,7 @@ export function renderUsbPlaylists(ctx) {
     const playlist = entry.kind === "playlist" ? byId.get(String(entry.id)) : null;
     if (entry.kind === "playlist" && !playlist) continue;
     const li = cloneTemplate(document, entry.kind === "folder" ? "tplUsbFolderItem" : "tplUsbPlaylistItem");
-    Object.assign(li.dataset, { treeKind: entry.kind, treeId: entry.id, treeParent: entry.parentId || "", depth: String(entry.depth) });
+    Object.assign(li.dataset, { treeKind: entry.kind, treeId: entry.id, depth: String(entry.depth) });
     li.style.setProperty("--nav-depth", String(entry.depth));
     const btn = li.firstElementChild;
     btn.querySelector(".playlist-label").textContent = entry.name;

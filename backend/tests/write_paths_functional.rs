@@ -323,6 +323,7 @@ fn run_every_write(rekordbox_shaped: bool) {
         playlist_id: c.id.clone(),
         before_playlist_id: Some(a.id.clone()),
         after_playlist_id: None,
+        into_folder_id: None,
     });
     assert!(moved.ok, "move playlist: {moved:?}");
     let moved = backend.move_usb_playlist_track(MoveUsbPlaylistTrackRequest {

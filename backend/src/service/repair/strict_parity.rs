@@ -127,67 +127,6 @@ pub(super) fn strict_repair_ordered_playlist_keys(
         .collect()
 }
 
-/// Patches the PDB playlists' `sort_order` (playlist_tree, t07) in `bytes`:
-/// `desired_sort_by_id` is keyed by PDB playlist id. Returns the rows patched.
-pub(crate) fn restore_pdb_playlist_sort_orders(
-    bytes: &mut [u8],
-    desired_sort_by_id: &HashMap<u32, u32>,
-) -> BackendResult<usize> {
-    if desired_sort_by_id.is_empty() {
-        return Ok(0);
-    }
-    let page_size = pdb_page_size(bytes)?;
-    let patches = desired_sort_by_id
-        .iter()
-        .map(
-            |(id, sort_order)| crate::pdb_writer::PdbPlaylistTreeSortOrderPatch {
-                id: *id,
-                sort_order: *sort_order,
-            },
-        )
-        .collect::<Vec<_>>();
-    crate::pdb_writer::patch_playlist_tree_sort_orders_in_place(bytes, &patches, page_size)
-}
-
-/// Writes a USB playlist order to the eDB, in the caller's transaction.
-/// `order_by_name` is keyed by playlist path key ([`PlaylistPath::key`]),
-/// because the USB playlist list pairs eDB rows with PDB rows by path, and a
-/// playlist may have a row in only one database; `folder_order` by the USB
-/// view's folder id (`playlist_tree::folder_id`), also a path. Returns the
-/// rows updated.
-///
-/// [`PlaylistPath::key`]: crate::pdb_reader::PlaylistPath::key
-pub(crate) fn write_edb_playlist_order(
-    tx: &rusqlite::Transaction<'_>,
-    order_by_name: &HashMap<String, u32>,
-    folder_order: &HashMap<String, u32>,
-) -> BackendResult<usize> {
-    if (order_by_name.is_empty() && folder_order.is_empty()) || !table_exists(tx, "playlist") {
-        return Ok(0);
-    }
-    let rows = crate::edb::read_edb_playlist_tree(tx)?;
-    let tree = crate::pdb_reader::PlaylistTree::new(&rows);
-    let mut updated = 0usize;
-    for row in &rows {
-        let path = tree.path(row);
-        let position = if row.is_folder {
-            let mut segments = path.folders;
-            segments.push(path.name);
-            folder_order.get(&crate::service::usb::playlist_tree::folder_id(&segments))
-        } else {
-            order_by_name.get(&path.key())
-        };
-        if let Some(position) = position {
-            updated += tx.execute(
-                "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 \
-                 AND sequenceNo IS NOT ?1",
-                params![i64::from(*position), i64::from(row.id)],
-            )?;
-        }
-    }
-    Ok(updated)
-}
-
 /// The eDB's playlists (not folders): `(playlist_id, path key)`.
 fn edb_playlist_keys(tx: &rusqlite::Transaction<'_>) -> BackendResult<Vec<(i64, String)>> {
     let rows = crate::edb::read_edb_playlist_tree(tx)?;

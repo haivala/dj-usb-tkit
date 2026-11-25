@@ -109,8 +109,9 @@ export async function settleUsbOrderEditBeforeLeaving(ctx) {
   return false;
 }
 
-// A playlist or folder row dropped before or after another row of its folder;
-// the backend answers with the list in its new order.
+// A playlist or folder row dropped before or after another row (into that
+// row's folder) or inside a folder; the backend answers with the list in its
+// new order, or refuses (a name the folder has, a folder into itself).
 export async function moveUsbPlaylistInOrder(ctx, item, target, placement) {
   const { state } = ctx;
   try {
@@ -119,6 +120,7 @@ export async function moveUsbPlaylistInOrder(ctx, item, target, placement) {
       playlistId: item.id,
       beforePlaylistId: placement === "before" ? target.id : null,
       afterPlaylistId: placement === "after" ? target.id : null,
+      intoFolderId: placement === "inside" ? target.id : null,
     });
     if (data.tree) state.usbPlaylistTree = data.tree;
     applyUsbOrderEdit(ctx, data.orderEdit);

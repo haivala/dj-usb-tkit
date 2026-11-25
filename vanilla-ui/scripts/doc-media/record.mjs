@@ -156,6 +156,13 @@ const PLAYLISTS = [
   { id: "pl-house", name: "House", titles: ["Frost Line", "Afterglow", "Pier Lights"] },
   { id: "pl-1", name: "Playlist 1", titles: [] },
 ];
+// Library folders, each with its playlists in its own order. Every view shows
+// them: the sidebar, the Add to… dialog and the Export playlists page, and on
+// the USB the ones exported (Warmup isn't), in the same folder.
+const PLAYLIST_FOLDERS = [
+  { name: "UG", playlists: ["Warmup", "Bass"] },
+];
+const folderOf = (name) => PLAYLIST_FOLDERS.find((folder) => folder.playlists.includes(name))?.name;
 // The USB's Audio formats for the transcode shot: only MP3 and AAC ticked,
 // as for older players. Two of Warmup's FLACs have an MP3 from Convert…
 // already; the other two export would convert.
@@ -223,12 +230,18 @@ function buildFixture(work) {
     usbRoot,
     usbName: USB_NAME,
     brokenUsbRoot,
-    playlists: PLAYLISTS.filter((p) => p.titles.length && !p.unexported).map(({ name, titles }) => ({ name, titles })),
+    // A folder's playlists go in at its top: the later one first.
+    playlists: PLAYLISTS.filter((p) => p.titles.length && !p.unexported)
+      .map(({ name, titles }) => ({ name, titles, folder: folderOf(name) })),
     audioFormats: {
       transcodeFolder,
       transcode: AUDIO_FORMATS.transcode,
       untick: AUDIO_FORMATS.untick,
-      playlist: { name: AUDIO_FORMATS.playlist, titles: PLAYLISTS.find((p) => p.name === AUDIO_FORMATS.playlist).titles },
+      playlist: {
+        name: AUDIO_FORMATS.playlist,
+        titles: PLAYLISTS.find((p) => p.name === AUDIO_FORMATS.playlist).titles,
+        folder: folderOf(AUDIO_FORMATS.playlist),
+      },
     },
     batchExport: BATCH_EXPORT,
   }));
@@ -284,6 +297,13 @@ function buildFixture(work) {
   fixture.playlists = PLAYLISTS.map(({ titles, ...playlist }) => ({
     ...playlist,
     tracks: fixture.tracks.filter((t) => titles.includes(t.title)),
+  }));
+  // The folders as the backend made them (id, texts), with their playlists'
+  // page ids in the folder's order.
+  const backendFolders = fixture.usb.batchExport.exportStatus.data.folders;
+  fixture.playlistFolders = PLAYLIST_FOLDERS.map(({ name, playlists }) => ({
+    ...backendFolders.find((folder) => folder.name === name),
+    playlistIds: playlists.map((member) => PLAYLISTS.find((p) => p.name === member).id),
   }));
   // Warmup as the backend read it for the USB with FLAC unticked: each row
   // with what export puts there (`exportFile`) and its transcodes then.
@@ -416,16 +436,17 @@ async function dragMarker(page, marker, dx, { shift = false, steps = 60, stepDel
   }
 }
 
-// Drags a row by its `handle` onto `target`, into its upper or lower half, slowly
-// enough for the animation (the rows move as it goes).
-async function dragRow(page, handle, target, before) {
+// Drags a row by its `handle` onto `target`'s top, middle or bottom (`at`):
+// before it, inside it (a folder) or after it. Slowly enough for the
+// animation (the rows move as it goes).
+async function dragRow(page, handle, target, at) {
   const [x0, y0] = await center(handle);
   await moveTo(page, x0, y0, 20);
   await page.waitForTimeout(250);
   await page.mouse.down();
   await page.mouse.move(x0, y0 + 6, { steps: 4 });
   const b = await target.boundingBox();
-  const y1 = b.y + b.height * (before ? 0.25 : 0.75);
+  const y1 = b.y + b.height * { top: 0.15, middle: 0.5, bottom: 0.85 }[at];
   const steps = 30;
   for (let i = 1; i <= steps; i += 1) {
     await page.mouse.move(x0, y0 + ((y1 - y0) * i) / steps);
@@ -703,11 +724,11 @@ function scenes(fixture) {
     },
     {
       // docs/PLAYLISTS_PLAYBACK.md: Edit order on the USB Playlists page -- a
-      // playlist dragged, a track dragged, a column sort made the order, then
-      // Save order. Opens House, Bass and Event 1 in turn, so each
-      // playlist's own tracks show.
+      // playlist dragged into the UG folder, a track dragged, a column sort
+      // made the order, then Save order. Opens House, Bass and Event 1 in
+      // turn, so each playlist's own tracks show.
       name: "usb-playlist-order",
-      caption: "Edit order on the USB: drag playlists and tracks, or sort by a column, then Save order",
+      caption: "Edit order on the USB: drag playlists into folders, drag tracks, or sort by a column, then Save order",
       editor: false,
       opts: {},
       viewport: WIDE_VIEWPORT,
@@ -730,13 +751,14 @@ function scenes(fixture) {
         await record(async () => {
           await page.waitForTimeout(1200);
           await clickOn(page, page.locator("#usbEditOrderBtn"), 1200);
-          // The last playlist to the top.
+          // The last playlist into the UG folder.
           const lastName = (await page.locator("#usbPlaylists li").last().locator(".playlist-label").textContent()).trim();
-          await dragRow(page, playlistRow(lastName).locator("[data-usb-drag-handle]"), page.locator("#usbPlaylists li").first(), true);
+          const folderRow = page.locator('#usbPlaylists li[data-tree-kind="folder"]', { hasText: "UG" });
+          await dragRow(page, playlistRow(lastName).locator("[data-usb-drag-handle]"), folderRow, "middle");
           await page.waitForTimeout(1200);
           // Bass's last track to the top.
           await openPlaylist("Bass");
-          await dragRow(page, trackRows.last().locator("[data-playlist-track-drag-handle]"), trackRows.first(), true);
+          await dragRow(page, trackRows.last().locator("[data-playlist-track-drag-handle]"), trackRows.first(), "top");
           await page.waitForTimeout(1200);
           // A column sort is the new order too.
           await clickOn(page, page.locator('[data-body-id="usbPlaylistTracks"] [role="columnheader"][data-sort-key="bpm"]'), 1600);
@@ -770,7 +792,7 @@ function scenes(fixture) {
           await clickOn(page, item("Album").locator("input"), 900);
           await clickOn(page, item("Fmt").locator("input"), 900);
           // BPM to the top, before Year.
-          await dragRow(page, item("BPM").locator("[data-track-column-drag-handle]"), item("Year"), true);
+          await dragRow(page, item("BPM").locator("[data-track-column-drag-handle]"), item("Year"), "top");
           await page.waitForTimeout(1200);
           await clickOn(page, page.locator("#trackColumnsDoneBtn"), 1400);
           await openNav(page, "usb-playlists");

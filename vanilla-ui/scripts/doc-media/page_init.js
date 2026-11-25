@@ -10,7 +10,8 @@
 // library exported to a USB (`fixture.usb`); `opts.brokenUsb` swaps in the
 // damaged copy's diagnostics. History sessions, which only a player writes,
 // are made from those USB tracks (`fixture.usbHistory`). Edit order on the
-// USB Playlists page keeps a pending order that Save order makes the USB's
+// USB Playlists page keeps a pending tree (playlists and folders moved, also
+// into other folders) and track order that Save order makes the USB's
 // (both answered here, as the backend would), and so does the column editor's
 // layout. Exporting replays
 // the real export's progress messages as job events; `opts.unexported`
@@ -25,7 +26,9 @@
 // puts there (`tracksForUsb`), and its estimate is the backend's. Convert…'s
 // folder and choices are the backend's too (`fixture.transcodes`).
 (() => {
-  const { tracks, detail, sourceFolders, playlists, usb, usbHistory, transcodes, uiTexts, trackColumns } = window.__DOC_GIF_FIXTURE__;
+  const {
+    tracks, detail, sourceFolders, playlists, playlistFolders, usb, usbHistory, transcodes, uiTexts, trackColumns,
+  } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
   const USB_ROOT = "/run/media/dj/Chiphead";
   // Never shown (the label is hidden); the update check just needs a value.
@@ -156,17 +159,57 @@
     const editedPlaylistIds = Object.keys(orderEdit.tracks).sort();
     const n = editedPlaylistIds.length;
     const count = `${n} playlist${n === 1 ? "" : "s"} changed`;
-    const editingText = orderEdit.playlists
+    const editingText = orderEdit.tree
       ? (n ? `Editing order: playlist order and ${count}` : "Editing order: playlist order changed")
       : (n ? `Editing order: ${count}` : "Editing order: nothing changed yet");
-    return { active: true, changed: !!orderEdit.playlists || n > 0, editedPlaylistIds, editingText };
+    return { active: true, changed: !!orderEdit.tree || n > 0, editedPlaylistIds, editingText };
   };
-  const orderEditAnswer = (statusText = "") => ok({ orderEdit: orderEditState(), statusText, warnings: [], warningText: "" });
+  // The USB's tree (`fetch_usb_playlists`' rows), pending or as saved.
+  const usbTree = () => orderEdit?.tree || usb.playlists.data.tree;
+  const orderEditAnswer = (statusText = "", extra = {}) =>
+    ok({ orderEdit: orderEditState(), statusText, warnings: [], warningText: "", ...extra });
+  // The USB's playlists in the tree's order, each named by its folders and
+  // own name, as the backend names them.
   const usbPlaylistItems = () => {
-    const items = usb.playlists.data.items;
-    if (!orderEdit?.playlists) return items;
-    const byId = new Map(items.map((item) => [item.id, item]));
-    return orderEdit.playlists.map((id) => byId.get(id));
+    const tree = usbTree();
+    const byId = new Map(usb.playlists.data.items.map((item) => [item.id, item]));
+    const pathOf = (row) => {
+      const parent = tree.find((other) => other.id === row.parentId);
+      return parent ? `${pathOf(parent)} / ${row.name}` : row.name;
+    };
+    return tree.filter((row) => row.kind === "playlist" && byId.has(row.id))
+      .map((row) => ({ ...byId.get(row.id), name: pathOf(row) }));
+  };
+  // `rows` with the item `id` (a folder with what it holds) moved as
+  // `move_usb_playlist` asks: before or after another row, in that row's
+  // folder, or at the end of a folder (`intoFolderId`, else its own).
+  const moveInTree = (rows, id, { beforePlaylistId, afterPlaylistId, intoFolderId }) => {
+    const blockEnd = (list, at) => {
+      let end = at + 1;
+      while (end < list.length && list[end].depth > list[at].depth) end += 1;
+      return end;
+    };
+    const start = rows.findIndex((row) => row.id === id);
+    const block = rows.slice(start, blockEnd(rows, start));
+    const rest = [...rows.slice(0, start), ...rows.slice(start + block.length)];
+    const index = (other) => rest.findIndex((row) => row.id === other);
+    const intoFolder = intoFolderId ?? (beforePlaylistId || afterPlaylistId ? null : block[0].parentId || null);
+    let at;
+    let parent;
+    if (intoFolder) {
+      const folder = index(intoFolder);
+      [at, parent] = [blockEnd(rest, folder), rest[folder]];
+    } else if (beforePlaylistId || afterPlaylistId) {
+      const target = index(beforePlaylistId || afterPlaylistId);
+      at = beforePlaylistId ? target : blockEnd(rest, target);
+      parent = rest.find((row) => row.id === rest[target].parentId);
+    } else {
+      [at, parent] = [rest.length, null];
+    }
+    const shift = (parent ? parent.depth + 1 : 0) - block[0].depth;
+    const moved = block.map((row, i) => ({ ...row, depth: row.depth + shift, ...(i === 0 ? { parentId: parent?.id || "" } : {}) }));
+    rest.splice(at, 0, ...moved);
+    return rest;
   };
   const usbPlaylistTrackItems = (id) => {
     const items = usb.playlistTracks[id].data.items;
@@ -270,6 +313,8 @@
   // list_playlists and every playlist change answer with them.
   const playlistsState = () => ({
     playlists: playlistRows(),
+    folders: folders.map(({ playlistIds, ...folder }) => folder),
+    sidebar: treeRows(),
     playlistUsbExportStatus: usbSelected
       ? exportStatusList() || []
       : playlists.map((playlist) => ({
@@ -286,10 +331,44 @@
   const listExternal = (source) =>
     ok({ items: external[source].map(({ id, name, kind, titles }) => ({ id, name, kind, trackCount: titles.length })) });
 
-  // The sidebar lists playlists newest first, i.e. reversed.
-  const playlistRows = () => [...playlists].reverse().map(({ id, name, tracks: items, imported }) => ({
+  // The library's folders (the backend's, each with its playlists' page ids
+  // in its order) and the sidebar's tree: the top level newest first, a
+  // folder where its newest playlist would be, its playlists in its order.
+  const folders = playlistFolders || [];
+  const folderOf = (id) => folders.find((folder) => folder.playlistIds.includes(id));
+  const treeRows = () => {
+    const rows = [];
+    const placed = new Set();
+    for (const { id } of [...playlists].reverse()) {
+      const folder = folderOf(id);
+      if (!folder) {
+        rows.push({ kind: "playlist", id, depth: 0 });
+      } else if (!placed.has(folder.id)) {
+        placed.add(folder.id);
+        rows.push({ kind: "folder", id: folder.id, depth: 0 });
+        for (const member of folder.playlistIds) rows.push({ kind: "playlist", id: member, depth: 1 });
+      }
+    }
+    return rows;
+  };
+  // The tree with every folder open, as the Add to… dialog and the Export
+  // playlists page list it: of the playlists `ids` (all by default), a
+  // folder ticking its own and left out when it holds none.
+  const listTree = (ids = playlists.map((p) => p.id)) => treeRows().flatMap((row) => {
+    if (row.kind === "playlist") return ids.includes(row.id) ? [{ ...row, name: "", playlistIds: [] }] : [];
+    const folder = folders.find((f) => f.id === row.id);
+    const held = folder.playlistIds.filter((id) => ids.includes(id));
+    return held.length ? [{ ...row, name: folder.name, playlistIds: held }] : [];
+  });
+  // The playlists in tree order.
+  const playlistRows = () => treeRows().filter((row) => row.kind === "playlist").map((row) => {
+    const { id, name, tracks: items, imported } = playlists.find((p) => p.id === row.id);
+    return playlistRow(id, name, items, imported);
+  });
+  const playlistRow = (id, name, items, imported) => ({
     id,
     name,
+    folderId: folderOf(id)?.id ?? null,
     source: "app",
     lastExportedAt: isExported(id, items, imported) ? exportedAt : null,
     lastExportedUsbRoot: isExported(id, items, imported) ? USB_ROOT : null,
@@ -302,7 +381,7 @@
       : "Not exported yet.",
     createdAt: exportedAt,
     updatedAt: exportedAt,
-  }));
+  });
 
   document.addEventListener("DOMContentLoaded", () => {
     const style = document.createElement("style");
@@ -395,7 +474,7 @@
               const noteText = { none: "", all: "Already in", some: `${contained} of ${ids.length} in` }[state];
               return { playlistId: id, name, contained, state, noteText };
             });
-            return ok({ selected: ids.length, items });
+            return ok({ selected: ids.length, items, tree: listTree() });
           }
           case "get_playlist_tracks": {
             const playlist = playlists.find((p) => p.id === r.playlistId);
@@ -431,7 +510,7 @@
             const order = playlistRows().map((p) => p.id);
             const { overview } = usb.batchExport;
             const rows = [...overview.data.rows].sort((a, b) => order.indexOf(a.playlistId) - order.indexOf(b.playlistId));
-            return { ...overview, data: { ...overview.data, rows } };
+            return { ...overview, data: { ...overview.data, rows, tree: listTree(rows.map((row) => row.playlistId)) } };
           }
           case "get_playlists_export_space": {
             const chosen = playlists.filter((p) => r.playlistIds.includes(p.id));
@@ -500,6 +579,7 @@
             return ok({
               ...usb.playlists.data,
               items: usbPlaylistItems().map((item) => ({ ...item, orderEdited: !!orderEdit?.tracks[item.id] })),
+              tree: usbTree(),
               orderEdit: orderEditState(),
               orderEditBlockedText: null,
               ...playlistsState(),
@@ -507,12 +587,12 @@
           case "fetch_usb_playlist_tracks":
             return ok({ ...usb.playlistTracks[r.id].data, items: usbPlaylistTrackItems(r.id) });
           case "begin_usb_order_edit":
-            orderEdit = { playlists: null, tracks: {} };
+            orderEdit = { tree: null, tracks: {} };
             return orderEditAnswer("Editing the order: drag playlists and tracks, or sort a playlist by a column. Nothing is written until Save order.");
           case "move_usb_playlist": {
-            const ids = moveBefore(usbPlaylistItems().map((item) => item.id), r.playlistId, r.beforePlaylistId);
-            orderEdit.playlists = ids.join() === usb.playlists.data.items.map((item) => item.id).join() ? null : ids;
-            return orderEditAnswer();
+            const tree = moveInTree(usbTree(), r.playlistId, r);
+            orderEdit.tree = JSON.stringify(tree) === JSON.stringify(usb.playlists.data.tree) ? null : tree;
+            return orderEditAnswer("", { tree });
           }
           case "move_usb_playlist_track":
             setPendingTracks(r.playlistId, moveBefore(usbPlaylistTrackItems(r.playlistId).map((t) => t.id), r.moveTrackId, r.beforeTrackId));
@@ -532,6 +612,7 @@
           case "commit_usb_order_edit": {
             await sleep(900);
             usb.playlists.data.items = usbPlaylistItems();
+            usb.playlists.data.tree = usbTree();
             for (const id of Object.keys(orderEdit.tracks)) usb.playlistTracks[id].data.items = usbPlaylistTrackItems(id);
             orderEdit = null;
             return orderEditAnswer("Order saved to the USB");

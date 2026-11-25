@@ -194,7 +194,9 @@ usb-order-edit-unchanged = Order unchanged: nothing to save
 usb-order-edit-cancelled = Order changes discarded
 # Why an order edit command was refused.
 usb-order-edit-not-active = Order editing isn't on for this USB
-usb-order-edit-move-other-folder = Items move only within their own folder
+usb-order-edit-move-into-playlist = Items go into folders, not into playlists
+usb-order-edit-move-into-itself = A folder can't go into itself or a folder it holds
+usb-order-edit-move-name-taken = There is already a playlist or folder named “{ $name }” there
 usb-order-edit-saving = The new order is being saved to the USB; wait for it to finish
 usb-write-busy = Another USB write is running; try again when it's done
 usb-order-edit-read-only = This USB can't be written to, so its order can't be changed
@@ -207,6 +209,7 @@ usb-edb-checkpoint-failed = The eDB couldn't finish writing its changes, so noth
 usb-order-edit-save-failed = Failed to save the order: { $error }
 # The save's check found the PDB and the eDB in a different order after writing; nothing was saved.
 # $playlists: the playlists, comma-separated.
+usb-order-edit-folder-missing = “{ $item }” can't go into “{ $folder }”: the USB's { $database } has no such folder, so nothing was saved to the USB. Run Preview Fixes in Health & Diagnostics and apply "Upgrade Export Data To Strict Parity", then save the order again.
 usb-order-edit-verify-failed = The new order came out different in the PDB and the eDB for { $playlists }, so nothing was saved to the USB. Run Preview Fixes in Health & Diagnostics and apply "Upgrade Export Data To Strict Parity", then save the order again.
 # A save wrote one database and then failed on the other. $saved, $failed: "PDB" or "eDB".
 # $error: why.

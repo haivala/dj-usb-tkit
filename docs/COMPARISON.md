@@ -64,10 +64,11 @@ force a clean resync when that's what's wanted instead.
 ## Reordering playlists directly on the USB
 
 The USB Playlists panel's Edit order puts the playlists and folders on an
-already-exported USB (each within its own folder), and the tracks in them, in a new order by drag-and-drop
+already-exported USB (also into other folders), and the tracks in them, in a new order by drag-and-drop
 or a column sort; Save order writes it (`commit_usb_order_edit`). The playlist
-order goes to `t07.sort_order` in PDB, in place, and to eDB
-`playlist.sequenceNo`; the track order to the PDB's t08 `entry_index` and the
+order goes to `t07.sort_order` (and `parent_id` for a move into another
+folder) in PDB, in place, and to eDB `playlist.sequenceNo` (and
+`playlist_id_parent`); the track order to the PDB's t08 `entry_index` and the
 eDB's `playlist_content.sequenceNo`. So the new order shows up on CDJs and in
 Rekordbox itself, not
 just in DJ USB Tkit — and strict-parity ordering checks stay green. See

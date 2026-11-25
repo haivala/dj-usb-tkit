@@ -1299,6 +1299,7 @@ fn playlist_tree_sort_patch_preserves_inactive_rows() {
         &[PdbPlaylistTreeSortOrderPatch {
             id: 10,
             sort_order: 7,
+            parent_id: None,
         }],
         PAGE_SIZE,
     )
@@ -1327,6 +1328,57 @@ fn playlist_tree_sort_patch_preserves_inactive_rows() {
     assert!(
         parsed.playlist_tree.iter().all(|row| row.id != 11),
         "inactive t07 row must remain inactive"
+    );
+}
+
+#[test]
+fn playlist_tree_place_patch_moves_a_row_to_another_folder_and_changes_nothing_else() {
+    let mut seed = build_seed_pdb_data();
+    for (id, parent_id, sort_order, is_folder, name) in [
+        (1, 0, 0, true, "Sets"),
+        (2, 0, 1, false, "Top"),
+        (3, 1, 0, false, "Warm"),
+    ] {
+        seed.playlist_tree.push(PdbPlaylistTreeRow {
+            id,
+            parent_id,
+            sort_order,
+            is_folder,
+            name: name.into(),
+        });
+    }
+    let mut bytes = write_pdb(&seed).expect("write seed with playlists");
+    let before = bytes.clone();
+    let (_page, top_abs, top_len, _slot) = playlist_tree_row_loc_by_id(&bytes, 2).expect("Top row");
+
+    let patched = patch_playlist_tree_sort_orders_in_place(
+        &mut bytes,
+        &[PdbPlaylistTreeSortOrderPatch {
+            id: 2,
+            sort_order: 1,
+            parent_id: Some(1),
+        }],
+        PAGE_SIZE,
+    )
+    .expect("patch t07 place");
+    assert_eq!(patched, 1);
+
+    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes).expect("parse patched pdb");
+    let top = parsed
+        .playlist_tree
+        .iter()
+        .find(|row| row.id == 2)
+        .expect("Top");
+    assert_eq!((top.parent_id, top.sort_order), (1, 1));
+    // Only the row's parent and sort order differ inside it.
+    let row_before = &before[top_abs..top_abs + top_len];
+    let row_after = &bytes[top_abs..top_abs + top_len];
+    let changed: Vec<usize> = (0..top_len)
+        .filter(|&at| row_before[at] != row_after[at])
+        .collect();
+    assert!(
+        changed.iter().all(|&at| at < 4 || (8..12).contains(&at)),
+        "changed row bytes {changed:?}"
     );
 }
 

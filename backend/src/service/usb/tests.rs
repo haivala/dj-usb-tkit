@@ -2189,6 +2189,7 @@ fn edit_playlist_order(service: &crate::service::BackendService, usb_root: &Path
                 playlist_id: id.clone(),
                 before_playlist_id: None,
                 after_playlist_id: None,
+                into_folder_id: None,
             })
             .expect("move playlist");
     }
@@ -2641,6 +2642,7 @@ fn usb_order_edit_refuses_changes_while_it_saves() {
                     playlist_id: playlist_id.clone(),
                     before_playlist_id: None,
                     after_playlist_id: None,
+                    into_folder_id: None,
                 })
                 .is_err()
         );

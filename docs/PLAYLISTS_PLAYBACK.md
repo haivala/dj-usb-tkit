@@ -142,7 +142,9 @@ button's "Append to..." label.
 
 The USB Playlists page shows a playlist on the stick in its own order. Browsing it, a column
 sort only changes the view, and there are no drag handles. **Edit order** (in the page's title
-row) turns on an edit of the whole stick's order: drag the playlists in the list, drag tracks
+row) turns on an edit of the whole stick's order: drag the playlists and folders in the list (a
+folder takes what it holds along; dropped on a row's top or bottom an item goes before or after
+it, in that row's folder, and on a folder's middle into it), drag tracks
 inside a playlist (not while searching), or click a column sort to make it that playlist's order.
 The backend holds the pending order and the pages show it; playlists whose track order changed
 get a mark. Nothing is written until **Save order**, which saves it all in one write (see

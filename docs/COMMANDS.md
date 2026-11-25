@@ -476,10 +476,13 @@ applies them as they come and never asks for the list again after a change.
   `changed`, `editedPlaylistIds`, `editingText`), each playlist's `orderEdited`, and
   `orderEditBlockedText` (why Edit order can't start, e.g. a read-only USB). Selecting another
   USB ends the edit.
-- `move_usb_playlist` — `{ usbRoot, playlistId, beforePlaylistId?, afterPlaylistId? }`, moves a
-  playlist or a folder (with what it holds) to just before or after another item of its own
-  folder (neither: to the folder's end) in the pending order, and answers with the new `tree`.
-  An item of another folder is refused.
+- `move_usb_playlist` — `{ usbRoot, playlistId, beforePlaylistId?, afterPlaylistId?,
+  intoFolderId? }`, moves a playlist or a folder (with what it holds) in the pending order: to
+  just before or after another item, in that item's folder, or to the end of `intoFolderId`
+  (none: to the end of its own folder), and answers with the new `tree`. Refused: a folder into
+  itself or a folder it holds, into a playlist, and a name the new folder already has (a playlist
+  or a folder of that name, names compared as the USB view pairs them). Ids stay the stick's for
+  the whole edit.
 - `move_usb_playlist_track` — `{ usbRoot, playlistId, moveTrackId, beforeTrackId }`, the same
   for one track of a playlist. A history list (`usb-h-…`) is refused.
 - `sort_usb_playlist_tracks` — `{ usbRoot, playlistId, sortBy, sortDir }`, makes a column sort

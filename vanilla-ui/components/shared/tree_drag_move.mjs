@@ -7,9 +7,8 @@ import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 // on its middle half) inside it. On drop `onMove(item, target, placement)`
 // gets `{ kind, id }` for both and "before" / "after" / "inside"; the caller
 // saves it and redraws. A folder can't land in itself or what it holds: those
-// rows show no drop place. `siblingsOnly` (the USB view's Edit order): an item
-// lands only before or after another item of its own folder (`data-tree-parent`).
-export function bindTreeDragMove(list, { handleSelector, itemSelector, onMove, siblingsOnly = false }) {
+// rows show no drop place.
+export function bindTreeDragMove(list, { handleSelector, itemSelector, onMove }) {
   let dragItem = null;
   let excluded = new Set();
   let drop = null;
@@ -50,14 +49,13 @@ export function bindTreeDragMove(list, { handleSelector, itemSelector, onMove, s
     event.preventDefault();
     autoScroller.update(event.clientY);
     const target = event.target.closest(itemSelector);
-    if (!target || excluded.has(target)
-      || (siblingsOnly && target.dataset.treeParent !== dragItem.dataset.treeParent)) {
+    if (!target || excluded.has(target)) {
       clearMark();
       return;
     }
     const rect = target.getBoundingClientRect();
     const at = (event.clientY - rect.top) / rect.height;
-    const placement = target.dataset.treeKind === "folder" && !siblingsOnly
+    const placement = target.dataset.treeKind === "folder"
       ? (at < 0.25 ? "before" : at > 0.75 ? "after" : "inside")
       : (at < 0.5 ? "before" : "after");
     if (drop?.target === target && drop.placement === placement) return;

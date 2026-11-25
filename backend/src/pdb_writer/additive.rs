@@ -697,10 +697,13 @@ pub(crate) struct PdbTrackRowMutation {
     pub changed_fields: Vec<&'static str>,
 }
 
+/// A `t07` row's place: its sort order among its folder's items and, when
+/// it moves to another folder, that folder's id (0: the top level).
 #[derive(Debug, Clone)]
 pub(crate) struct PdbPlaylistTreeSortOrderPatch {
     pub id: u32,
     pub sort_order: u32,
+    pub parent_id: Option<u32>,
 }
 
 /// Reason a diff was rejected as non-additive. Returned for diagnostics
@@ -1081,6 +1084,7 @@ pub(crate) fn compute_additive_diff(
             (existing.sort_order != new_row.sort_order).then_some(PdbPlaylistTreeSortOrderPatch {
                 id: new_row.id,
                 sort_order: new_row.sort_order,
+                parent_id: None,
             })
         })
         .collect();
@@ -2105,8 +2109,8 @@ pub(crate) fn patch_playlist_tree_sort_orders_in_place(
         ));
     }
 
-    let desired_by_id: std::collections::HashMap<u32, u32> =
-        patches.iter().map(|p| (p.id, p.sort_order)).collect();
+    let desired_by_id: std::collections::HashMap<u32, &PdbPlaylistTreeSortOrderPatch> =
+        patches.iter().map(|p| (p.id, p)).collect();
     let (_t07_ec, first, last) = table_ptr_fields(bytes, 7).ok_or_else(|| {
         BackendError::Internal(
             "PDB additive playlist-tree sort patch blocked: t07 pointer missing".into(),
@@ -2145,10 +2149,13 @@ pub(crate) fn patch_playlist_tree_sort_orders_in_place(
             let Some(playlist_id) = read_u32_le_at(bytes, row_abs + 12) else {
                 continue;
             };
-            let Some(new_sort_order) = desired_by_id.get(&playlist_id).copied() else {
+            let Some(patch) = desired_by_id.get(&playlist_id) else {
                 continue;
             };
-            bytes[row_abs + 8..row_abs + 12].copy_from_slice(&new_sort_order.to_le_bytes());
+            bytes[row_abs + 8..row_abs + 12].copy_from_slice(&patch.sort_order.to_le_bytes());
+            if let Some(parent_id) = patch.parent_id {
+                bytes[row_abs..row_abs + 4].copy_from_slice(&parent_id.to_le_bytes());
+            }
             patched_ids.insert(playlist_id);
             patched_pages.insert(page_idx);
         }
