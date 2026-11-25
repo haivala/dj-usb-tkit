@@ -89,6 +89,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         label: tr::migration_long_track_waveforms,
         run: drop_long_track_waveforms,
     },
+    Migration {
+        id: "0.6.7-stratum-v1-analysis",
+        phase: Phase::Startup,
+        label: tr::migration_stratum_v1_analysis,
+        run: drop_stratum_v1_analysis,
+    },
 ];
 
 impl BackendService {
@@ -417,20 +423,7 @@ fn drop_long_track_waveforms(
             })
             .collect()
     };
-    for (id, dat) in &tracks {
-        conn.execute(
-            "UPDATE tracks SET waveform_peaks_path = NULL WHERE id = ?1",
-            params![id],
-        )?;
-        let still_used: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tracks WHERE waveform_peaks_path = ?1)",
-            params![dat.to_string_lossy()],
-            |row| row.get(0),
-        )?;
-        if !still_used {
-            super::remove_bundle_files(dat);
-        }
-    }
+    drop_cached_bundles(&conn, &tracks)?;
 
     let transcodes: Vec<String> = {
         let mut stmt = conn.prepare(
@@ -463,6 +456,70 @@ fn drop_long_track_waveforms(
             "marked {} longer than the decode cap for analysis; dropped the waveforms of {}",
             counted(tracks.len(), "track", "tracks"),
             counted(transcodes.len(), "transcode", "transcodes")
+        ),
+    );
+    Ok(Outcome::Done)
+}
+
+/// Marks each track for analysis by clearing its `waveform_peaks_path`, and
+/// deletes its cached bundle (`.DAT` path) once no track uses it.
+fn drop_cached_bundles(
+    conn: &rusqlite::Connection,
+    tracks: &[(String, std::path::PathBuf)],
+) -> BackendResult<()> {
+    for (id, dat) in tracks {
+        conn.execute(
+            "UPDATE tracks SET waveform_peaks_path = NULL WHERE id = ?1",
+            params![id],
+        )?;
+        let still_used: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tracks WHERE waveform_peaks_path = ?1)",
+            params![dat.to_string_lossy()],
+            |row| row.get(0),
+        )?;
+        if !still_used {
+            super::remove_bundle_files(dat);
+        }
+    }
+    Ok(())
+}
+
+/// `0.6.7-stratum-v1-analysis`: a track whose BPM is still stratum's raw
+/// estimate (`bpm_analyzer = "stratum"`, analysis before `refine_bpm`, up to
+/// 0.3.3) loses its cached bundle and is marked for analysis, like a long
+/// track in `drop_long_track_waveforms`. The new analysis replaces that BPM,
+/// its beat grid and first beat (a `"stratum"` BPM is not one analysis keeps),
+/// so the library's bundles are all from the current analysis. Cues and edits
+/// stay. Bundles from rekordbox or a USB are not the app's and stay.
+fn drop_stratum_v1_analysis(
+    svc: &BackendService,
+    _: &mut dyn crate::progress::ProgressFn,
+) -> BackendResult<Outcome> {
+    let waveform_dir = svc.db.data_dir().join("analysis").join("waveforms");
+    let conn = svc.db.connect()?;
+    let tracks: Vec<(String, std::path::PathBuf)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, waveform_peaks_path FROM tracks
+             WHERE bpm_analyzer = 'stratum'
+               AND waveform_peaks_path IS NOT NULL AND waveform_peaks_path != ''",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.filter_map(Result::ok)
+            .filter_map(|(id, dat)| {
+                let dat =
+                    super::local_cache_bundle_dat(&waveform_dir, std::path::Path::new(dat.trim()))?;
+                Some((id, dat))
+            })
+            .collect()
+    };
+    drop_cached_bundles(&conn, &tracks)?;
+    crate::logging::debug(
+        "migrations",
+        format!(
+            "marked {} with stratum's raw BPM for analysis",
+            counted(tracks.len(), "track", "tracks")
         ),
     );
     Ok(Outcome::Done)
@@ -739,5 +796,73 @@ mod tests {
         }
         assert!(!long_transcode.dat_path.exists() && !long_transcode.ext_path.exists());
         assert!(short_transcode.dat_path.exists() && short_transcode.ext_path.exists());
+    }
+
+    // A track with stratum's raw BPM loses its cached bundle and needs
+    // analysis again; later analyzers, imports, user edits and bundles that
+    // aren't the app's stay.
+    #[test]
+    fn stratum_v1_analysis_is_dropped_and_its_tracks_need_analysis() {
+        let (dir, svc) = service();
+        let cache = dir.path().join("analysis").join("waveforms");
+        std::fs::create_dir_all(&cache).unwrap();
+        let foreign = dir.path().join("usb");
+        std::fs::create_dir_all(&foreign).unwrap();
+        let bundle = |dir: &std::path::Path, stem: &str| {
+            for ext in ["DAT", "EXT", "2EX"] {
+                std::fs::write(dir.join(format!("{stem}.{ext}")), b"x").unwrap();
+            }
+            dir.join(format!("{stem}.DAT"))
+        };
+        // (id, bundle, bpm_analyzer, dropped)
+        let cases = [
+            ("v1", bundle(&cache, "V1"), Some("stratum"), true),
+            ("v2", bundle(&cache, "V2"), Some("stratum-v2"), false),
+            ("essentia", bundle(&cache, "ESS"), Some("essentia"), false),
+            ("user", bundle(&cache, "USER"), Some("user"), false),
+            ("rekordbox", bundle(&cache, "RB"), Some("rekordbox"), false),
+            ("unmarked", bundle(&cache, "NONE"), None, false),
+            (
+                "foreign",
+                bundle(&foreign, "FOREIGN"),
+                Some("stratum"),
+                false,
+            ),
+        ];
+        let conn = svc.db.connect().unwrap();
+        for (id, dat, analyzer, _) in &cases {
+            conn.execute(
+                "INSERT INTO tracks (id, title, artist, file_path, bpm, bpm_analyzer,
+                   duration_ms, waveform_peaks_path, created_at, updated_at)
+                 VALUES (?1, ?1, 'A', ?2, 120.0, ?3, 300000, ?4, '1', '1')",
+                params![
+                    id,
+                    format!("/music/{id}.flac"),
+                    analyzer,
+                    dat.to_string_lossy()
+                ],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            drop_stratum_v1_analysis(&svc, &mut |_, _, _| {}).unwrap(),
+            Outcome::Done
+        );
+
+        for (id, dat, _, dropped) in &cases {
+            let (path, bpm): (Option<String>, f64) = conn
+                .query_row(
+                    "SELECT waveform_peaks_path, bpm FROM tracks WHERE id = ?1",
+                    params![id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(path.is_none(), *dropped, "{id}");
+            assert_eq!(bpm, 120.0, "{id}: the BPM stays until the analysis");
+            for ext in ["DAT", "EXT", "2EX"] {
+                assert_eq!(!dat.with_extension(ext).exists(), *dropped, "{id} {ext}");
+            }
+        }
     }
 }

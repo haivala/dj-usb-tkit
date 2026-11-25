@@ -1466,6 +1466,7 @@ migration-merge-usb-tracks = Merging duplicate USB tracks
 migration-beat-grids = Upgrading cached beat grids
 migration-mp3-seek = Adding MP3 seek data
 migration-long-track-waveforms = Redrawing the waveforms of long tracks
+migration-stratum-v1-analysis = Marking tracks with an outdated BPM analysis for analysis
 
 # Event Log warnings when a data upgrade fails. $migration: the upgrade (migration-*). $error: the reason.
 migration-warning-failed = { $migration } failed ({ $error }); it runs again next launch

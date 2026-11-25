@@ -144,6 +144,11 @@ stay in `db.rs` `migrate()` and are versioned by `schema_version`.
   deleted and `waveform_peaks_path` cleared, so the track needs analysis again; BPM,
   key, cues and edits stay. A transcode that long loses its waveform bundle, which
   export draws again. Bundles from rekordbox or a USB aren't the app's and stay.
+  `0.6.7-stratum-v1-analysis` does the same for a track whose BPM is still stratum's
+  raw estimate (`bpm_analyzer = "stratum"`, written up to 0.3.3): the new analysis
+  replaces that BPM, its beat grid and first beat, so every bundle in
+  `analysis/waveforms` is from the current analysis. A separate id, so it also runs
+  where `0.6.7-long-track-waveforms` already has.
 - **Background** migrations run through the `run_data_migrations` command. The frontend
   calls it once after the initial load, and it shows in the footer progress bar as a
   `migration` job. With nothing pending it returns at once and emits no job events. While
