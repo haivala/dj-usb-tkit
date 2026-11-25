@@ -437,35 +437,48 @@ impl BackendService {
             let (beat_grid_status, beat_grid_detail) =
                 diagnose_beat_grid_format(beat_grids.as_deref());
             note_stage("beat grid check");
-            if matches!(beat_grid_status, DiagStatus::Warn) {
+            // The window says how many; the Event Log names each track.
+            for grid in beat_grids.as_deref().into_iter().flatten() {
                 raw_warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.beat-grid-format",
-                    &beat_grid_detail,
+                    &tr::diagnostics_warning_beat_grid_outdated(&grid.track_path),
                 ));
             }
-            analysis_integrity.checks.push(DiagCheck::new(
+            let beat_grid_warns = matches!(beat_grid_status, DiagStatus::Warn);
+            let beat_grid_check = DiagCheck::new(
                 tr::diagnostics_check_beat_grid(),
                 beat_grid_status,
                 beat_grid_detail,
-            ));
-            let stretched =
-                crate::service::repair::tracks_with_maybe_stretched_waveforms(&usb_root, parsed);
+            );
+            analysis_integrity.checks.push(if beat_grid_warns {
+                beat_grid_check.with_link("event-log")
+            } else {
+                beat_grid_check
+            });
+            let stretched = self
+                .tracks_with_maybe_stretched_waveforms(&usb_root, parsed)
+                .unwrap_or_default();
             let (long_status, long_detail) = diagnose_long_track_waveforms(&stretched);
-            if matches!(long_status, DiagStatus::Warn) {
+            for row in &stretched {
                 raw_warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.long-track-waveforms",
-                    &long_detail,
+                    &tr::diagnostics_warning_long_waveform(&row.track_file_path),
                 ));
             }
-            analysis_integrity.checks.push(DiagCheck::new(
+            let long_check = DiagCheck::new(
                 tr::diagnostics_check_long_waveforms(),
                 long_status,
                 long_detail,
-            ));
+            );
+            analysis_integrity.checks.push(if stretched.is_empty() {
+                long_check
+            } else {
+                long_check.with_link("event-log")
+            });
             note_stage("long-track waveform check");
             analysis_integrity.status = DiagStatus::worst_of(
                 &analysis_integrity

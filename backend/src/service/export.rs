@@ -2486,7 +2486,14 @@ impl BackendService {
                 run.updated_at
             ],
         )?;
-        match append_export_log_record(usb_root, playlist, manifest) {
+        // With analysis files, every track's bundle got the library's
+        // waveforms (fresh, or synced onto a reused one).
+        match append_export_log_record(
+            usb_root,
+            playlist,
+            manifest,
+            manifest.options.include_analysis,
+        ) {
             // The next connect checks the drive holding this name has
             // this record, which a copy made before now doesn't.
             Ok(record) => {

@@ -2586,7 +2586,7 @@ impl BackendService {
                         usb_root,
                         &unindexed_playlist,
                         &unindexed_audio_files,
-                        session.edb_conn(),
+                        &mut session,
                         warnings,
                     )
                 })

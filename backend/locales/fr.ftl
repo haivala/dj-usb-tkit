@@ -532,10 +532,10 @@ diagnostics-check-path-agreement-history-only = { $count ->
 diagnostics-check-beat-grid = Format des beatgrids
 diagnostics-check-beat-grid-not-exported = aucun morceau de cette clé USB n'a été exporté par cette application
 diagnostics-check-beat-grid-current = toutes les beatgrids que cette application a écrites sur cette clé USB sont au format actuel
-diagnostics-check-beat-grid-outdated = Morceaux dont la beatgrid est dans un format obsolète que certains lecteurs (p. ex. le XDJ-AZ) refusent, si bien que le Beat Sync n'y est pas disponible : { $count } ; p. ex. { $examples } ; réexportez ou lancez la réparation (update_app_analysis_files) pour corriger
+diagnostics-check-beat-grid-outdated = Morceaux dont la beatgrid est dans un format obsolète que certains lecteurs (p. ex. le XDJ-AZ) refusent, si bien que le Beat Sync n'y est pas disponible : { $count } ; réexportez ou lancez la réparation (update_app_analysis_files) pour corriger. Voir le Journal des événements pour la liste.
 diagnostics-check-long-waveforms = Formes d'onde des morceaux longs
 diagnostics-check-long-waveforms-ok = aucun morceau de plus d'environ 9 minutes n'a de forme d'onde tracée par l'analyse jusqu'à 0.6.6
-diagnostics-check-long-waveforms-stretched = Morceaux de plus d'environ 9 minutes dont l'analyse jusqu'à 0.6.6 a tracé la forme d'onde étirée, si bien que le son apparaît plus tard qu'il ne joue et que la fin manque : { $count } ; p. ex. { $examples } ; lancez la réparation (update_app_analysis_files) pour corriger
+diagnostics-check-long-waveforms-stretched = Morceaux de plus d'environ 9 minutes dont l'analyse jusqu'à 0.6.6 a tracé la forme d'onde étirée, si bien que le son apparaît plus tard qu'il ne joue et que la fin manque : { $count } ; lancez la réparation (update_app_analysis_files) pour corriger. Voir le Journal des événements pour la liste.
 diagnostics-check-pdb-analysis = Références d'analyse PDB
 diagnostics-check-pdb-analysis-detail = { $with }/{ $total } lignes de morceaux avec chemin d'analyse ; { $refs ->
     [one] { $refs } référence de bundle unique
@@ -721,6 +721,8 @@ diagnostics-progress-resolving-playlist = Résolution de la playlist { $playlist
 
 diagnostics-warning-missing-audio = fichier audio indexé absent de la clé USB : { $path }
 diagnostics-warning-unindexed-audio = fichier audio non indexé : { $path }
+diagnostics-warning-beat-grid-outdated = beatgrid dans un format obsolète : { $path }
+diagnostics-warning-long-waveform = forme d'onde étirée par l'analyse jusqu'à 0.6.6 : { $path }
 diagnostics-warning-shared-analysis = fichier d'analyse partagé : { $path } utilisé par { $tracks }
 diagnostics-warning-history-only-track = morceau seulement dans l'historique : { $path } ({ $playlists })
 diagnostics-warning-history-only-track-unknown = morceau seulement dans l'historique : { $path } (playlist d'historique inconnue)

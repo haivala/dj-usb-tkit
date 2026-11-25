@@ -16,8 +16,20 @@ the additive export appends and patches instead of rewriting.
 - `repair_pdb_artist_name_layout`, `repair_pdb_track_string_alignment`,
   `repair_pdb_album_string_alignment`
 - `repair_pdb_t19_template_state` (export still rewrites an app-written `t19`)
-- ANLZ: `fix_beat_grid_header`, `add_missing_mp3_seek_data`,
-  `add_analysis_track_path`, `separate_shared_analysis`
+- ANLZ: `update_app_analysis_files`, which replaced `fix_beat_grid_header`,
+  `add_missing_mp3_seek_data`, `add_analysis_track_path` and
+  `separate_shared_analysis` and also replaces the waveforms the repairs and
+  analysis up to 0.6.6 drew coarse or stretched.
+- Revise how stretched waveforms are tracked, and handle it properly. Today
+  the stick's export log decides: a long track whose latest record is an
+  export without `waveformsSynced` (0.6.6 and earlier) is suspect until an
+  export syncs it or the repair appends a `waveform-redrawn` record listing
+  it (`waveforms_maybe_stretched`). That record is a marker in
+  a log made for exports: every reader of exports has to skip it, tracks are
+  known only by their stick path, and the "Long-track waveforms" check and
+  the repair depend on it. Before 1.0.0, replace it with a proper record of
+  what each stick's analysis files are (who drew them, with which version),
+  or drop the check and the repair along with the other old-version fixes.
 - strict parity's flattened-copy removal (`flattened_edb_copies`): top-level
   eDB copies of playlists in folders, which the repair wrote before it kept
   folders
@@ -117,21 +129,6 @@ Open points:
   writes, always with a track id. Merge them once the writer appends
   sessions, deciding what it writes for a row without a track id; the
   playlist tree and entry rows are already one type.
-
-## Gap: stretched waveforms of long tracks stay on USBs
-
-Analysis before 0.6.7 drew a track longer than its decode cap (about 9 minutes
-at 44.1 kHz) as its first part stretched over its whole length. The
-`0.6.7-long-track-waveforms` migration clears those from the local cache, so
-the tracks are analyzed again, but a USB that already holds such a track keeps
-its stretched waveform: export reuses the bundle on the stick
-(`existing_analysis_by_path` in `backend/src/service/export.rs`) and only
-re-applies cues and the beat grid. Seen on "Horse On Wheels" on CHIPHEAD32.
-
-Options: export replaces the waveform tags of a reused bundle from the local
-cache when they differ, or a diagnostics check finds bundles whose waveform
-doesn't match the local one. Either way the CDJ's own writes to that bundle
-(cues, `PVB2`) must survive.
 
 ## Possibility: copy cues added on a CDJ back to the library
 

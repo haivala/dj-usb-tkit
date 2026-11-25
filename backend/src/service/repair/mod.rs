@@ -77,7 +77,6 @@ pub use write_gate::{pdb_shape_problems, pdb_write_problems};
 #[cfg(test)]
 mod tests;
 
-pub(crate) use app_analysis::tracks_with_maybe_stretched_waveforms;
 use app_analysis::*;
 use audio_fixes::*;
 use damaged_playlists::*;

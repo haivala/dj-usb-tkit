@@ -376,37 +376,25 @@ pub(crate) fn detect_outdated_beat_grids(
 pub(super) fn diagnose_beat_grid_format(
     found: Option<&[OutdatedBeatGrid]>,
 ) -> (DiagStatus, crate::i18n::Text) {
-    let check = |status, detail: crate::i18n::Text| (status, detail);
     let Some(found) = found else {
-        return check(
+        return (
             DiagStatus::Pass,
             tr::diagnostics_check_beat_grid_not_exported(),
         );
     };
-    let outdated = found
-        .iter()
-        .map(|bundle| bundle.track_path.as_str())
-        .collect::<Vec<_>>();
-    if outdated.is_empty() {
-        return check(DiagStatus::Pass, tr::diagnostics_check_beat_grid_current());
+    if found.is_empty() {
+        return (DiagStatus::Pass, tr::diagnostics_check_beat_grid_current());
     }
-    check(
+    (
         DiagStatus::Warn,
-        tr::diagnostics_check_beat_grid_outdated(
-            outdated.len(),
-            outdated
-                .iter()
-                .take(3)
-                .copied()
-                .collect::<Vec<_>>()
-                .join(", "),
-        ),
+        tr::diagnostics_check_beat_grid_outdated(found.len()),
     )
 }
 
 /// The "Long-track waveforms" check: tracks longer than analysis up to
 /// 0.6.6 decoded (about 9 minutes) whose waveform it drew, stretched, and
-/// that no repair has replaced since. Found from the export log alone.
+/// that no repair has replaced since. Found from the export log alone. The
+/// tracks themselves go to the Event Log.
 pub(super) fn diagnose_long_track_waveforms(
     found: &[&crate::pdb_reader::PdbTrackRow],
 ) -> (DiagStatus, crate::i18n::Text) {
@@ -415,15 +403,7 @@ pub(super) fn diagnose_long_track_waveforms(
     }
     (
         DiagStatus::Warn,
-        tr::diagnostics_check_long_waveforms_stretched(
-            found.len(),
-            found
-                .iter()
-                .take(3)
-                .map(|row| row.track_file_path.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-        ),
+        tr::diagnostics_check_long_waveforms_stretched(found.len()),
     )
 }
 

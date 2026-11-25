@@ -108,14 +108,14 @@ impl BackendService {
 }
 
 /// Writes a USB file's new bundle from its [`StickAnalysis`] with the
-/// library's bundle writer, the `PPTH` naming `track_path`, and for a FLAC
-/// the `PVB2` the repairs have always added to the bundles they draw. No
-/// cues.
+/// library's bundle writer, the `PPTH` naming `track_path`, `cues`, and for
+/// a FLAC the `PVB2` the repairs have always added to the bundles they draw.
 pub(super) fn write_stick_bundle(
     analysis: &StickAnalysis,
     paths: &AnlzBundlePaths,
     track_path: &str,
     audio: &Path,
+    cues: &[crate::service::anlz::AnlzCue],
 ) -> Result<(), DrawError> {
     write_track_bundle(
         &TrackBundle {
@@ -124,7 +124,7 @@ pub(super) fn write_stick_bundle(
             bpm: analysis.core.bpm,
             duration_ms: analysis.duration_ms,
             first_beat_ms: analysis.core.first_beat_ms,
-            cues: &[],
+            cues,
         },
         paths,
         audio,
@@ -215,6 +215,9 @@ pub(super) struct AppBundleUpdate {
     pub(super) dat: PathBuf,
     /// Shares another track's bundle: gets its own, drawn from its audio.
     pub(super) own_bundle: bool,
+    /// The library track it is, for the cues of the bundle it gets of its
+    /// own (`own_bundle`): the shared one's cues are its owner's.
+    pub(super) library_track: Option<String>,
     pub(super) waveform: Option<(WaveformFault, WaveformSource)>,
     /// Its beat grid is in the pre-0.3.7 format.
     pub(super) grid: bool,
@@ -260,6 +263,8 @@ struct LibraryTrack {
     file_path: String,
     duration_ms: Option<i64>,
     waveform_peaks_path: Option<String>,
+    /// Its BPM came from rekordbox, so its analysis bundle did too.
+    rekordbox: bool,
 }
 
 /// The library, indexed the exact ways a USB track is matched to it.
@@ -283,7 +288,7 @@ impl LibraryIndex {
         let mut index = Self::default();
         let mut stmt = conn.prepare(
             "SELECT id, file_path, file_size_bytes, title, artist, duration_ms, \
-             waveform_peaks_path FROM tracks",
+             waveform_peaks_path, bpm_analyzer FROM tracks",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -292,6 +297,7 @@ impl LibraryIndex {
                     file_path: row.get(1)?,
                     duration_ms: row.get(5)?,
                     waveform_peaks_path: row.get(6)?,
+                    rekordbox: row.get::<_, Option<String>>(7)?.as_deref() == Some("rekordbox"),
                 },
                 row.get::<_, Option<i64>>(2)?,
                 row.get::<_, String>(3)?,
@@ -424,35 +430,40 @@ fn library_waveform_source(
 }
 
 /// `waveforms_maybe_stretched` of the stick's export log; none without one.
-fn maybe_stretched_fingerprints(usb_root: &Path) -> HashSet<String> {
-    crate::service::export_log::load_export_log(usb_root)
-        .ok()
-        .flatten()
-        .map(|log| crate::service::export_log::waveforms_maybe_stretched(&log))
-        .unwrap_or_default()
+/// A USB track's key in the export log: its stick path.
+fn log_key(row: &crate::pdb_reader::PdbTrackRow) -> String {
+    track_identity_key(&row.track_file_path, "", "", None)
 }
 
-fn is_maybe_stretched(
-    fingerprints: &HashSet<String>,
-    row: &crate::pdb_reader::PdbTrackRow,
-) -> bool {
-    longer_than_old_decode_cap(row)
-        && fingerprints.contains(&track_identity_key(&row.track_file_path, "", "", None))
-}
-
-/// The USB tracks whose waveform analysis up to 0.6.6 may have drawn
-/// stretched ([`WaveformCheck::maybe_stretched`]), for the diagnostics'
-/// "Long-track waveforms" check. Reads only the export log.
-pub(crate) fn tracks_with_maybe_stretched_waveforms<'p>(
-    usb_root: &Path,
-    parsed: &'p ParsedPdb,
-) -> Vec<&'p crate::pdb_reader::PdbTrackRow> {
-    let fingerprints = maybe_stretched_fingerprints(usb_root);
-    parsed
-        .tracks
-        .iter()
-        .filter(|row| is_maybe_stretched(&fingerprints, row))
-        .collect()
+impl BackendService {
+    /// The USB tracks whose waveform analysis up to 0.6.6 drew stretched
+    /// ([`WaveformCheck::stretched`]), for the diagnostics' "Long-track
+    /// waveforms" check: the same test the repair uses.
+    pub(crate) fn tracks_with_maybe_stretched_waveforms<'p>(
+        &self,
+        usb_root: &Path,
+        parsed: &'p ParsedPdb,
+    ) -> BackendResult<Vec<&'p crate::pdb_reader::PdbTrackRow>> {
+        // This install's export id, read only: with none it exported nothing.
+        let app_master_db_id = self
+            .db
+            .connect()?
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![SETTING_EXPORT_MASTER_DB_ID],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok());
+        let mut check = WaveformCheck::new(self, usb_root, parsed, app_master_db_id)?;
+        let mut found = Vec::new();
+        for row in &parsed.tracks {
+            if check.stretched(row)?.is_some() {
+                found.push(row);
+            }
+        }
+        Ok(found)
+    }
 }
 
 /// Whether a USB track is at least as long as analysis up to 0.6.6
@@ -476,6 +487,10 @@ pub(crate) struct WaveformCheck<'a> {
     /// exported, on whichever machine, and no repair has redrawn since
     /// (`waveforms_maybe_stretched`).
     maybe_stretched: HashSet<String>,
+    /// Every track the export log lists (`fingerprints_ever_exported`): the
+    /// only ones whose waveform this app can have drawn. The rest came from
+    /// rekordbox and are never checked.
+    exported: HashSet<String>,
     library_conn: r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
     data_dir: PathBuf,
     /// Loaded at the first track that needs it.
@@ -489,12 +504,16 @@ impl<'a> WaveformCheck<'a> {
         parsed: &'a ParsedPdb,
         app_master_db_id: Option<u32>,
     ) -> BackendResult<Self> {
-        let maybe_stretched = maybe_stretched_fingerprints(usb_root);
+        let log = crate::service::export_log::load_export_log(usb_root)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         Ok(Self {
             usb_root,
             parsed,
             app_master_db_id,
-            maybe_stretched,
+            maybe_stretched: crate::service::export_log::waveforms_maybe_stretched(&log),
+            exported: crate::service::export_log::fingerprints_ever_exported(&log),
             library_conn: service.db.connect()?,
             data_dir: service.db.data_dir(),
             library: None,
@@ -507,14 +526,38 @@ impl<'a> WaveformCheck<'a> {
     /// exported it with no repair redrawing it since. The bundle alone can't
     /// tell: a stretched waveform has the right length and entry count.
     fn maybe_stretched(&self, row: &crate::pdb_reader::PdbTrackRow) -> bool {
-        is_maybe_stretched(&self.maybe_stretched, row)
+        longer_than_old_decode_cap(row) && self.maybe_stretched.contains(&log_key(row))
     }
 
-    /// Where the library keeps `row`'s waveform, when it is in the library.
+    /// Whether this app exported `row`, by the export log.
+    fn exported(&self, row: &crate::pdb_reader::PdbTrackRow) -> bool {
+        self.exported.contains(&log_key(row))
+    }
+
+    /// The library track `row` is, matched exactly ([`LibraryIndex::find`]).
+    fn library_track_id(
+        &mut self,
+        row: &crate::pdb_reader::PdbTrackRow,
+    ) -> BackendResult<Option<String>> {
+        if self.library.is_none() {
+            self.library = Some(LibraryIndex::load(&self.library_conn)?);
+        }
+        let audio =
+            crate::service::usb::root::resolve_usb_side_path(self.usb_root, &row.track_file_path);
+        Ok(self
+            .library
+            .as_ref()
+            .and_then(|index| index.find(self.parsed, row, self.app_master_db_id, audio.as_deref()))
+            .map(|(track, _)| track.id.clone()))
+    }
+
+    /// Where the library keeps `row`'s waveform, when it is in the library,
+    /// and whether that bundle is rekordbox's: the track's BPM came from
+    /// rekordbox.
     fn library_source(
         &mut self,
         row: &crate::pdb_reader::PdbTrackRow,
-    ) -> BackendResult<Option<WaveformSource>> {
+    ) -> BackendResult<Option<(WaveformSource, bool)>> {
         if self.library.is_none() {
             self.library = Some(LibraryIndex::load(&self.library_conn)?);
         }
@@ -525,22 +568,28 @@ impl<'a> WaveformCheck<'a> {
             .as_ref()
             .and_then(|index| index.find(self.parsed, row, self.app_master_db_id, audio.as_deref()))
             .and_then(|(track, transcode)| {
-                library_waveform_source(&self.library_conn, &self.data_dir, track, transcode)
+                let source =
+                    library_waveform_source(&self.library_conn, &self.data_dir, track, transcode)?;
+                Some((source, track.rekordbox))
             }))
     }
 
     /// Where a [`Self::maybe_stretched`] track's new waveform comes from:
-    /// the library's when it has the track, else the stick's audio.
-    fn stretched(
+    /// the library's when it has the track, else the stick's audio. `None`
+    /// when the library's bundle for it is rekordbox's: export copied that
+    /// one to the stick, and it was never stretched.
+    pub(crate) fn stretched(
         &mut self,
         row: &crate::pdb_reader::PdbTrackRow,
     ) -> BackendResult<Option<WaveformSource>> {
         if !self.maybe_stretched(row) {
             return Ok(None);
         }
-        Ok(Some(
-            self.library_source(row)?.unwrap_or(WaveformSource::Draw),
-        ))
+        Ok(match self.library_source(row)? {
+            Some((_, true)) => None,
+            Some((source, false)) => Some(source),
+            None => Some(WaveformSource::Draw),
+        })
     }
 
     /// What `row`'s bundle at `dat` needs instead of its waveform, if
@@ -551,11 +600,17 @@ impl<'a> WaveformCheck<'a> {
         row: &crate::pdb_reader::PdbTrackRow,
         dat: &Path,
     ) -> BackendResult<Option<(WaveformFault, WaveformSource)>> {
+        // Only tracks this app exported: the rest came from rekordbox.
+        if !self.exported(row) {
+            return Ok(None);
+        }
         let repair_drawn = read_anlz_chunks(&dat.with_extension("EXT"), &[*b"PWV3"])
             .and_then(|ext| pwv3_stretched_from_bins(&ext, REPAIR_WAVEFORM_BINS_UP_TO_0_6_6))
             == Some(true);
         if repair_drawn {
-            let source = self.library_source(row)?.unwrap_or(WaveformSource::Draw);
+            let source = self
+                .library_source(row)?
+                .map_or(WaveformSource::Draw, |(source, _)| source);
             return Ok(Some((WaveformFault::RepairDrawn, source)));
         }
         Ok(self
@@ -646,6 +701,10 @@ impl BackendService {
         let mut waveforms = WaveformCheck::new(self, usb_root, parsed, app_master_db_id)?;
         for row in &parsed.tracks {
             if non_owners.contains(&row.id) {
+                let library_track = waveforms.library_track_id(row)?;
+                if let Some(update) = updates.get_mut(&row.id) {
+                    update.library_track = library_track;
+                }
                 continue;
             }
             let Some(dat) = resolve(row) else {
@@ -968,7 +1027,28 @@ impl BackendService {
                     ext_path: ext,
                     twoex_path: twoex,
                 };
-                if let Err(err) = write_stick_bundle(&analysis, &paths, &update.track_path, &audio)
+                // The library's cues, timed on the stick's file: a transcode's
+                // audio starts its offset later.
+                let cues = match &update.library_track {
+                    Some(id) => {
+                        let conn = self.db.connect()?;
+                        let offset =
+                            crate::service::transcode_export::transcode_offset_for_usb_file(
+                                &conn, id, &audio,
+                            )?
+                            .unwrap_or(0);
+                        crate::service::cues::anlz_cues_for_track(&conn, id)?
+                            .into_iter()
+                            .map(|mut cue| {
+                                cue.position_ms = cue.position_ms.saturating_add(offset);
+                                cue
+                            })
+                            .collect()
+                    }
+                    None => Vec::new(),
+                };
+                if let Err(err) =
+                    write_stick_bundle(&analysis, &paths, &update.track_path, &audio, &cues)
                 {
                     let err = match err {
                         DrawError::Write(err) => err,

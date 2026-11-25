@@ -4955,6 +4955,22 @@ fn log_export_as_pre_versioning(usb: &Path) {
     fs::write(&log_path, serde_json::to_string(&value).unwrap()).expect("write log");
 }
 
+/// The link of the Analysis integrity check labelled `label`.
+fn analysis_check_link(backend: &BackendCommands, usb: &Path, label: &str) -> Option<String> {
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    diagnostics
+        .data
+        .expect("diagnostics data")
+        .data
+        .analysis_integrity
+        .checks
+        .into_iter()
+        .find(|c| c.label == label)
+        .and_then(|c| c.link)
+}
+
 fn analysis_check(backend: &BackendCommands, usb: &Path, label: &str) -> Option<(String, String)> {
     let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -5006,11 +5022,23 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
     log_export_as_pre_versioning(&usb);
     let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
     assert_eq!(status, "Warn");
+    // The window says how many; the Event Log names the track.
     assert!(
         detail.starts_with("Tracks with a beat grid in an outdated format")
             && detail.contains("reject, so Beat Sync is unavailable on them: 1;")
-            && detail.contains(&track_path),
+            && detail.ends_with("See Event Log for the list.")
+            && !detail.contains(&track_path),
         "{detail}"
+    );
+    assert!(
+        diagnostics_warnings(&backend, &usb)
+            .contains(&format!("beat grid in an outdated format: {track_path}")),
+        "{:#?}",
+        diagnostics_warnings(&backend, &usb)
+    );
+    assert_eq!(
+        analysis_check_link(&backend, &usb, "Beat grid format").as_deref(),
+        Some("event-log")
     );
 
     // Once fixed, the old export record alone isn't enough to flag it, and
@@ -5048,8 +5076,27 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
     fs::write(&dat_path, &old_dat).expect("write DAT");
     fs::write(&log_path, "not json").expect("write log");
     let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
-    assert_eq!(status, "Warn");
-    assert!(detail.contains(&track_path), "{detail}");
+    assert_eq!(status, "Warn", "{detail}");
+    assert!(
+        diagnostics_warnings(&backend, &usb)
+            .contains(&format!("beat grid in an outdated format: {track_path}"))
+    );
+}
+
+/// The Event Log lines a diagnosis of `usb` writes.
+fn diagnostics_warnings(backend: &BackendCommands, usb: &Path) -> Vec<String> {
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
+    diagnostics
+        .data
+        .expect("diagnostics data")
+        .data
+        .warnings
+        .into_iter()
+        .map(|warning| warning.message)
+        .collect()
 }
 
 // ── update_app_analysis_files: MP3 seek data / add_missing_flac_seek_data ───────────────────────────────────────────────────
@@ -6027,7 +6074,19 @@ fn use_real_usb_bundles(usb: &Path) -> Vec<backend::pdb_reader::PdbTrackRow> {
 
 #[test]
 fn repair_gives_tracks_sharing_an_analysis_file_their_own_in_one_pass() {
-    let (_root, backend, usb, _target, _control) = setup_two_playlist_strict_parity_fixture();
+    let (root, backend, usb, _target, _control) = setup_two_playlist_strict_parity_fixture();
+    // Each library track has a memory cue at 5 s: a track given a bundle of
+    // its own gets its library cues there.
+    let library = rusqlite::Connection::open(root.path().join("data").join("backend.db"))
+        .expect("open library");
+    library
+        .execute(
+            "INSERT INTO track_cues (id, track_id, position_ms, is_memory, created_at, updated_at) \
+             SELECT 'cue-' || id, id, 5000, 1, 'now', 'now' FROM tracks",
+            [],
+        )
+        .expect("seed cues");
+    drop(library);
     let pdb_path = vendor_db_dir(&usb).join("export.pdb");
     let tracks = use_real_usb_bundles(&usb);
     assert_eq!(tracks.len(), 2);
@@ -6066,6 +6125,21 @@ fn repair_gives_tracks_sharing_an_analysis_file_their_own_in_one_pass() {
     assert!(ids.is_empty(), "{ids:?}");
     let parsed = parse_pdb(&pdb_path).expect("parse pdb");
     assert_ne!(parsed.tracks[0].anlz_path, parsed.tracks[1].anlz_path);
+    let separated = parsed
+        .tracks
+        .iter()
+        .filter(|track| track.anlz_path != a.anlz_path)
+        .collect::<Vec<_>>();
+    assert!(!separated.is_empty());
+    for track in separated {
+        let dat = fs::read(usb.join(track.anlz_path.trim_start_matches('/'))).expect("read DAT");
+        let cues = backend::service::anlz::read_cues_from_anlz(&dat);
+        assert!(
+            cues.iter().any(|cue| cue.position_ms == 5000),
+            "{}: {cues:?}",
+            track.track_file_path
+        );
+    }
     for track in &parsed.tracks {
         let dat = usb.join(track.anlz_path.trim_start_matches('/'));
         for file in [dat.clone(), dat.with_extension("EXT")] {
@@ -6368,6 +6442,17 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
         data.data.failed_fixes.is_empty(),
         "{:#?}",
         data.data.failed_fixes
+    );
+    // Added through the export's own path, so the export log lists it as
+    // this app's, like an exported track.
+    let log = fs::read_to_string(
+        usb.join(".dj-usb-tkit")
+            .join("dj_usb_tkit_export_log.v1.json"),
+    )
+    .expect("export log");
+    assert!(
+        log.contains("path:/contents/stray artist/stray album/99 unindexed stray.mp3"),
+        "{log}"
     );
 
     // Both databases now carry the playlist with the stray file; the
@@ -7668,8 +7753,14 @@ fn long_waveforms_check(backend: &BackendCommands, usb: &Path) -> (String, Strin
 /// 0.6.6: its export is one whose waveform may be stretched), with a
 /// detailed waveform in the library.
 fn setup_long_track() -> (TempDir, BackendCommands, PathBuf, PathBuf, PathBuf) {
+    let (root, backend, usb, dat, library_dat, _playlist) = setup_long_track_in_playlist();
+    (root, backend, usb, dat, library_dat)
+}
+
+/// [`setup_long_track`], with the name of the playlist it was exported in.
+fn setup_long_track_in_playlist() -> (TempDir, BackendCommands, PathBuf, PathBuf, PathBuf, String) {
     use backend::service::anlz::{build_anlz_2ex_file, build_anlz_dat_file, build_anlz_ext_file};
-    let (root, backend, usb, _playlist) = setup_clean_strict_parity_fixture_with_length(600_000);
+    let (root, backend, usb, playlist) = setup_clean_strict_parity_fixture_with_length(600_000);
     let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
     assert_eq!(parsed.tracks[0].duration_seconds, Some(600));
     let conn = rusqlite::Connection::open(root.path().join("data").join("backend.db"))
@@ -7731,7 +7822,20 @@ fn setup_long_track() -> (TempDir, BackendCommands, PathBuf, PathBuf, PathBuf) {
     )
     .expect("write 2EX");
     assert_ne!(detail_waveform(&dat), detail_waveform(&library_dat));
-    (root, backend, usb, dat, library_dat)
+    // The export as 0.6.6 and earlier logged it: without `waveformsSynced`.
+    let log_path = usb
+        .join(".dj-usb-tkit")
+        .join("dj_usb_tkit_export_log.v1.json");
+    let log = fs::read_to_string(&log_path).expect("export log");
+    let mut value: serde_json::Value = serde_json::from_str(&log).expect("parse log");
+    for record in value["records"].as_array_mut().expect("records") {
+        record
+            .as_object_mut()
+            .expect("record")
+            .remove("waveformsSynced");
+    }
+    fs::write(&log_path, serde_json::to_string(&value).unwrap()).expect("write log");
+    (root, backend, usb, dat, library_dat, playlist)
 }
 
 fn export_log_modes(usb: &Path) -> Vec<String> {
@@ -7754,7 +7858,23 @@ fn a_long_track_old_versions_drew_stretched_is_redrawn_once_and_logged() {
     let (_root, backend, usb, dat, library_dat) = setup_long_track();
     let (status, detail) = long_waveforms_check(&backend, &usb);
     assert_eq!(status, "Warn", "{detail}");
-    assert!(detail.contains(": 1;"), "{detail}");
+    // The window says how many; the Event Log names the track.
+    assert!(
+        detail.contains(": 1;") && !detail.contains("/Contents/"),
+        "{detail}"
+    );
+    let track_path = parse_pdb(&vendor_db_dir(&usb).join("export.pdb"))
+        .expect("parse pdb")
+        .tracks[0]
+        .track_file_path
+        .clone();
+    assert!(diagnostics_warnings(&backend, &usb).contains(&format!(
+        "waveform stretched by analysis up to 0.6.6: {track_path}"
+    )));
+    assert_eq!(
+        analysis_check_link(&backend, &usb, "Long-track waveforms").as_deref(),
+        Some("event-log")
+    );
 
     apply_app_analysis_fix(&backend, &usb);
     assert_eq!(detail_waveform(&dat), detail_waveform(&library_dat));
@@ -7797,4 +7917,60 @@ fn a_long_track_is_redrawn_on_a_usb_with_only_an_edb() {
     assert_eq!(detail_waveform(&dat), detail_waveform(&library_dat));
     let (status, detail) = long_waveforms_check(&backend, &usb);
     assert_eq!(status, "Pass", "{detail}");
+}
+
+#[test]
+fn exporting_again_puts_the_library_waveform_on_a_reused_bundle() {
+    let (_root, backend, usb, dat, library_dat, playlist_name) = setup_long_track_in_playlist();
+    let (status, detail) = long_waveforms_check(&backend, &usb);
+    assert_eq!(status, "Warn", "{detail}");
+
+    let playlist_id = backend
+        .list_playlists()
+        .data
+        .expect("playlists")
+        .playlists
+        .into_iter()
+        .find(|p| p.name == playlist_name)
+        .expect("playlist")
+        .id;
+    let export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        }),
+        sort: None,
+    });
+    assert!(export.ok, "export failed: {export:?}");
+
+    // The stick's bundle, reused, now shows the library's waveform, and the
+    // export logged that it synced it: nothing left to repair.
+    assert_eq!(detail_waveform(&dat), detail_waveform(&library_dat));
+    let (status, detail) = long_waveforms_check(&backend, &usb);
+    assert_eq!(status, "Pass", "{detail}");
+    let preview = preview_repair(&backend, &usb);
+    let reasons = preview
+        .warnings
+        .iter()
+        .filter(|w| w.code == "usb.diagnostics.app-analysis")
+        .map(|w| w.message.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        !reasons
+            .iter()
+            .any(|line| line.contains("waveform stretched")),
+        "{reasons:#?}"
+    );
+    // What's left is the fixture's own: its MP3 bundle has an empty seek
+    // index, which the same fix adds.
+    assert!(
+        reasons
+            .iter()
+            .all(|line| line.ends_with("(no MP3 seek data)")),
+        "{reasons:#?}"
+    );
 }

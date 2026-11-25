@@ -342,7 +342,11 @@ track has rows in `track_cues` or a user-set `first_beat_ms`, the copied
 `.DAT` / `.EXT` are passed through `apply_analysis_edits_to_anlz` (after the
 `PPTH` injection) so the exported bundle carries the current cue list and beat
 grid — including on the "reuse an on-USB bundle" retain path
-(`ensure_analysis_bundle_ppth`). **Each hot cue is written twice**: a memory
+(`ensure_analysis_bundle_ppth`). That path also puts the library bundle's
+waveform chunks on the reused bundle, so the stick shows the library's
+waveform (one an earlier version drew stretched is replaced); every other
+chunk, including what players wrote, is kept, and an unchanged file isn't
+rewritten. The export's log record says so (`waveformsSynced`). **Each hot cue is written twice**: a memory
 point (`PCPT`/`PCP2` with `hot_cue = 0`) and a hot-cue pad (`hot_cue = 1..8` by
 position order), so a CDJ surfaces it both in the CALL/memory list and on a pad.
 The optional **playback-start cue** (`is_playback_start`) is the exception: it

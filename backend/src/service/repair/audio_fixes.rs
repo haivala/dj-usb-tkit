@@ -749,7 +749,7 @@ impl BackendService {
                 twoex_path: base_dir.join("ANLZ0000.2EX"),
             };
             let result = analysis.and_then(|analysis| {
-                write_stick_bundle(&analysis, &paths, &target.track_path, &source_audio)
+                write_stick_bundle(&analysis, &paths, &target.track_path, &source_audio, &[])
             });
             let (code, line) = match result {
                 Ok(()) => {
@@ -933,7 +933,7 @@ impl BackendService {
         usb_root: &std::path::Path,
         playlist_name: &str,
         files: &[String],
-        edb_conn: Option<&mut rusqlite::Connection>,
+        session: &mut staging::UsbWriteSession<'_>,
         warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<(usize, usize, usize)> {
         let local_conn = self.db.connect()?;
@@ -1013,7 +1013,7 @@ impl BackendService {
                     ext_path: ext_path.clone(),
                     twoex_path,
                 };
-                if write_stick_bundle(&analysis, &paths, rel, &abs).is_ok() {
+                if write_stick_bundle(&analysis, &paths, rel, &abs, &[]).is_ok() {
                     analysed += 1;
                     detected_key = analysis.core.key;
                 }
@@ -1138,80 +1138,57 @@ impl BackendService {
             tracks: manifest_tracks,
         };
 
-        // Same order as export: eDB first, then the PDB takes its playlist id
-        // and sort order. Additive (no mirror), so an existing playlist of the
-        // same name is appended to rather than replaced. All or nothing, and
-        // only the staged copies: the eDB transaction commits after the
-        // staged PDB is written, and the repair run writes both back once.
-        let pdb_path = staging::required_pdb(usb_root)?;
-        let mut handle = EdbRw::shared_or_open(edb_conn, usb_root);
-        let tx = match handle.as_mut().map(EdbRw::conn) {
-            Some(conn) => Some(conn.transaction()?),
-            None => {
-                warnings.push(logging::log_text(
-                    Level::Warn,
-                    "usb-repair",
-                    "usb.repair.unindexed-audio.edb-open-failed",
-                    &tr::repair_warning_unindexed_edb_unavailable(),
-                ));
-                None
-            }
+        // The real export's own path into the repair's staged copies: the eDB
+        // first (its playlist id and sort order go to the PDB), then the PDB,
+        // each the stick has; then the export log's record, so these tracks
+        // are known as this app's like any exported ones. Additive (no
+        // mirror): a playlist of that name is appended to.
+        use crate::service::usb::staging::UsbDatabasesExt as _;
+        let databases = session.databases()?;
+        let edb_identity = if databases.edb().is_some() {
+            let written = crate::service::export_helpers::write_edb_playlists_in(
+                session,
+                &[EdbPlaylistWrite {
+                    playlist: &playlist,
+                    manifest: &manifest,
+                    mirror_playlist_entries: false,
+                    identity: None,
+                    placement: PlaylistPlacement::MoveToFront,
+                    folders: None,
+                }],
+            )?;
+            written.first().map(|w| {
+                (
+                    u32::try_from(w.playlist_id).ok(),
+                    u32::try_from(w.sort_order).ok(),
+                )
+            })
+        } else {
+            None
         };
-        let (edb_identity, t19_property) = match tx.as_ref() {
-            Some(tx) => {
-                let written = write_edb_playlists_in_tx(
-                    tx,
-                    &[EdbPlaylistWrite {
-                        playlist: &playlist,
-                        manifest: &manifest,
-                        mirror_playlist_entries: false,
-                        identity: None,
-                        placement: PlaylistPlacement::MoveToFront,
-                        folders: None,
-                    }],
-                )?;
-                let identity = written.first().map(|w| {
-                    (
-                        u32::try_from(w.playlist_id).ok(),
-                        u32::try_from(w.sort_order).ok(),
-                    )
-                });
-                (identity, t19_property_from_conn(tx))
-            }
-            None => (None, None),
-        };
-        let (playlist_id, sort_order) = edb_identity.unwrap_or((None, None));
-        let build = build_pdb_for_playlists(
-            usb_root,
-            &[PdbPlaylistWrite {
-                playlist: &playlist,
-                manifest: &manifest,
-                mirror_playlist_entries: false,
-                row_id: None,
-                playlist_id,
-                sort_order,
-                placement: PlaylistPlacement::MoveToFront,
-                folders: None,
-            }],
-            t19_property,
-            false,
-            &[],
-        )?;
-        std::fs::write(&pdb_path, &build.bytes)?;
-        if let Some(tx) = tx
-            && let Err(err) = tx.commit()
-        {
-            if let Err(restore_err) = std::fs::write(&pdb_path, &build.before) {
-                logging::debug(
-                    "usb-repair",
-                    format!(
-                        "adding unindexed audio: eDB commit failed ({err}) and the staged PDB could \
-                         not be put back ({restore_err}): {}",
-                        pdb_path.display()
-                    ),
-                );
-            }
-            return Err(err.into());
+        if databases.pdb().is_some() {
+            let (playlist_id, sort_order) = edb_identity.unwrap_or((None, None));
+            crate::service::export_helpers::write_pdb_playlists_in(
+                session,
+                &[PdbPlaylistWrite {
+                    playlist: &playlist,
+                    manifest: &manifest,
+                    mirror_playlist_entries: false,
+                    row_id: None,
+                    playlist_id,
+                    sort_order,
+                    placement: PlaylistPlacement::MoveToFront,
+                    folders: None,
+                }],
+            )?;
+        }
+        if let Err(err) = crate::service::export_log::append_export_log_record(
+            usb_root, &playlist, &manifest, false,
+        ) {
+            logging::debug(
+                "usb-repair",
+                format!("USB export log append skipped: {err}", err = err.english()),
+            );
         }
         Ok((manifest.tracks.len(), analysed, without_analysis))
     }

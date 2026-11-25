@@ -458,19 +458,41 @@ pub fn ensure_analysis_bundle_ppth(
     // clears cues, and an already-correct bundle is a no-op via
     // `write_bytes_if_different`.
     let edits = anlz_edits_from_export_track(track, cues.as_slice());
+    // The waveforms too: the library's bundle is what the stick shows, so a
+    // waveform an earlier version drew wrong (stretched, coarse) is replaced
+    // once the library has drawn it again. Only the waveform chunks change;
+    // what players wrote stays.
+    let library = library_bundle_files(track);
 
-    for path in [&dat_path, &ext_path] {
-        let bytes = std::fs::read(path)?;
+    for (path, library) in [(&dat_path, &library[0]), (&ext_path, &library[1])] {
+        let bytes = with_library_waveforms(std::fs::read(path)?, library.as_deref());
         let out = apply_analysis_edits_to_anlz(&ensure_ppth_chunk(&bytes, track_path), &edits);
         write_bytes_if_different(path, &out, closer)?;
     }
     // The `.2EX` is optional (see `bundle_usable`).
     if twoex_path.is_file() {
-        let bytes = std::fs::read(&twoex_path)?;
+        let bytes = with_library_waveforms(std::fs::read(&twoex_path)?, library[2].as_deref());
         let with_ppth = ensure_ppth_chunk(&bytes, track_path);
         write_bytes_if_different(&twoex_path, &with_ppth, closer)?;
     }
     Ok(())
+}
+
+/// The `.DAT`, `.EXT` and `.2EX` of the track's library bundle, as far as
+/// they read; `waveform_peaks_path` may name any of them.
+fn library_bundle_files(track: &ExportTrackData) -> [Option<Vec<u8>>; 3] {
+    let Some(path) = track.waveform_peaks_path.as_deref().map(Path::new) else {
+        return [None, None, None];
+    };
+    ["DAT", "EXT", "2EX"].map(|ext| std::fs::read(path.with_extension(ext)).ok())
+}
+
+/// `bytes` (a stick bundle file) with the waveform chunks of `library` (the
+/// same file of the library's bundle), when it has any and both walk.
+fn with_library_waveforms(bytes: Vec<u8>, library: Option<&[u8]>) -> Vec<u8> {
+    library
+        .and_then(|library| crate::service::anlz::with_waveform_chunks(&bytes, library))
+        .unwrap_or(bytes)
 }
 
 /// Copy a track's analysis bundle onto the USB. Returns the USB-relative
