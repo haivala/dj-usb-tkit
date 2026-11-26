@@ -14,6 +14,73 @@ Scanning also flags a WAV-specific hardware compatibility issue: some Pioneer CD
 
 Analysis engine selection is user-controlled from Settings. The default engine is `stratum`. The optional `essentia` engine can be enabled after runtime assets are installed, and analysis requests then use the selected engine for BPM/key detection.
 
+### The analysis pipeline
+
+Every analysis in the app, of a library track or of a file on a USB that a
+repair draws, goes through the same steps. Nothing is guessed or copied from
+elsewhere: each value comes from the track's own audio, unless it's one the
+analysis keeps (step 1).
+
+1. **What's kept.** Before anything is decoded, `kept_analysis_values`
+   decides what the run leaves alone. A first analysis (the track has no
+   waveform yet) keeps a BPM or key you set, or one imported from rekordbox
+   or Mixxx (sources `user`, `rekordbox`, `mixxx`), and an edited or imported
+   first beat (see "Analyze and Reanalyze" below). A reanalysis keeps
+   nothing. With a BPM kept and no key wanted, nothing is detected: the audio
+   is only decoded and the first beat placed.
+2. **Decode, once.** `decode_audio_with_waveform` reads the file one time,
+   mixed down to mono (rodio first, Symphonia when rodio can't read it). A
+   file with no decodable audio fails here; it's never drawn from its raw
+   bytes. The track's length comes from its metadata.
+3. **Waveform, from all of the audio.** While decoding, `WaveformAccumulator`
+   splits every sample into three bands with 2nd-order Butterworth filters
+   (low under 350 Hz, high over 1000 Hz, mid what's left) and fills one bin
+   per stretch of the track: its peak, the RMS of each band and how often the
+   signal crosses zero. The bin count follows the length,
+   `max(2400, ceil(seconds × 150) + 4)`, so each bin covers the same time on
+   any track, and the whole track is drawn however long it is. A file with no
+   known length gets no waveform rather than one stretched to a made-up
+   length. These bins become rekordbox's waveform chunks (`PWAV`, `PWV2`–
+   `PWV7`) and the track table's small waveform; see `docs/WAVEFORMS.md`.
+4. **The first pieces reach the screen.** As soon as the decode is done the
+   row gets its cover (the file's embedded art, else a cover image in its
+   folder or the one above, saved as a thumbnail), its waveform and its length, before the slow part.
+5. **BPM and key.** Only the first 24M samples (about 9 minutes at 44.1 kHz,
+   `BPM_KEY_MAX_SAMPLES`) are kept for detection, to bound memory. The
+   selected engine detects from them (`detect_bpm_key`): `stratum` in Rust,
+   or `essentia` in its own runner, which fails the track rather than falling
+   back to stratum. stratum's raw BPM is then refined and its first beat
+   placed again, as "Stratum BPM and first beat" below describes, within the
+   BPM range set in Settings.
+6. **First beat.** A kept first beat stays. With a kept BPM, the first beat is
+   placed from the audio at that BPM (`first_beat_secs`); otherwise the
+   engine's first beat is used. When the audio gives none (silence), the old
+   one stays.
+7. **Analysis files.** `write_track_bundle`, the one writer of a new analysis
+   bundle, writes the `.DAT`, `.EXT` and `.2EX` with the waveform, the beat
+   grid built from the BPM and first beat, and the cues, plus an MP3's seek
+   index (`PVBR`) when it can be reproduced exactly. A library track's bundle
+   goes to the app's `analysis/waveforms` folder, with no cues: the next save
+   or export puts them in. Export copies these files to the USB; see
+   `docs/USB_EXPORT.md`.
+8. **Saved, with where each value came from.** The coordinator saves the
+   result in one transaction per track: BPM with `bpm_analyzer` (the engine
+   and its version, `stratum-v2` or `essentia`), key with `key_source`, first
+   beat with `first_beat_ms_source = 'estimated'` when this run placed it,
+   length, cover and the analysis files' path. A kept value keeps its source,
+   so the app always knows whether a value is its own detection, yours or an
+   import's. The row then gets its BPM and key.
+
+A failure in one track (a file that won't decode, a detection that fails) is
+reported for that track and the job goes on with the rest. A USB repair runs
+steps 2–7 through the same coordinator (`analyze_audio_files`), writing the
+bundle on the USB with the stick's own cues and track path, and for a FLAC its
+seek index (`PVB2`); a track whose BPM can't be found there still gets its
+waveform, with no beat grid. A transcode gets
+only steps 2, 3 and 7, its own waveform on its own timeline. How the
+coordinator schedules tracks, and the memory and worker limits, are under
+"Batch concurrency model" below.
+
 ### Analysis engine matrix
 
 | Engine | Runtime | Default | Typical use |
@@ -31,12 +98,13 @@ minutes, so the right one stands out. Each tempo is scored on the beat and
 on its 2× and 4× subdivisions, which keeps the score sharp when a backbeat
 falls half a beat off (drum & bass analyzed at 87 instead of 174).
 
-1. **Tempo family.** stratum's estimate is compared with its 3/2, 3/4, 2/3
-   and 4/3 relatives inside the analysis BPM range; a relative replaces it
-   only when it scores clearly higher (`TEMPO_FAMILY`: 8× for 3/2 and 3/4,
-   whose subdivisions also line up with stratum's own beats, 2.5× for the
-   others). Halving and doubling are never done: at those, every onset
-   still lands on the grid and the score can't tell which is right.
+1. **Tempo family.** stratum's estimate is compared with its 3/2, 3/4, 2/3,
+   4/3, 5/4 and 4/5 relatives inside the analysis BPM range (5/4: 156 for a
+   125 BPM track); a relative replaces it only when it scores clearly higher
+   (`TEMPO_FAMILY`: 8× for 3/2 and 3/4, whose subdivisions also line up with
+   stratum's own beats, 2.5× for the others). Halving and doubling are never
+   done: at those, every onset still lands on the grid and the score can't
+   tell which is right.
 2. **Precise tempo.** Every tempo within ±2 BPM is tried in 0.01 steps. The
    best one must score at least 0.06 and 1.5× anything 0.5 BPM or more away;
    the nearest whole or half BPM is used instead when it scores at least 0.9
@@ -92,8 +160,10 @@ analyzed (has its waveform); the buttons' tooltips say the same:
 - **Reanalyze** in the selection bar (Library and app playlists): every
   selected track gets the fresh analysis, even one never analyzed before, so
   imported or edited values are replaced (`reanalyze` on
-  `analyze_new_tracks`). Filling in only what's missing stays with the
-  header's Analyze Library and the playlist's Analyze Missing Tracks.
+  `analyze_new_tracks`). A selected track in a source folder that isn't in the
+  library yet is added first, as its own Analyze button does. Filling in only
+  what's missing stays with the header's Analyze Library and the playlist's
+  Analyze Missing Tracks.
 
 The rule lives in one place, `kept_analysis_values` (`service/analysis.rs`).
 
@@ -162,6 +232,9 @@ to `'user'`; an import sets `'rekordbox'` or `'mixxx'`. Like the BPM and key,
 a first analysis keeps an edited first beat, and an imported one when the BPM
 imported with it is kept; a reanalysis places a new one. Every first beat an
 analysis places is stored as `'estimated'`, even when it lands on the old value.
+A key the analysis detects is stored with the engine as its source
+(`key_source`), so a later rekordbox or Mixxx import asks before replacing it
+instead of taking it for its own; a kept key keeps its source.
 See `docs/CUE_EDITOR.md`, `docs/APP_DATA_MODEL.md` (TrackCue) and `docs/USB_EXPORT.md`.
 
 Waveform output has two resolutions. The frontend receives a downsampled preview (`2400` bins), but local `DAT/EXT/2EX` cache files are generated from detail-resolution waveform data: `max(2400, ceil(duration_seconds * 150) + 4)`. This keeps `PWV3`, `PWV5`, and `PWV7` dense enough for CDJ detailed waveform views while avoiding large UI payloads. See `docs/WAVEFORMS.md`.

@@ -54,7 +54,9 @@ that's missing them, without replacing a year or genre already set.
 When `materialize_usb_track_row` creates or matches a local `tracks` row for a
 USB track, `import_anlz_cues_for_track` reads cue points from the on-USB
 `.EXT` (preferred, for colour + comment) or `.DAT` (`read_cues_from_anlz`) and
-seeds `track_cues`, and seeds `tracks.first_beat_ms` from the `PQTZ`/`PQT2`
+seeds `track_cues`. A hot cue's colour is its palette colour when it has one,
+else the app's colour nearest its RGB: a CDJ-2000NXS2 writes only the RGB,
+after the comment. It also seeds `tracks.first_beat_ms` from the `PQTZ`/`PQT2`
 anchor. The app writes each cue as a memory + hot pair on export, so entries are
 **deduped by position** back into one `track_cues` row (cap 8). This only
 happens when the local track has **no cues yet** and (for the first beat) **no

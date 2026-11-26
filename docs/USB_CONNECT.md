@@ -12,9 +12,21 @@ Open **USB Browser** in the sidebar and click **Select USB Folder**. Pick the to
 stick: the one that holds (or will hold) the `PIONEER` folder. Any folder works, so a folder on
 your hard drive can stand in for a stick, which is handy for testing.
 
-Every USB you've selected before is listed under **Recent USBs**. Click one to select it again.
-The list closes once a USB is selected, and clicking its heading opens it again. The **×** next to
-an entry removes it from the list, which also frees its name for another drive.
+Every USB you've selected before is listed under **Recent USBs**, by its name, with its folder in
+the tooltip. Click one to select it again. The list closes once a USB is selected, and clicking its
+heading opens it again.
+
+The **×** next to an entry deletes what this computer keeps of that USB, for a stick that isn't
+yours, read to fix it. First it asks, saying what goes: the tracks read from it (unless the library
+or a playlist has them), and how much space its database copies and backups take on this computer,
+with how many backups there are. **Delete** removes them, takes the USB off the list and frees its
+name for another drive. The newest backup on the USB itself stays, and selecting the USB again
+puts it back on the list.
+
+The list always holds every USB this computer keeps anything of: on each start, a USB whose
+database copies or backups are still here comes back into it, under the name of its folder in
+the app's `usb_cache` when its own name isn't known. An entry is red when the list knows the USB but this computer keeps no copy
+of its databases or backups; it's deleted the same way. A USB that's only unplugged isn't red.
 
 The app remembers the last USB between sessions, but doesn't connect to it by itself on start:
 select it again, from **Recent USBs**, once it's plugged in.
@@ -119,14 +131,17 @@ stick goes into next; they change from gig to gig, so the app doesn't guess.
 
 ## While the app is working on the USB
 
-During an export, a playlist or history import, diagnostics or repairs, or a save to the USB's
-tracks, the selected USB can't change:
+While a job runs, every button that would get in its way is off, and hovering it says which job
+to wait for. The app refuses those actions itself too, so nothing slips through. During an
+export, a change to the USB, a playlist or history import, diagnostics or repairs:
 
-- **Select USB Folder** and the **Recent USBs** entries are disabled, and the drive can't be
-  renamed.
-- **Export is disabled from the moment you click it until the export has finished**, so a second
-  click never starts a second export. Another export, or one started while a save to the USB's
-  tracks is still running, is refused.
+- **Select USB Folder** and the **Recent USBs** entries (selecting and deleting) are off, and the
+  drive can't be renamed.
+- **Export is off from the moment you click it until the export has finished**, so a second
+  click never starts a second export.
+- The USB's audio formats, backups, Player Menu and background colour wait for the job.
+- An export or a change to the USB also holds off source-folder changes, rekordbox and Mixxx
+  imports and converting.
 - Saving edits to the USB's tracks waits for the running job to finish instead of being dropped.
 
 The footer shows the progress. At the end of an export it says when it's waiting for the stick
