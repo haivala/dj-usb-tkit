@@ -95,6 +95,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         label: tr::migration_stratum_v1_analysis,
         run: drop_stratum_v1_analysis,
     },
+    Migration {
+        id: "0.6.7-forget-removed-usb-drives",
+        phase: Phase::Startup,
+        label: tr::migration_forget_removed_usb_drives,
+        run: forget_removed_usb_drives,
+    },
 ];
 
 impl BackendService {
@@ -525,6 +531,46 @@ fn drop_stratum_v1_analysis(
     Ok(Outcome::Done)
 }
 
+/// `0.6.7-forget-removed-usb-drives`: up to 0.6.6, removing a drive from the
+/// list only hid it, keeping its USB links and the track rows made for the
+/// stick's tracks, which piled up behind every library listing. Those links
+/// and export records go now, as removing a drive does
+/// (`usb::identity::forget_usb_device`), but not the drive's cache: the
+/// removal didn't say it would go. Then the tracks from sticks that nothing
+/// keeps go (`delete_unreferenced_tracks`), also ones older bugs left.
+fn forget_removed_usb_drives(
+    svc: &BackendService,
+    _: &mut dyn crate::progress::ProgressFn,
+) -> BackendResult<Outcome> {
+    let mut conn = svc.db.connect()?;
+    let tx = conn.transaction()?;
+    let links = tx.execute(
+        "DELETE FROM track_usb_links
+         WHERE usb_device_id IN (SELECT id FROM usb_devices WHERE deleted_at IS NOT NULL)",
+        [],
+    )?;
+    tx.execute(
+        "DELETE FROM usb_device_exports
+         WHERE usb_device_id IN (SELECT id FROM usb_devices WHERE deleted_at IS NOT NULL)",
+        [],
+    )?;
+    let track_ids: Vec<String> = tx
+        .prepare("SELECT id FROM tracks")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    let tracks = super::delete_unreferenced_tracks(&tx, &track_ids)?;
+    tx.commit()?;
+    crate::logging::debug(
+        "migrations",
+        format!(
+            "forgot {} of removed USB devices and {} nothing kept",
+            counted(links, "link", "links"),
+            counted(tracks, "track", "tracks")
+        ),
+    );
+    Ok(Outcome::Done)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -864,5 +910,65 @@ mod tests {
                 assert_eq!(!dat.with_extension(ext).exists(), *dropped, "{id} {ext}");
             }
         }
+    }
+
+    #[test]
+    fn forgets_removed_usb_drives_and_the_stick_tracks_nothing_keeps() {
+        let (_dir, svc) = service();
+        let conn = svc.db.connect().unwrap();
+        conn.execute_batch(
+            r#"
+            INSERT INTO usb_devices (id, root_path, root_path_key, first_seen_at, last_seen_at,
+                                     deleted_at, created_at, updated_at)
+              VALUES ('gone', '/media/gone', '/media/gone', 'now', 'now', 'then', 'now', 'now'),
+                     ('kept', '/media/kept', '/media/kept', 'now', 'now', NULL, 'now', 'now');
+            INSERT INTO tracks (id, title, artist, file_path, created_at, updated_at)
+              VALUES ('t-gone', 'T', 'A', '/media/gone/a.mp3', 'now', 'now'),
+                     ('t-gone-playlist', 'T', 'A', '/media/gone/b.mp3', 'now', 'now'),
+                     ('t-unlinked', 'T', 'A', '/media/kept/c.mp3', 'now', 'now'),
+                     ('t-kept', 'T', 'A', '/media/kept/d.mp3', 'now', 'now'),
+                     ('t-library', 'T', 'A', '/music/e.mp3', 'now', 'now');
+            INSERT INTO playlists (id, name, source, created_at, updated_at)
+              VALUES ('p1', 'Set', 'app', 'now', 'now');
+            INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at)
+              VALUES ('pt1', 'p1', 't-gone-playlist', 0, 'now');
+            INSERT INTO track_usb_links (id, track_id, usb_device_id, usb_file_path,
+                                         first_seen_at, last_seen_at)
+              VALUES ('l1', 't-gone', 'gone', '/a.mp3', 'now', 'now'),
+                     ('l2', 't-gone-playlist', 'gone', '/b.mp3', 'now', 'now'),
+                     ('l3', 't-kept', 'kept', '/d.mp3', 'now', 'now');
+            INSERT INTO usb_device_exports (id, usb_device_id, playlist_name, exported_at,
+                                            track_count, track_fingerprints, created_at)
+              VALUES ('e1', 'gone', 'Set', 'now', 1, '[]', 'now');
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            forget_removed_usb_drives(&svc, &mut |_, _, _| {}).unwrap(),
+            Outcome::Done
+        );
+
+        let ids = |sql: &str| -> Vec<String> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        // A library track stays even with no source folder set: only tracks
+        // from a stick are looked at.
+        assert_eq!(
+            ids("SELECT id FROM tracks ORDER BY id"),
+            vec!["t-gone-playlist", "t-kept", "t-library"]
+        );
+        assert_eq!(ids("SELECT id FROM track_usb_links"), vec!["l3"]);
+        assert!(ids("SELECT id FROM usb_device_exports").is_empty());
+        assert_eq!(
+            ids("SELECT id FROM usb_devices ORDER BY id"),
+            vec!["gone", "kept"],
+            "a removed drive's path stays known"
+        );
     }
 }

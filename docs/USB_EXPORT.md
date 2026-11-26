@@ -171,15 +171,15 @@ no name of its own (unnamed, or carrying another drive's name) keeps whatever is
 a name set in rekordbox. The PDB's `t19` rows can carry the name too; the app leaves them as
 they are.
 
-Locally, two tables mirror it:
-
-- `usb_drive_names` is the uniqueness index: one row per name in use, keyed by the name's slug
-  (the cache/backup key), so "My USB" and "my-usb" are the same name. It is not keyed by mount
-  path: sticks with the same volume label usually mount at the same path, and each needs its own
-  name. A name read from a drive's marker joins it on connect, so drives named on another computer
-  count as taken too. Removing a drive from the recent list frees its name.
-- `usb_devices.label` is the name last seen at a mount path, shown for a drive that isn't plugged
-  in. It is never read back as a drive's name: a drive without a marker is unnamed.
+Locally, the drive's `usb_devices` row mirrors it: `name_slug` is the uniqueness index, keyed
+by the name's slug (the cache/backup key), so "My USB" and "my-usb" are the same name, and
+`label` is the name as written, shown for a drive that isn't plugged in. The row is found by the
+name, not the mount path: sticks with the same volume label usually mount at the same path (on
+Windows, every stick can get the same letter), and each is its own drive. A name read from a
+drive's marker registers it on connect, so drives named on another computer count as taken too.
+Naming a drive gives it the row its mount path had while it was unnamed, with what was read from
+it. A drive without a marker is unnamed, whatever a row says. Removing a drive from the recent
+list forgets it and frees its name (`docs/APP_DATA_MODEL.md`).
 
 Renaming moves the drive's HDD cache directory (staged databases and archived backups) to the new
 name's key and frees the old name.
@@ -187,7 +187,7 @@ name's key and frees the old name.
 ### Copies of a named drive
 
 A copied stick or folder carries the original's marker. On every connect, before the databases
-are staged, `check_drive_identity` compares the drive with what `usb_drive_names` remembers about
+are staged, `check_drive_identity` compares the drive with what its `usb_devices` row remembers about
 the drive holding that name:
 
 - `total_bytes`: the drive's size (for a folder, its disk's). A different size means a different

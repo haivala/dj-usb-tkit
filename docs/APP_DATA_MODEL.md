@@ -73,19 +73,28 @@ These entities represent USB-side discovered state:
 They are read from whichever of the USB's databases it has, the PDB first and the eDB where
 there is no PDB, through the layer in `docs/APP_DATA_FLOW.md`.
 
-`UsbDevice` state is backed by the local `usb_devices` table, keyed by a
-normalized root path and carrying mount/first-seen/last-seen state. It
-replaces the old frontend-only recent-roots list for device bookkeeping.
+`UsbDevice` state is backed by the local `usb_devices` table: one row per
+drive this computer knows, carrying where it was last seen (`root_path`) and
+mount/first-seen/last-seen state. A named drive's row is found by its name
+(`name_slug`), wherever it mounts; an unnamed drive's by its mount path, one
+row per path. So sticks that share a mount path (one drive letter on Windows,
+one volume label on Linux) each keep their own row once named.
 `track_usb_links` records which local track row corresponds to a given
-USB-device media path, and `usb_device_exports` records per-device playlist
+media path on a drive, and `usb_device_exports` records per-drive playlist
 export history even when that drive is not currently mounted.
 
-A `UsbDevice`'s `label` column is the user-assigned drive name last seen at
-that mount path, shown while the drive isn't plugged in (see
-`docs/USB_EXPORT.md`'s "USB drive naming" section). The name of record is a
-marker file on the drive itself. Names in use are indexed by slug in
-`usb_drive_names`, which also remembers each named drive's size and last
-logged export, to tell it apart from a copy.
+A named drive's row holds its user-assigned name (`label`, shown while the
+drive isn't plugged in), its size and its last logged export, to tell it
+apart from a copy (see `docs/USB_EXPORT.md`'s "USB drive naming" section).
+The name of record is a marker file on the drive itself.
+
+Removing a drive from the recent list forgets it: its links and export
+records go, then the track rows only those links kept (rows under a source
+folder, from rekordbox or Mixxx, or in a playlist stay), its name is free, and
+its HDD cache with the archived backups is deleted. A mount path left without
+a row keeps a forgotten one (`deleted_at`), so it still counts as removable
+media. A drive that stays in the list keeps its links, also to files since
+deleted from it; only removing the drive clears them.
 
 ### WarningEntry
 
@@ -148,7 +157,12 @@ stay in `db.rs` `migrate()` and are versioned by `schema_version`.
   raw estimate (`bpm_analyzer = "stratum"`, written up to 0.3.3): the new analysis
   replaces that BPM, its beat grid and first beat, so every bundle in
   `analysis/waveforms` is from the current analysis. A separate id, so it also runs
-  where `0.6.7-long-track-waveforms` already has.
+  where `0.6.7-long-track-waveforms` already has. `0.6.7-forget-removed-usb-drives`:
+  up to 0.6.6, removing a drive from the list only hid it, keeping its USB links and the
+  track rows made for its tracks, which slowed every library listing. Those links and export
+  records go, then the track rows from a stick (linked to a removed drive, or with their file
+  on a known drive's path) that nothing keeps; a library track is never looked at. The
+  removed drives' HDD caches stay: removing them didn't say they would go.
 - **Background** migrations run through the `run_data_migrations` command. The frontend
   calls it once after the initial load, and it shows in the footer progress bar as a
   `migration` job. With nothing pending it returns at once and emits no job events. While

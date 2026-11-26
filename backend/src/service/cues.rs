@@ -1536,15 +1536,8 @@ impl BackendService {
         // 3. Authoritative link row for this device + media path.
         let media_raw = req.usb_media_path_raw.trim();
         if !media_raw.is_empty() {
-            let root_key = super::normalize_source_root_for_matching(&usb_root.to_string_lossy());
-            let device_id: Option<String> = conn
-                .query_row(
-                    "SELECT id FROM usb_devices WHERE root_path_key = ?1",
-                    params![root_key],
-                    |r| r.get(0),
-                )
-                .optional()
-                .ok()?;
+            let device_id =
+                crate::service::usb::identity::usb_device_id_for_root(&conn, usb_root).ok()?;
             if let Some(device_id) = device_id {
                 let resolved = resolve_usb_side_path_text(usb_root, media_raw);
                 let link: Option<String> = conn

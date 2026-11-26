@@ -176,8 +176,15 @@ fn cache_root() -> Option<PathBuf> {
 /// or a test's arbitrary temp dir) fall back to the old mount-path hash,
 /// prefixed so the two key spaces can never collide.
 fn cache_key_for_root(usb_root: &Path) -> String {
-    if let Some(name) = crate::service::usb::identity::drive_name(usb_root) {
-        return crate::service::usb::identity::slug(&name);
+    cache_key(
+        crate::service::usb::identity::drive_name(usb_root).as_deref(),
+        usb_root,
+    )
+}
+
+fn cache_key(name: Option<&str>, usb_root: &Path) -> String {
+    if let Some(name) = name {
+        return crate::service::usb::identity::slug(name);
     }
 
     use std::hash::{Hash, Hasher};
@@ -185,6 +192,27 @@ fn cache_key_for_root(usb_root: &Path) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     normalized.hash(&mut hasher);
     format!("unnamed-{:016x}", hasher.finish())
+}
+
+/// Deletes a forgotten drive's cache dir: its staged databases and the
+/// backups archived from it. `name` is the drive's name, or `None` for an
+/// unnamed drive, whose cache is its mount path's. A drive still plugged in
+/// stages again on its next read.
+pub(crate) fn remove_cache_dir(name: Option<&str>, usb_root: &Path) -> std::io::Result<()> {
+    let Some(cache_root) = cache_root() else {
+        return Ok(());
+    };
+    let key = cache_key(name, usb_root);
+    let _guard = STATE_LOCK.lock().unwrap();
+    VERIFIED_THIS_CONNECT.lock().unwrap().retain(|k| *k != key);
+    RESOLVED_CACHE_KEYS
+        .lock()
+        .unwrap()
+        .retain(|(_, resolved)| *resolved != key);
+    match std::fs::remove_dir_all(cache_root.join(&key)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// Moves a named drive's cache dir to its new name's key when the drive is

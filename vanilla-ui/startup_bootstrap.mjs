@@ -196,6 +196,13 @@ export async function runDataMigrations(ctx) {
   }
 }
 
+// Sources starts folded (index.html) and opens once the start is done: the
+// window shown and the library drawn. Opened earlier, in the hidden window,
+// its row keeps a height that doesn't fit its chips.
+function openSourceBar(ctx) {
+  ctx.requestAnimationFrameFn(() => ctx.el.sourceBar.classList.remove("collapsed"));
+}
+
 export function runDeferredInitialLoad(ctx) {
   const { state } = ctx;
   (ctx.setTimeoutFn || setTimeout)(() => {
@@ -224,9 +231,11 @@ export function runDeferredInitialLoad(ctx) {
       ctx.renderWaveformsIn(ctx.document);
     }).then(() => {
       state.startupPhase = false;
+      openSourceBar(ctx);
       return runDataMigrations(ctx);
     }).catch((error) => {
       state.startupPhase = false;
+      openSourceBar(ctx);
       ctx.logError(error);
       ctx.emitStatus(t("ui-startup-init-failed", { error: error.message }));
     });
@@ -246,7 +255,6 @@ export async function initApp(ctx) {
   themeManager.setAccentManager(accentManager);
   themeManager.init();
   accentManager.init();
-  await hydrateAppVersionLabel(ctx);
   checkForUpdate(ctx);
   await ctx.setupConsoleFileLogging();
   ctx.logInfo("Frontend console bridge initialized");
@@ -254,20 +262,20 @@ export async function initApp(ctx) {
   ctx.logToFile({ source: "startup", message: "Console/event logging ready" });
 
   ctx.setProgress(false, 0, t("ui-common-idle"));
-  await ctx.loadUsbDevices();
-  // The library's folders and their switches (draws the chips, lets the
-  // folders into the asset scope).
-  await ctx.refreshLibrarySources();
+  // Independent of each other, so asked for together; each catches its own
+  // failure. The library's folders and their switches draw the chips and let
+  // the folders into the asset scope.
+  await Promise.all([
+    hydrateAppVersionLabel(ctx),
+    ctx.loadUsbDevices(),
+    ctx.refreshLibrarySources(),
+    ctx.detectExternalRekordboxDb(),
+    ctx.detectExternalMixxxDb(),
+  ]);
   ctx.loadUsbRootFromStorage();
 
   restoreStoredUiPrefs(ctx);
   applySidebarCollapsedUi(ctx);
-
-  await ctx.detectExternalRekordboxDb();
-  await ctx.detectExternalMixxxDb();
-  // Sources starts folded (index.html) and opens once its chips are drawn:
-  // opened earlier, its row keeps the height it had before they arrived.
-  ctx.el.sourceBar.classList.remove("collapsed");
   ctx.bindEvents();
   await ctx.switchView("library");
   ctx.logToFile({ source: "startup", message: "Initial view ready" });

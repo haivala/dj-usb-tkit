@@ -831,15 +831,22 @@ test("library row", async ({ page }) => {
   expect(await creates()).toBe(2);
 });
 
-// Startup: defaults backup on and Engine library off, opens the top playlist, runs the data
-// migrations after the first load and logs their failure; a changed setting goes to the settings
-// database, and a start with only that database restores every stored setting; a failed first load
-// says so.
+// Startup: defaults backup on and Engine library off, opens the top playlist, opens Sources once
+// the first load is in, runs the data migrations after it and logs their failure; a changed
+// setting goes to the settings database, and a start with only that database restores every
+// stored setting; a failed first load says so.
 test("startup and settings", async ({ page }) => {
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
     backend.seed({ playlists: [{ id: "pl-top", name: "Top Set" }, { id: "pl-2", name: "Second" }] });
-    backend.install((command) => {
+    // The first start's playlists wait for the spec, so it can look at the window before
+    // the first load is in.
+    if (!sessionStorage.getItem("loadHeld")) {
+      sessionStorage.setItem("loadHeld", "1");
+      window.__playlistsHeld = new Promise((resolve) => { window.__releasePlaylists = resolve; });
+    }
+    backend.install(async (command) => {
+      if (command === "list_playlists") await window.__playlistsHeld;
       if (command === "get_frontend_settings" && sessionStorage.getItem("fromDb")) {
         return backend.ok({
           values: {
@@ -857,6 +864,15 @@ test("startup and settings", async ({ page }) => {
     });
   });
   await page.goto("/");
+
+  // Sources stays folded until the first load is in, then opens to fit its chips.
+  await expect.poll(() => page.evaluate(() => window.__calls.some((c) => c.command === "list_playlists"))).toBe(true);
+  await expect(page.locator("#sourceBar")).toHaveClass(/collapsed/);
+  expect(await page.evaluate(() => window.__calls.some((c) => c.command === "show_window"))).toBe(true);
+  await page.evaluate(() => window.__releasePlaylists());
+  await expect(page.locator("#sourceBar")).not.toHaveClass(/collapsed/);
+  const sourceBody = page.locator("#sourceBar .source-body-inner");
+  await expect.poll(() => sourceBody.evaluate((node) => node.clientHeight === node.scrollHeight)).toBe(true);
 
   await expect(page.locator("#exportBackupCheckbox")).toBeChecked();
   await expect(page.locator("#exportEngineLibraryCheckbox")).not.toBeChecked();
@@ -894,6 +910,7 @@ test("startup and settings", async ({ page }) => {
   await expect(page.locator("#statusText")).toHaveText("Initialization failed: database locked");
   await expect(page.locator("#progressText")).toHaveText("Initializing failed");
   await expect(page.locator("#progressFooter")).toHaveClass(/error/);
+  await expect(page.locator("#sourceBar")).not.toHaveClass(/collapsed/);
   expect(await page.evaluate(() => window.__calls.some((c) => c.command === "run_data_migrations"))).toBe(false);
   await expect(page.locator("#analysisBpmRangeSelect")).toHaveValue("70-180");
 });

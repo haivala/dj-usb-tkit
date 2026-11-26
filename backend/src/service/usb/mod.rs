@@ -209,10 +209,11 @@ impl BackendService {
 
         let normalized = normalize_usb_root_path(canonicalize_or_self(candidate));
         let mount_conn = self.db.connect()?;
-        crate::service::usb::identity::upsert_usb_device(&mount_conn, &normalized, true, &now())?;
         // Before staging below: a drive carrying another drive's name must
-        // not stage into that drive's cache.
+        // not stage into that drive's cache. And before the row is found by
+        // that name: such a drive gets a row of its own.
         self.check_drive_identity(&mount_conn, &normalized)?;
+        crate::service::usb::identity::upsert_usb_device(&mount_conn, &normalized, true, &now())?;
         drop(mount_conn);
         let has_vendor_root = normalized.join(USB_VENDOR_ROOT_DIR).is_dir();
         let has_contents = normalized.join(USB_CONTENTS_DIR).is_dir();

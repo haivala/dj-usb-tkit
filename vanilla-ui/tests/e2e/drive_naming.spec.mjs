@@ -107,15 +107,27 @@ test("naming a drive from its recent pill", async ({ page }) => {
   }
 });
 
-test("forgetting a recent USB drops it from the list the prune answers with", async ({ page }) => {
-  await installTauriMock(page);
+test("forgetting a recent USB asks first, then drops it from the list the prune answers with", async ({ page }) => {
+  await installTauriMock(page, { deviceName: "Club Stick" });
   await page.goto("/");
   await page.locator('.nav-item[data-view="usb"]').click();
   const pill = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]');
-  await expect(pill).toBeVisible();
+  // Sticks sharing a path (one drive letter) tell apart by name; the path is the tooltip.
+  await expect(pill).toHaveText("Club Stick");
+  await expect(pill).toHaveAttribute("data-tooltip", "/Volumes/USB-TEST");
   const lists = await page.evaluate(() => window.__calls.filter((c) => c.command === "list_usb_devices").length);
+  const prunes = () => page.evaluate(() => window.__calls.filter((c) => c.command === "prune_usb_device").length);
+
+  // It deletes what this computer kept of the stick, so it asks; cancelling keeps it.
+  await page.locator("#usbRecentList .usb-cfg-recent-prune-btn").click();
+  await expect(page.locator("#confirmTitle")).toHaveText("Forget Club Stick?");
+  await expect(page.locator("#confirmMessage")).toContainText("backups of it kept on this computer are deleted too");
+  await page.locator("#confirmCancelBtn").click();
+  await expect(pill).toBeVisible();
+  expect(await prunes()).toBe(0);
 
   await page.locator("#usbRecentList .usb-cfg-recent-prune-btn").click();
+  await page.locator("#confirmOkBtn").click();
   await expect(pill).toHaveCount(0);
   expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "prune_usb_device").map((c) => c.request.id))).toEqual(["dev-1"]);
   // The list came with the prune's answer: no second read.

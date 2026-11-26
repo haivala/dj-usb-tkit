@@ -222,8 +222,10 @@ pub(crate) fn usb_drive_name(conn: &rusqlite::Connection, usb_root: &Path) -> Op
     if let Some(name) = usb::identity::read_drive_name(usb_root) {
         return Some(name);
     }
+    // The drive last seen there with a name: other sticks may have used the path.
     conn.query_row(
-        "SELECT label FROM usb_devices WHERE root_path_key = ?1",
+        "SELECT label FROM usb_devices WHERE root_path_key = ?1 AND name_slug IS NOT NULL
+         ORDER BY last_seen_at DESC LIMIT 1",
         params![normalize_source_root_for_matching(
             &usb_root.to_string_lossy()
         )],

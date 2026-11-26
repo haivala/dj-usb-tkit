@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::{BackendError, BackendResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, Clone)]
 pub struct Db {
@@ -65,6 +65,9 @@ impl Db {
 
     fn migrate(&self) -> BackendResult<()> {
         let conn = self.connect()?;
+        conn.execute_batch(&format!(
+            "CREATE TABLE IF NOT EXISTS usb_devices {USB_DEVICES_COLUMNS};"
+        ))?;
         conn.execute_batch(
             r#"
             PRAGMA journal_mode = WAL;
@@ -157,19 +160,6 @@ impl Db {
               FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
               FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
               UNIQUE(playlist_id, position)
-            );
-
-            CREATE TABLE IF NOT EXISTS usb_devices (
-              id TEXT PRIMARY KEY,
-              root_path TEXT NOT NULL,
-              root_path_key TEXT NOT NULL UNIQUE,
-              label TEXT,
-              mounted INTEGER NOT NULL DEFAULT 0,
-              first_seen_at TEXT NOT NULL,
-              last_seen_at TEXT NOT NULL,
-              deleted_at TEXT,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS track_usb_links (
@@ -301,7 +291,13 @@ impl Db {
             "#,
         )?;
         store_file_modified_at_as_integer(&conn)?;
-        create_usb_drive_names(&conn)?;
+        key_usb_devices_by_drive_name(&conn)?;
+        conn.execute_batch(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_usb_devices_unnamed_path
+              ON usb_devices (root_path_key) WHERE name_slug IS NULL;
+            "#,
+        )?;
         set_schema_version(&conn, CURRENT_SCHEMA_VERSION)?;
 
         Ok(())
@@ -625,6 +621,132 @@ fn create_usb_drive_names(conn: &Connection) -> BackendResult<()> {
     Ok(())
 }
 
+/// `usb_devices`: the drives this computer knows. A named drive is one row,
+/// found by its name (`name_slug`, `usb::identity::slug`) wherever it mounts;
+/// `root_path` is where it was last seen. An unnamed drive is known only by
+/// its mount path, one row per path (`idx_usb_devices_unnamed_path`). A row
+/// with `deleted_at` is a forgotten drive's path: links and name gone, kept
+/// so the path still counts as removable media
+/// (`usb::identity::all_usb_device_root_paths`).
+const USB_DEVICES_COLUMNS: &str = "(
+  id TEXT PRIMARY KEY,
+  root_path TEXT NOT NULL,
+  root_path_key TEXT NOT NULL,
+  label TEXT,
+  name_slug TEXT UNIQUE,
+  last_export_at TEXT,
+  total_bytes INTEGER,
+  mounted INTEGER NOT NULL DEFAULT 0,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  deleted_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)";
+
+/// Schema v6: `usb_devices` was one row per mount path, and drive names lived
+/// in a separate `usb_drive_names` registry. Sticks that mount at the same
+/// path (one drive letter on Windows, one volume label on Linux) shared a row
+/// and its USB links, and a stick seen at two paths had two. Now a named
+/// drive is one row holding its name, last export and size, found by name.
+///
+/// Each registered name goes to the live row last labelled with it; the
+/// drive's other live rows hand it their links and exports (the newest row's
+/// link wins where both link the same file) and are kept as forgotten paths.
+/// Every other row is unnamed. Rows removed from the list stay as they were
+/// (their links go in `0.6.7-forget-removed-usb-drives`). A no-op once done,
+/// and on a fresh database.
+fn key_usb_devices_by_drive_name(conn: &Connection) -> BackendResult<()> {
+    if has_column(conn, "usb_devices", "name_slug")? {
+        return Ok(());
+    }
+    // A database from before the registry gets it first.
+    create_usb_drive_names(conn)?;
+
+    // Dropping the old table would otherwise cascade-delete every USB link
+    // and export record. Ignored inside a transaction, so set around it.
+    conn.execute_batch("PRAGMA foreign_keys = OFF")?;
+    let result = (|| -> BackendResult<()> {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(&format!(
+            "CREATE TABLE usb_devices_v6 {USB_DEVICES_COLUMNS};
+             INSERT INTO usb_devices_v6 (id, root_path, root_path_key, mounted, first_seen_at,
+                                         last_seen_at, deleted_at, created_at, updated_at)
+               SELECT id, root_path, root_path_key, mounted, first_seen_at, last_seen_at,
+                      deleted_at, created_at, updated_at
+               FROM usb_devices;"
+        ))?;
+        let labelled: Vec<(String, String)> = tx
+            .prepare(
+                "SELECT id, label FROM usb_devices
+                 WHERE deleted_at IS NULL AND label IS NOT NULL
+                 ORDER BY last_seen_at DESC",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        let registry: Vec<(String, String, Option<String>, Option<i64>)> = tx
+            .prepare("SELECT slug, name, last_export_at, total_bytes FROM usb_drive_names")?
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        let now = crate::service::now();
+        for (slug, name, last_export_at, total_bytes) in registry {
+            let mut rows = labelled
+                .iter()
+                .filter(|(_, label)| crate::service::usb::identity::slug(label.trim()) == slug)
+                .map(|(id, _)| id);
+            let Some(drive) = rows.next() else {
+                continue;
+            };
+            tx.execute(
+                "UPDATE usb_devices_v6
+                 SET name_slug = ?1, label = ?2, last_export_at = ?3, total_bytes = ?4
+                 WHERE id = ?5",
+                rusqlite::params![slug, name, last_export_at, total_bytes, drive],
+            )?;
+            for other in rows {
+                tx.execute(
+                    "UPDATE OR IGNORE track_usb_links SET usb_device_id = ?1 WHERE usb_device_id = ?2",
+                    rusqlite::params![drive, other],
+                )?;
+                tx.execute(
+                    "DELETE FROM track_usb_links WHERE usb_device_id = ?1",
+                    rusqlite::params![other],
+                )?;
+                tx.execute(
+                    "UPDATE usb_device_exports SET usb_device_id = ?1 WHERE usb_device_id = ?2",
+                    rusqlite::params![drive, other],
+                )?;
+                tx.execute(
+                    "UPDATE usb_devices_v6 SET deleted_at = ?1, mounted = 0 WHERE id = ?2",
+                    rusqlite::params![now, other],
+                )?;
+            }
+        }
+        tx.execute_batch(
+            "DROP TABLE usb_devices;
+             ALTER TABLE usb_devices_v6 RENAME TO usb_devices;
+             DROP TABLE usb_drive_names;
+             CREATE INDEX IF NOT EXISTS idx_usb_devices_last_seen
+               ON usb_devices (last_seen_at DESC);",
+        )?;
+        let broken_links: i64 =
+            tx.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })?;
+        if broken_links > 0 {
+            return Err(BackendError::Internal(format!(
+                "schema v6: usb_devices rebuild would break {broken_links} foreign key(s)"
+            )));
+        }
+        tx.commit()?;
+        Ok(())
+    })();
+    conn.execute_batch("PRAGMA foreign_keys = ON")?;
+    result
+}
+
 fn has_column(conn: &Connection, table: &str, column_name: &str) -> BackendResult<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
@@ -860,16 +982,69 @@ mod tests {
         assert_eq!(count("SELECT COUNT(*) FROM track_usb_links"), 0);
     }
 
+    /// Puts `usb_devices` back in its schema v5 shape: one row per mount path.
+    fn downgrade_usb_devices_to_v5(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            DROP TABLE usb_devices;
+            CREATE TABLE usb_devices (
+              id TEXT PRIMARY KEY, root_path TEXT NOT NULL, root_path_key TEXT NOT NULL UNIQUE,
+              label TEXT, mounted INTEGER NOT NULL DEFAULT 0, first_seen_at TEXT NOT NULL,
+              last_seen_at TEXT NOT NULL, deleted_at TEXT, created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL);
+            PRAGMA foreign_keys = ON;
+            UPDATE schema_version SET version = 5;
+            "#,
+        )
+        .expect("downgrade usb_devices");
+    }
+
+    type DeviceRow = (String, Option<String>, Option<String>, Option<String>, bool);
+
+    /// `(id, name_slug, label, last_export_at, forgotten)` by id.
+    fn device_rows(db: &Db) -> Vec<DeviceRow> {
+        db.connect()
+            .unwrap()
+            .prepare(
+                "SELECT id, name_slug, label, last_export_at, deleted_at IS NOT NULL
+                 FROM usb_devices ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn has_table(db: &Db, name: &str) -> bool {
+        db.connect()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1)",
+                [name],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
     #[test]
-    fn migrate_seeds_drive_name_registry_once_from_known_drive_names() {
+    fn migrate_names_usb_devices_from_their_labels_before_the_registry() {
         let dir = tempfile::tempdir().expect("tempdir");
         {
             let db = Db::new(dir.path()).expect("db init");
             let conn = db.connect().expect("db connect");
-            // Put the database back in its shape from before the registry.
+            downgrade_usb_devices_to_v5(&conn);
             conn.execute_batch(
                 r#"
-                DROP TABLE usb_drive_names;
                 INSERT INTO usb_devices (id, root_path, root_path_key, label, first_seen_at,
                                          last_seen_at, deleted_at, created_at, updated_at)
                   VALUES ('u1', '/media/a', '/media/a', 'Club Stick', 'now', 'now', NULL, 'now', 'now'),
@@ -881,91 +1056,113 @@ mod tests {
                          ('e2', 'u1', 'Set', '2026-01-02T10:00:00+02:00', 1, '[]', '2026-01-02T08:00:00Z');
                 "#,
             )
-            .expect("downgrade");
+            .expect("v5 rows");
         }
 
-        let names = |db: &Db| -> Vec<(String, String)> {
-            db.connect()
-                .unwrap()
-                .prepare("SELECT slug, name FROM usb_drive_names ORDER BY slug")
-                .unwrap()
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap()
-        };
         let db = Db::new(dir.path()).expect("db reopen");
+        let s = |v: &str| Some(v.to_string());
         assert_eq!(
-            names(&db),
-            vec![("club-stick".to_string(), "Club Stick".to_string())]
+            device_rows(&db),
+            vec![
+                // Starts from the latest export this computer made to the drive.
+                (
+                    "u1".into(),
+                    s("club-stick"),
+                    s("Club Stick"),
+                    s("2026-01-02T10:00:00+02:00"),
+                    false
+                ),
+                ("u2".into(), None, None, None, false),
+                // A drive removed from the list held no name.
+                ("u3".into(), None, None, None, true),
+            ]
         );
-        let last_export: Option<String> = db
-            .connect()
-            .unwrap()
-            .query_row(
-                "SELECT last_export_at FROM usb_drive_names WHERE slug = 'club-stick'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            last_export.as_deref(),
-            Some("2026-01-02T10:00:00+02:00"),
-            "starts from the latest export this computer made to the drive"
-        );
+        assert!(!has_table(&db, "usb_drive_names"));
 
-        // Later opens leave the registry alone (a renamed-away name stays free).
+        // Later opens leave the rows alone.
         db.connect()
             .unwrap()
-            .execute("DELETE FROM usb_drive_names", [])
+            .execute("UPDATE usb_devices SET name_slug = NULL, label = NULL", [])
             .unwrap();
         drop(db);
         let db = Db::new(dir.path()).expect("db reopen again");
-        assert!(names(&db).is_empty());
+        assert_eq!(device_rows(&db)[0].1, None);
     }
 
     #[test]
-    fn migrate_adds_drive_check_columns_to_an_existing_registry() {
+    fn migrate_makes_one_row_of_a_drive_seen_at_two_paths() {
         let dir = tempfile::tempdir().expect("tempdir");
         {
             let db = Db::new(dir.path()).expect("db init");
             let conn = db.connect().expect("db connect");
+            downgrade_usb_devices_to_v5(&conn);
             // The registry before it remembered a drive's last export and size.
             conn.execute_batch(
                 r#"
-                DROP TABLE usb_drive_names;
                 CREATE TABLE usb_drive_names (
                   slug TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen_at TEXT NOT NULL);
                 INSERT INTO usb_drive_names VALUES ('club-stick', 'Club Stick', 'now');
                 INSERT INTO usb_devices (id, root_path, root_path_key, label, first_seen_at,
                                          last_seen_at, created_at, updated_at)
-                  VALUES ('u1', '/media/a', '/media/a', 'Club Stick', 'now', 'now', 'now', 'now');
+                  VALUES ('u1', '/media/a', '/media/a', 'Club Stick', 'now', '2026-01-01', 'now', 'now'),
+                         ('u2', '/media/b', '/media/b', 'club stick', 'now', '2026-02-01', 'now', 'now'),
+                         ('u3', '/media/c', '/media/c', 'Not Registered', 'now', '2026-02-01', 'now', 'now');
+                INSERT INTO tracks (id, title, artist, file_path, created_at, updated_at)
+                  VALUES ('t1', 'T1', 'A', '/media/a/Contents/a.mp3', 'now', 'now'),
+                         ('t2', 'T2', 'A', '/media/b/Contents/a.mp3', 'now', 'now'),
+                         ('t3', 'T3', 'A', '/media/a/Contents/b.mp3', 'now', 'now');
+                INSERT INTO track_usb_links (id, track_id, usb_device_id, usb_file_path,
+                                             first_seen_at, last_seen_at)
+                  VALUES ('l1', 't1', 'u1', '/Contents/a.mp3', 'now', 'now'),
+                         ('l2', 't2', 'u2', '/Contents/a.mp3', 'now', 'now'),
+                         ('l3', 't3', 'u1', '/Contents/b.mp3', 'now', 'now');
                 INSERT INTO usb_device_exports (id, usb_device_id, playlist_name, exported_at,
                                                 track_count, track_fingerprints, created_at)
                   VALUES ('e1', 'u1', 'Set', '2026-01-01T10:00:00+02:00', 1, '[]', 'now');
                 "#,
             )
-            .expect("downgrade");
+            .expect("v5 rows");
         }
 
         let db = Db::new(dir.path()).expect("db reopen");
-        let row: (String, Option<String>, Option<i64>) = db
-            .connect()
-            .unwrap()
-            .query_row(
-                "SELECT name, last_export_at, total_bytes FROM usb_drive_names",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
+        let s = |v: &str| Some(v.to_string());
         assert_eq!(
-            row,
-            (
-                "Club Stick".to_string(),
-                Some("2026-01-01T10:00:00+02:00".to_string()),
-                None
-            )
+            device_rows(&db),
+            vec![
+                // The other path stays known as removable media, without the drive.
+                ("u1".into(), None, None, None, true),
+                // The row last labelled with the name is the drive, under the
+                // registry's spelling, with the export the registry gained.
+                (
+                    "u2".into(),
+                    s("club-stick"),
+                    s("Club Stick"),
+                    s("2026-01-01T10:00:00+02:00"),
+                    false
+                ),
+                ("u3".into(), None, None, None, false),
+            ]
         );
+        let conn = db.connect().unwrap();
+        let links: Vec<(String, String)> = conn
+            .prepare("SELECT id, usb_device_id FROM track_usb_links ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // Both rows linked the same file: the drive's newest row's link wins.
+        assert_eq!(
+            links,
+            vec![("l2".into(), "u2".into()), ("l3".into(), "u2".into())]
+        );
+        let export_device: String = conn
+            .query_row("SELECT usb_device_id FROM usb_device_exports", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(export_device, "u2");
+        assert!(!has_table(&db, "usb_drive_names"));
     }
 
     #[test]

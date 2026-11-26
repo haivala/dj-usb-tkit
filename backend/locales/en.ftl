@@ -1471,6 +1471,7 @@ migration-beat-grids = Upgrading cached beat grids
 migration-mp3-seek = Adding MP3 seek data
 migration-long-track-waveforms = Redrawing the waveforms of long tracks
 migration-stratum-v1-analysis = Marking tracks with an outdated BPM analysis for analysis
+migration-forget-removed-usb-drives = Forgetting the tracks of USB devices removed from the list
 
 # Event Log warnings when a data upgrade fails. $migration: the upgrade (migration-*). $error: the reason.
 migration-warning-failed = { $migration } failed ({ $error }); it runs again next launch
@@ -3147,6 +3148,10 @@ ui-usb-export-failed-unknown = USB export failed
 # The aria-label of the button that forgets a recent USB.
 # $path: the USB's folder.
 ui-usb-forget-path-aria-label = Forget { $path }
+# The confirmation before a USB device leaves the recent list. $name: its name, or its path when it has none.
+ui-usb-forget-title = Forget { $name }?
+ui-usb-forget-message = The tracks read from it and the backups of it kept on this computer are deleted too. The newest backup on the USB itself stays.
+ui-usb-forget-confirm = Forget
 ui-usb-parity-running = Running USB parity report...
 ui-usb-repair-applying = Applying supported USB repair fixes...
 ui-usb-repair-previewing = Previewing USB repair fixes...

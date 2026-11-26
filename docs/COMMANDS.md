@@ -429,8 +429,9 @@ applies them as they come and never asks for the list again after a change.
   nameTakenBy }`), each `null` when it can't be read (an Event Log warning says why); `devices`
   is the known drives, as `list_usb_devices` lists them. Plus the playlist state (see Playlists)
 - `list_usb_devices`
-- `prune_usb_device` — `{ id }` → `{ pruned, devices }`: `devices` is the list
-  `list_usb_devices` would answer after the prune.
+- `prune_usb_device` — `{ id }` → `{ pruned, devices }`: forgets the drive (its links, the
+  track rows only they kept, its name, its HDD cache and archived backups); `devices` is the
+  list `list_usb_devices` would answer after the prune.
 - `set_usb_device_name`
 - `audioFormats` (`select_usb`) →
   `{ formats: [{ format, label, allowed, locked, tooltip }], writable, hint }`: the USB's Player

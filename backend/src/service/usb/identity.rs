@@ -1,9 +1,9 @@
 //! User-assigned identity for a USB root: a name, stored in a marker file on
 //! the root itself (so it survives being plugged into a different computer)
-//! and mirrored into the local `usb_devices.label` column (display cache for
-//! a drive that isn't plugged in) and the `usb_drive_names` registry (the
-//! uniqueness index -- not keyed by mount path, since drives with the same
-//! volume label usually mount at the same path).
+//! and mirrored into the drive's `usb_devices` row (its name shown while it
+//! isn't plugged in, and the uniqueness index). A named drive's row is found
+//! by its name, not its mount path: drives with the same volume label mount
+//! at the same path, and on Windows every stick can get the same letter.
 //!
 //! The app has no real USB device enumeration -- `resolve_usb_root` accepts
 //! any directory, not just a real removable device -- so a hardware
@@ -467,15 +467,30 @@ fn linux_unescape_udev_label(raw: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// The registered `usb_devices` id for the stick mounted at `usb_root`.
-pub(super) fn usb_device_id_for_root(
+/// The `usb_devices` id of the drive at `usb_root`, if this computer knows
+/// it: a named drive's row by its name, wherever it was seen; an unnamed
+/// drive's by its mount path (see `db::USB_DEVICES_COLUMNS`).
+pub(crate) fn usb_device_id_for_root(
     conn: &rusqlite::Connection,
     usb_root: &Path,
 ) -> BackendResult<Option<String>> {
-    let root_key = crate::service::normalize_source_root_for_matching(&usb_root.to_string_lossy());
+    Ok(match drive_name(usb_root) {
+        Some(name) => conn
+            .query_row(
+                "SELECT id FROM usb_devices WHERE name_slug = ?1",
+                params![slug(&name)],
+                |row| row.get(0),
+            )
+            .optional()?,
+        None => unnamed_device_id(conn, &root_key(usb_root))?,
+    })
+}
+
+/// The unnamed row for a mount path, a forgotten one included.
+fn unnamed_device_id(conn: &rusqlite::Connection, root_key: &str) -> BackendResult<Option<String>> {
     Ok(conn
         .query_row(
-            "SELECT id FROM usb_devices WHERE root_path_key = ?1",
+            "SELECT id FROM usb_devices WHERE root_path_key = ?1 AND name_slug IS NULL",
             params![root_key],
             |row| row.get(0),
         )
@@ -506,31 +521,26 @@ impl BackendService {
         Ok(crate::models::ListUsbDevicesData { items })
     }
 
+    /// Forgets a drive removed from the list (`forget_usb_device`), and its
+    /// local cache: staged databases and the backups archived from it.
     pub fn prune_usb_device(
         &self,
         req: crate::models::PruneUsbDeviceRequest,
     ) -> BackendResult<crate::models::PruneUsbDeviceData> {
-        let conn = self.db.connect()?;
-        let now_ts = now();
-        let label: Option<String> = conn
-            .query_row(
-                "SELECT label FROM usb_devices WHERE id = ?1 AND deleted_at IS NULL",
-                params![req.id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten();
-        let changed = conn.execute(
-            "UPDATE usb_devices SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
-            params![now_ts, req.id],
-        )?;
-        // A removed drive's name is free again.
-        if let Some(label) = label.filter(|label| !label.trim().is_empty()) {
-            forget_drive_name(&conn, label.trim())?;
-        }
+        let mut conn = self.db.connect()?;
+        let tx = conn.transaction()?;
+        let forgotten = forget_usb_device(&tx, &req.id, &now())?;
+        tx.commit()?;
         drop(conn);
+        if let Some(drive) = &forgotten {
+            crate::service::usb::staging::remove_cache_dir(drive.name.as_deref(), &drive.root_path)
+                .map_err(|e| {
+                    BackendError::Internal(format!("failed to remove the drive's cache: {e}"))
+                })?;
+            self.invalidate_usb_parse_cache();
+        }
         Ok(crate::models::PruneUsbDeviceData {
-            pruned: changed > 0,
+            pruned: forgotten.is_some(),
             devices: self.list_usb_devices()?.items,
         })
     }
@@ -618,14 +628,10 @@ impl BackendService {
             return Ok(registered.map(|drive| drive.name));
         }
         if let Some(name) = &marker {
-            let now_ts = now();
-            register_drive_name(conn, name, &now_ts)?;
+            register_drive(conn, usb_root, name, &now(), false)?;
             if let Some(total_bytes) = total_bytes {
                 fill_registered_drive_size(conn, name, total_bytes)?;
             }
-            // The path's label follows the drive last seen there, also one
-            // named elsewhere (another computer, or a hand-edited marker).
-            set_device_label(conn, usb_root, name, &now_ts)?;
         }
         Ok(None)
     }
@@ -635,8 +641,8 @@ impl BackendService {
     /// renames: the drive's cache dir moves to the new name and its old name
     /// is freed. A drive carrying another drive's name may take that name
     /// back (it is that drive after all), which makes it the drive the name
-    /// is checked against. Writes the on-drive marker (source of truth), the
-    /// local `usb_devices.label` cache and the `usb_drive_names` registry.
+    /// is checked against. Writes the on-drive marker (source of truth) and the
+    /// drive's `usb_devices` row.
     pub fn set_usb_device_name(
         &self,
         req: crate::models::SetUsbDeviceNameRequest,
@@ -686,7 +692,7 @@ impl BackendService {
         crate::service::usb::staging::forget_cache_key_for_root(&usb_root);
         let now_ts = now();
         if let Some(old_name) = renaming_away {
-            forget_drive_name(&conn, old_name)?;
+            rename_drive(&conn, old_name, &name, &now_ts)?;
             // Earlier exports to this drive name it as it is now called. By
             // its old name, not its mount path: another stick may have used
             // the same path, and names are unique to one drive.
@@ -695,7 +701,7 @@ impl BackendService {
                 params![name, old_name],
             )?;
         }
-        register_drive_name(&conn, &name, &now_ts)?;
+        register_drive(&conn, &usb_root, &name, &now_ts, true)?;
         if !keeps_own_name {
             // This drive is now the one the name is checked against.
             set_registered_drive(
@@ -705,7 +711,6 @@ impl BackendService {
                 fs4::total_space(&usb_root).ok(),
             )?;
         }
-        set_device_label(&conn, &usb_root, &name, &now_ts)?;
         self.invalidate_usb_parse_cache();
 
         Ok(crate::models::SetUsbDeviceNameData {
@@ -721,8 +726,9 @@ impl BackendService {
     }
 }
 
-/// Upsert a `usb_devices` row for `root`, keyed on its normalized path.
-/// Any touch clears `deleted_at` (seeing a device again un-prunes it).
+/// The `usb_devices` row of the drive at `root`, made if this computer
+/// doesn't know the drive yet: a named drive's (`register_drive`), else the
+/// mount path's unnamed row. Any touch brings a forgotten path's row back.
 /// `mark_mounted=true` additionally makes this the ONLY mounted device --
 /// every other row is unmounted in the same call (`validate_usb_root`'s
 /// success path is the sole caller that passes `true`). `mark_mounted=false`
@@ -735,31 +741,9 @@ pub(crate) fn upsert_usb_device(
     mark_mounted: bool,
     now_ts: &str,
 ) -> BackendResult<String> {
-    let root_path = root.to_string_lossy().to_string();
-    let root_path_key = crate::service::normalize_source_root_for_matching(&root_path);
-
-    let existing_id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM usb_devices WHERE root_path_key = ?1",
-            rusqlite::params![root_path_key],
-            |row| row.get(0),
-        )
-        .optional()?;
-
-    let id = if let Some(id) = existing_id {
-        conn.execute(
-            "UPDATE usb_devices SET root_path = ?1, last_seen_at = ?2, updated_at = ?2, deleted_at = NULL WHERE id = ?3",
-            rusqlite::params![root_path, now_ts, id],
-        )?;
-        id
-    } else {
-        let id = uuid::Uuid::now_v7().to_string();
-        conn.execute(
-            "INSERT INTO usb_devices (id, root_path, root_path_key, label, mounted, first_seen_at, last_seen_at, deleted_at, created_at, updated_at)
-             VALUES (?1, ?2, ?3, NULL, 0, ?4, ?4, NULL, ?4, ?4)",
-            rusqlite::params![id, root_path, root_path_key, now_ts],
-        )?;
-        id
+    let id = match drive_name(root) {
+        Some(name) => register_drive(conn, root, &name, now_ts, false)?,
+        None => upsert_unnamed_device(conn, root, now_ts)?,
     };
 
     if mark_mounted {
@@ -776,8 +760,86 @@ pub(crate) fn upsert_usb_device(
     Ok(id)
 }
 
-/// A `usb_drive_names` row: the name in use, plus what tells the drive that
-/// holds it apart from a copy (see `BackendService::check_drive_identity`).
+fn upsert_unnamed_device(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    now_ts: &str,
+) -> BackendResult<String> {
+    let root_path = root.to_string_lossy().to_string();
+    let key = root_key(root);
+    if let Some(id) = unnamed_device_id(conn, &key)? {
+        conn.execute(
+            "UPDATE usb_devices SET root_path = ?1, last_seen_at = ?2, updated_at = ?2, deleted_at = NULL WHERE id = ?3",
+            rusqlite::params![root_path, now_ts, id],
+        )?;
+        return Ok(id);
+    }
+    insert_device(conn, &root_path, &key, None, now_ts)
+}
+
+fn insert_device(
+    conn: &rusqlite::Connection,
+    root_path: &str,
+    root_key: &str,
+    name: Option<&str>,
+    now_ts: &str,
+) -> BackendResult<String> {
+    let id = uuid::Uuid::now_v7().to_string();
+    conn.execute(
+        "INSERT INTO usb_devices (id, root_path, root_path_key, label, name_slug, mounted,
+                                  first_seen_at, last_seen_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?6, ?6, ?6)",
+        rusqlite::params![id, root_path, root_key, name, name.map(slug), now_ts],
+    )?;
+    Ok(id)
+}
+
+/// The row of the drive named `name`, now seen at `root`; made when no
+/// drive holds the name. Registering the name makes it taken here too, also
+/// for a drive named on another computer. `adopt_path_row`: the drive at hand
+/// is being named, and the USB links read from it so far are its mount
+/// path's unnamed row's, so that row becomes the drive's.
+pub(crate) fn register_drive(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    name: &str,
+    now_ts: &str,
+    adopt_path_row: bool,
+) -> BackendResult<String> {
+    let root_path = root.to_string_lossy().to_string();
+    let key = root_key(root);
+    let mut id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM usb_devices WHERE name_slug = ?1",
+            rusqlite::params![slug(name)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if id.is_none() && adopt_path_row {
+        id = conn
+            .query_row(
+                "SELECT id FROM usb_devices
+                 WHERE root_path_key = ?1 AND name_slug IS NULL AND deleted_at IS NULL",
+                rusqlite::params![key],
+                |row| row.get(0),
+            )
+            .optional()?;
+    }
+    let Some(id) = id else {
+        return insert_device(conn, &root_path, &key, Some(name), now_ts);
+    };
+    conn.execute(
+        "UPDATE usb_devices
+         SET name_slug = ?1, label = ?2, root_path = ?3, root_path_key = ?4,
+             last_seen_at = ?5, updated_at = ?5, deleted_at = NULL
+         WHERE id = ?6",
+        rusqlite::params![slug(name), name, root_path, key, now_ts, id],
+    )?;
+    Ok(id)
+}
+
+/// A named drive: its name, plus what tells it apart from a copy (see
+/// `BackendService::check_drive_identity`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisteredDrive {
     pub name: String,
@@ -787,8 +849,8 @@ pub(crate) struct RegisteredDrive {
     pub total_bytes: Option<u64>,
 }
 
-/// The registered drive whose name shares `name`'s slug, if any. Names double
-/// as cache/backup-archive keys (`usb::identity::slug`), so "My USB" and
+/// The drive whose name shares `name`'s slug, if any. Names double as
+/// cache/backup-archive keys (`usb::identity::slug`), so "My USB" and
 /// "my-usb" are the same name here.
 pub(crate) fn find_registered_drive(
     conn: &rusqlite::Connection,
@@ -796,8 +858,8 @@ pub(crate) fn find_registered_drive(
 ) -> BackendResult<Option<RegisteredDrive>> {
     let row = conn
         .query_row(
-            "SELECT name, last_export_at, total_bytes FROM usb_drive_names WHERE slug = ?1",
-            rusqlite::params![crate::service::usb::identity::slug(name)],
+            "SELECT label, last_export_at, total_bytes FROM usb_devices WHERE name_slug = ?1",
+            rusqlite::params![slug(name)],
             |row| {
                 Ok(RegisteredDrive {
                     name: row.get(0)?,
@@ -810,21 +872,6 @@ pub(crate) fn find_registered_drive(
     Ok(row)
 }
 
-/// Record `name` as in use by a drive (see `db::create_usb_drive_names`),
-/// keeping what is already known about the drive holding it.
-pub(crate) fn register_drive_name(
-    conn: &rusqlite::Connection,
-    name: &str,
-    now_ts: &str,
-) -> BackendResult<()> {
-    conn.execute(
-        "INSERT INTO usb_drive_names (slug, name, last_seen_at) VALUES (?1, ?2, ?3)
-         ON CONFLICT(slug) DO UPDATE SET name = excluded.name, last_seen_at = excluded.last_seen_at",
-        rusqlite::params![crate::service::usb::identity::slug(name), name, now_ts],
-    )?;
-    Ok(())
-}
-
 /// Make the drive at hand the one holding `name`: from now on it's the
 /// drive whose last export and size the name is checked against.
 pub(crate) fn set_registered_drive(
@@ -834,12 +881,8 @@ pub(crate) fn set_registered_drive(
     total_bytes: Option<u64>,
 ) -> BackendResult<()> {
     conn.execute(
-        "UPDATE usb_drive_names SET last_export_at = ?1, total_bytes = ?2 WHERE slug = ?3",
-        rusqlite::params![
-            last_export_at,
-            total_bytes.map(|n| n as i64),
-            crate::service::usb::identity::slug(name)
-        ],
+        "UPDATE usb_devices SET last_export_at = ?1, total_bytes = ?2 WHERE name_slug = ?3",
+        rusqlite::params![last_export_at, total_bytes.map(|n| n as i64), slug(name)],
     )?;
     Ok(())
 }
@@ -851,11 +894,8 @@ pub(crate) fn fill_registered_drive_size(
     total_bytes: u64,
 ) -> BackendResult<()> {
     conn.execute(
-        "UPDATE usb_drive_names SET total_bytes = ?1 WHERE slug = ?2 AND total_bytes IS NULL",
-        rusqlite::params![
-            total_bytes as i64,
-            crate::service::usb::identity::slug(name)
-        ],
+        "UPDATE usb_devices SET total_bytes = ?1 WHERE name_slug = ?2 AND total_bytes IS NULL",
+        rusqlite::params![total_bytes as i64, slug(name)],
     )?;
     Ok(())
 }
@@ -867,41 +907,93 @@ pub(crate) fn record_drive_export(
     exported_at: &str,
 ) -> BackendResult<()> {
     conn.execute(
-        "UPDATE usb_drive_names SET last_export_at = ?1 WHERE slug = ?2",
-        rusqlite::params![exported_at, crate::service::usb::identity::slug(name)],
+        "UPDATE usb_devices SET last_export_at = ?1 WHERE name_slug = ?2",
+        rusqlite::params![exported_at, slug(name)],
     )?;
     Ok(())
 }
 
-/// Free `name` for another drive to take (renamed away, or the drive was
-/// removed from the known list).
-pub(crate) fn forget_drive_name(conn: &rusqlite::Connection, name: &str) -> BackendResult<()> {
-    conn.execute(
-        "DELETE FROM usb_drive_names WHERE slug = ?1",
-        rusqlite::params![crate::service::usb::identity::slug(name)],
-    )?;
-    Ok(())
-}
-
-/// Persist `label` onto the `usb_devices` row for `root`, upserting a row
-/// first if none exists yet (e.g. naming a drive before it's ever been
-/// through `validate_usb_root`). The on-drive marker file
-/// (`usb::identity::write_drive_name`) is the source of truth; this is the
-/// name shown for the path while the drive isn't plugged in, kept in sync by
-/// the caller.
-pub(crate) fn set_device_label(
+/// The drive named `old_name` takes `new_name`, which no other drive holds
+/// (the caller checked); `old_name` is free again.
+pub(crate) fn rename_drive(
     conn: &rusqlite::Connection,
-    root: &Path,
-    label: &str,
+    old_name: &str,
+    new_name: &str,
     now_ts: &str,
 ) -> BackendResult<()> {
-    upsert_usb_device(conn, root, false, now_ts)?;
-    let root_path_key = crate::service::normalize_source_root_for_matching(&root.to_string_lossy());
     conn.execute(
-        "UPDATE usb_devices SET label = ?1, updated_at = ?2 WHERE root_path_key = ?3 AND label IS NOT ?1",
-        rusqlite::params![label, now_ts, root_path_key],
+        "UPDATE usb_devices SET name_slug = ?1, label = ?2, updated_at = ?3 WHERE name_slug = ?4",
+        rusqlite::params![slug(new_name), new_name, now_ts, slug(old_name)],
     )?;
     Ok(())
+}
+
+/// What `forget_usb_device` leaves to clear off this computer's disk: the
+/// drive's cache, found by its name, or by the path for an unnamed drive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ForgottenDrive {
+    pub name: Option<String>,
+    pub root_path: PathBuf,
+}
+
+/// Forgets the drive of row `id`, one the user removed from the list (usually
+/// someone else's stick, read to fix it): its USB links and export records go,
+/// then the tracks only those links kept (`delete_unreferenced_tracks`), and
+/// its name is free for another drive. The row goes too, unless it's the only
+/// one of its mount path: then it stays as that path's forgotten row (see
+/// `all_usb_device_root_paths`). `None` when no listed drive has the id.
+pub(crate) fn forget_usb_device(
+    conn: &rusqlite::Connection,
+    id: &str,
+    now_ts: &str,
+) -> BackendResult<Option<ForgottenDrive>> {
+    let row: Option<(String, String, Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT root_path, root_path_key, name_slug, label FROM usb_devices
+             WHERE id = ?1 AND deleted_at IS NULL",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    let Some((root_path, key, name_slug, label)) = row else {
+        return Ok(None);
+    };
+    let linked: Vec<String> = conn
+        .prepare("SELECT DISTINCT track_id FROM track_usb_links WHERE usb_device_id = ?1")?
+        .query_map(rusqlite::params![id], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    conn.execute(
+        "DELETE FROM track_usb_links WHERE usb_device_id = ?1",
+        rusqlite::params![id],
+    )?;
+    conn.execute(
+        "DELETE FROM usb_device_exports WHERE usb_device_id = ?1",
+        rusqlite::params![id],
+    )?;
+    let path_has_other_rows: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM usb_devices WHERE root_path_key = ?1 AND id != ?2)",
+        rusqlite::params![key, id],
+        |row| row.get(0),
+    )?;
+    if path_has_other_rows {
+        conn.execute(
+            "DELETE FROM usb_devices WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE usb_devices
+             SET name_slug = NULL, label = NULL, last_export_at = NULL, total_bytes = NULL,
+                 mounted = 0, deleted_at = ?1, updated_at = ?1
+             WHERE id = ?2",
+            rusqlite::params![now_ts, id],
+        )?;
+    }
+    crate::service::delete_unreferenced_tracks(conn, &linked)?;
+    Ok(Some(ForgottenDrive {
+        name: name_slug.and(label),
+        root_path: PathBuf::from(root_path),
+    }))
 }
 
 /// All known device root paths (display form), ANY mount state, ANY age,

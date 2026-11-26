@@ -1134,6 +1134,7 @@ migration-beat-grids = Mise à niveau des beatgrids en cache
 migration-mp3-seek = Ajout des données de recherche MP3
 migration-long-track-waveforms = Nouveau tracé des formes d’onde des longs morceaux
 migration-stratum-v1-analysis = Marquage pour analyse des morceaux dont l’analyse du BPM est ancienne
+migration-forget-removed-usb-drives = Oubli des morceaux des clés USB retirées de la liste
 
 migration-warning-failed = Échec de { $migration } ({ $error }) ; nouvelle tentative au prochain lancement
 migration-warning-startup-failed = Échec des mises à niveau de données au démarrage ({ $error }) ; nouvelle tentative au prochain lancement
@@ -2413,6 +2414,9 @@ ui-usb-export-starting = Démarrage de l'export USB...
 ui-usb-export-failed = Échec de l'export : { $error }. Voir le Journal des événements pour les détails.
 ui-usb-export-failed-unknown = Échec de l'export USB
 ui-usb-forget-path-aria-label = Oublier { $path }
+ui-usb-forget-title = Oublier { $name } ?
+ui-usb-forget-message = Les morceaux lus depuis cette clé et ses sauvegardes conservées sur cet ordinateur sont aussi supprimés. La sauvegarde la plus récente sur la clé USB elle-même reste.
+ui-usb-forget-confirm = Oublier
 ui-usb-parity-running = Rapport de parité USB en cours...
 ui-usb-repair-applying = Application des corrections USB prises en charge...
 ui-usb-repair-previewing = Aperçu des corrections USB...

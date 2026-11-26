@@ -552,12 +552,22 @@ fn resolve_playback_source_fast_path_handles_missing_track_id() {
 }
 
 #[test]
-fn prune_usb_device_soft_deletes_without_breaking_existing_links() {
+fn prune_usb_device_forgets_the_sticks_tracks_but_never_a_library_track() {
     let (_dir, svc) = new_service();
     let conn = svc.db.connect().expect("connect");
     insert_usb_device(&conn, "dev-1", "/mnt/usb1");
+    // No source folder is set: a library track still stays.
     insert_track(&conn, "local-1", "/music/a.mp3", "fp1", None, None);
+    insert_track(
+        &conn,
+        "usb-1",
+        "/mnt/usb1/Contents/b.mp3",
+        "fp2",
+        None,
+        None,
+    );
     insert_track_usb_link(&conn, "local-1", "dev-1", "/mnt/usb1/Contents/a.mp3");
+    insert_track_usb_link(&conn, "usb-1", "dev-1", "/mnt/usb1/Contents/b.mp3");
     conn.execute(
         "INSERT INTO usb_device_exports (id, usb_device_id, playlist_id, playlist_name, exported_at, track_count, track_fingerprints, created_at)
          VALUES ('exp-1', 'dev-1', NULL, 'P', datetime('now'), 1, '[]', datetime('now'))",
@@ -572,68 +582,23 @@ fn prune_usb_device_soft_deletes_without_breaking_existing_links() {
         })
         .expect("prune");
     assert!(pruned.pruned);
+    assert!(
+        svc.list_usb_devices().expect("list").items.is_empty(),
+        "a forgotten device is not listed"
+    );
 
     let conn = svc.db.connect().expect("connect");
-    let deleted_at: Option<String> = conn
-        .query_row(
-            "SELECT deleted_at FROM usb_devices WHERE id = 'dev-1'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("deleted_at");
-    assert!(deleted_at.is_some());
-
-    let listed = svc.list_usb_devices().expect("list");
-    assert!(
-        listed.items.is_empty(),
-        "pruned device must not appear in list_usb_devices"
-    );
-
-    let link_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(1) FROM track_usb_links WHERE usb_device_id = 'dev-1'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("link count");
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).expect(sql) };
+    assert_eq!(count("SELECT COUNT(1) FROM track_usb_links"), 0);
+    assert_eq!(count("SELECT COUNT(1) FROM usb_device_exports"), 0);
+    assert_eq!(count("SELECT COUNT(1) FROM tracks WHERE id = 'local-1'"), 1);
+    assert_eq!(count("SELECT COUNT(1) FROM tracks WHERE id = 'usb-1'"), 0);
+    // `all_usb_device_root_paths`/`untainted_usb_root_paths` never filter on
+    // deleted_at: the path stays known as removable media.
     assert_eq!(
-        link_count, 1,
-        "pruning must not cascade-delete track_usb_links"
+        count(
+            "SELECT COUNT(1) FROM usb_devices WHERE root_path = '/mnt/usb1' AND deleted_at IS NOT NULL"
+        ),
+        1
     );
-    let export_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(1) FROM usb_device_exports WHERE usb_device_id = 'dev-1'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("export count");
-    assert_eq!(
-        export_count, 1,
-        "pruning must not cascade-delete usb_device_exports"
-    );
-
-    // `all_usb_device_root_paths`/`untainted_usb_root_paths` (exercised
-    // directly in service::tests and diag_tests) deliberately never filter
-    // on deleted_at -- confirm the underlying row (which those functions
-    // read from) is still present, just soft-deleted, not gone.
-    let root_still_present: i64 = conn
-        .query_row(
-            "SELECT COUNT(1) FROM usb_devices WHERE root_path = '/mnt/usb1'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("root still present");
-    assert_eq!(root_still_present, 1);
-
-    // Re-picking/validating the same root should un-prune it (exercised at
-    // the service level in Step 2/4's own tests via upsert_usb_device;
-    // here we just confirm list_usb_devices reflects deleted_at again once
-    // it's cleared).
-    conn.execute(
-        "UPDATE usb_devices SET deleted_at = NULL WHERE id = 'dev-1'",
-        [],
-    )
-    .expect("clear deleted_at");
-    let listed_again = svc.list_usb_devices().expect("list again");
-    assert_eq!(listed_again.items.len(), 1);
 }

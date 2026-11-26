@@ -21,6 +21,8 @@ accumulating forever on the (often space-constrained) USB stick. This archiving 
 stable cache directory yet, so everything is left on the USB until it's named. Total snapshots
 kept (USB + cache, combined) is capped by a user-configurable retention count in Settings
 (default 10; oldest cache-side snapshots are pruned first once the cap is exceeded).
+Removing the drive from the USB page's recent list deletes its cache, archived snapshots
+included, after asking; the newest snapshot on the drive itself stays with it.
 
 Backups are managed through a dedicated **Backups** panel (the **Backups** button on the USB page): it lists
 every snapshot (bundling each timestamp's PDB+eDB pair into one "eDB and PDB" row, tagged with

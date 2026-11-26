@@ -1328,8 +1328,17 @@ function applyUsbDevices(ctx, devices) {
   renderUsbRecentRoots(ctx);
 }
 
+// Forgetting a drive deletes what this computer kept of it (its tracks, its
+// archived backups), so it asks first.
 export async function pruneUsbDevice(ctx, id) {
   if (!id) return;
+  const device = ctx.state.usbDevices.find((d) => d.id === id);
+  const confirmed = await ctx.openConfirmDialog({
+    title: t("ui-usb-forget-title", { name: device?.label || device?.rootPath || "" }),
+    message: t("ui-usb-forget-message"),
+    confirmLabel: t("ui-usb-forget-confirm")
+  });
+  if (!confirmed) return;
   try {
     const data = await ctx.command("prune_usb_device", { id });
     applyUsbDevices(ctx, data.devices);
@@ -1350,7 +1359,8 @@ export function renderUsbRecentRoots(ctx) {
     const btn = row.querySelector(".usb-cfg-recent-btn");
     btn.dataset.usbRecentPath = path;
     btn.dataset.tooltip = path;
-    btn.textContent = path;
+    // Sticks that mount at the same path (one drive letter) tell apart by name.
+    btn.textContent = device.label || path;
 
     const pruneBtn = row.querySelector(".usb-cfg-recent-prune-btn");
     pruneBtn.dataset.usbPruneDeviceId = device.id;

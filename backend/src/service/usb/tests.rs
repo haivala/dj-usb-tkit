@@ -1157,31 +1157,185 @@ fn validate_usb_root_stages_edb_and_verifies_it_for_the_connect() {
     );
 }
 
-#[test]
-fn prune_usb_device_soft_deletes_and_removes_from_listing() {
-    let (_dir, service) = test_service();
-    let (_usb_dir, usb_root) = test_usb_root();
+fn validate(service: &crate::service::BackendService, usb_root: &Path) {
     service
         .validate_usb_root(crate::models::ValidateUsbRootRequest {
             path: usb_root.to_string_lossy().to_string(),
         })
         .expect("validate");
-    let devices = service.list_usb_devices().expect("list devices");
-    let id = devices.items[0].id.clone();
+}
+
+fn device_id(service: &crate::service::BackendService, usb_root: &Path) -> String {
+    let conn = service.db.connect().expect("connect");
+    super::identity::usb_device_id_for_root(&conn, usb_root)
+        .expect("device id")
+        .expect("a known drive")
+}
+
+fn ids(conn: &rusqlite::Connection, sql: &str) -> Vec<String> {
+    conn.prepare(sql)
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+// Usually someone else's stick, read to fix it: its tracks go with it, unless
+// the library or a playlist has them.
+#[test]
+fn removing_a_drive_forgets_its_tracks_links_and_cache() {
+    let (_dir, service) = test_service();
+    let cache = tempfile::tempdir().expect("cache dir");
+    let _cache_guard =
+        crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+    let (_usb_dir, usb_root) = test_usb_root();
+    set_name(&service, &usb_root, "Club Stick").expect("name drive");
+    validate(&service, &usb_root);
+    let archived = cache.path().join("club-stick/backups/export_old.pdb");
+    std::fs::create_dir_all(archived.parent().unwrap()).unwrap();
+    std::fs::write(&archived, b"pdb").unwrap();
+    let id = device_id(&service, &usb_root);
+    let usb = usb_root.to_string_lossy();
+    let conn = service.db.connect().unwrap();
+    conn.execute_batch(&format!(
+        r#"
+        INSERT INTO app_settings (key, value, updated_at)
+          VALUES ('ui_source_roots_v1', '["/music"]', 'now');
+        INSERT INTO usb_devices (id, root_path, root_path_key, label, name_slug, first_seen_at,
+                                 last_seen_at, created_at, updated_at)
+          VALUES ('other', '/media/other', '/media/other', 'Other', 'other', 'now', 'now', 'now', 'now');
+        INSERT INTO tracks (id, title, artist, file_path, created_at, updated_at)
+          VALUES ('t-usb', 'T', 'A', '{usb}/Contents/a.mp3', 'now', 'now'),
+                 ('t-playlist', 'T', 'A', '{usb}/Contents/b.mp3', 'now', 'now'),
+                 ('t-library', 'T', 'A', '/music/c.mp3', 'now', 'now'),
+                 ('t-other-drive', 'T', 'A', '{usb}/Contents/d.mp3', 'now', 'now');
+        INSERT INTO playlists (id, name, source, created_at, updated_at)
+          VALUES ('p1', 'Set', 'app', 'now', 'now');
+        INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at)
+          VALUES ('pt1', 'p1', 't-playlist', 0, 'now');
+        INSERT INTO track_usb_links (id, track_id, usb_device_id, usb_file_path,
+                                     first_seen_at, last_seen_at)
+          VALUES ('l1', 't-usb', '{id}', '/Contents/a.mp3', 'now', 'now'),
+                 ('l2', 't-playlist', '{id}', '/Contents/b.mp3', 'now', 'now'),
+                 ('l3', 't-library', '{id}', '/Contents/c.mp3', 'now', 'now'),
+                 ('l4', 't-other-drive', '{id}', '/Contents/d.mp3', 'now', 'now'),
+                 ('l5', 't-other-drive', 'other', '/Contents/d.mp3', 'now', 'now');
+        INSERT INTO usb_device_exports (id, usb_device_id, playlist_name, exported_at,
+                                        track_count, track_fingerprints, created_at)
+          VALUES ('e1', '{id}', 'Set', 'now', 1, '[]', 'now');
+        "#
+    ))
+    .unwrap();
 
     let pruned = service
         .prune_usb_device(crate::models::PruneUsbDeviceRequest { id: id.clone() })
         .expect("prune");
     assert!(pruned.pruned);
-    assert!(pruned.devices.is_empty(), "the list comes back without it");
+    let listed: Vec<&str> = pruned.devices.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(listed, vec!["other"], "the list comes back without it");
+
+    assert_eq!(
+        ids(&conn, "SELECT id FROM tracks ORDER BY id"),
+        vec!["t-library", "t-other-drive", "t-playlist"]
+    );
+    assert_eq!(ids(&conn, "SELECT id FROM track_usb_links"), vec!["l5"]);
+    assert!(ids(&conn, "SELECT id FROM usb_device_exports").is_empty());
+    assert!(
+        !cache.path().join("club-stick").exists(),
+        "its archived backups went"
+    );
+    assert_eq!(
+        super::identity::find_registered_drive(&conn, "Club Stick").unwrap(),
+        None,
+        "its name is free"
+    );
+    assert!(
+        super::identity::all_usb_device_root_paths(&conn)
+            .unwrap()
+            .contains(&usb.to_string()),
+        "its path still counts as removable media"
+    );
 
     let pruned_again = service
         .prune_usb_device(crate::models::PruneUsbDeviceRequest { id })
         .expect("prune again");
     assert!(
         !pruned_again.pruned,
-        "already-pruned device should be a no-op"
+        "a forgotten drive is no longer listed"
     );
+}
+
+// One drive letter on Windows, or one volume label on Linux, serves many sticks:
+// each named stick keeps its own row and links.
+#[test]
+fn named_drives_at_the_same_path_are_separate_devices() {
+    let (_dir, service) = test_service();
+    let (_usb_dir, usb_root) = test_usb_root();
+    set_name(&service, &usb_root, "Club Stick").expect("name the first stick");
+    validate(&service, &usb_root);
+    let first = device_id(&service, &usb_root);
+
+    // Another stick at the same path, named on another computer.
+    super::identity::write_drive_name(&usb_root, "Booth Stick").unwrap();
+    validate(&service, &usb_root);
+    let second = device_id(&service, &usb_root);
+    assert_ne!(first, second);
+
+    let devices = service.list_usb_devices().unwrap().items;
+    let mut labels: Vec<Option<String>> = devices.iter().map(|d| d.label.clone()).collect();
+    labels.sort();
+    assert_eq!(
+        labels,
+        vec![
+            Some("Booth Stick".to_string()),
+            Some("Club Stick".to_string())
+        ]
+    );
+
+    super::identity::write_drive_name(&usb_root, "Club Stick").unwrap();
+    assert_eq!(device_id(&service, &usb_root), first);
+}
+
+// A stick seen at another path is the same device, now there.
+#[test]
+fn a_named_drive_keeps_its_row_at_another_path() {
+    let (_dir, service) = test_service();
+    let (_usb_dir_a, usb_root_a) = test_usb_root();
+    let (_usb_dir_b, usb_root_b) = test_usb_root();
+    set_name(&service, &usb_root_a, "Club Stick").expect("name drive");
+    validate(&service, &usb_root_a);
+    let id = device_id(&service, &usb_root_a);
+
+    std::fs::copy(
+        super::identity::app_marker_dir(&usb_root_a).join("drive.json"),
+        {
+            std::fs::create_dir_all(super::identity::app_marker_dir(&usb_root_b)).unwrap();
+            super::identity::app_marker_dir(&usb_root_b).join("drive.json")
+        },
+    )
+    .unwrap();
+    std::fs::remove_dir_all(&usb_root_a).unwrap();
+    validate(&service, &usb_root_b);
+
+    assert_eq!(device_id(&service, &usb_root_b), id);
+    let devices = service.list_usb_devices().unwrap().items;
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].root_path, usb_root_b.to_string_lossy());
+}
+
+// Naming the stick at hand keeps what was read from it before it had a name.
+#[test]
+fn naming_a_drive_keeps_the_row_it_had_unnamed() {
+    let (_dir, service) = test_service();
+    let (_usb_dir, usb_root) = test_usb_root();
+    validate(&service, &usb_root);
+    let unnamed = device_id(&service, &usb_root);
+
+    set_name(&service, &usb_root, "Club Stick").expect("name drive");
+
+    assert_eq!(device_id(&service, &usb_root), unnamed);
+    assert_eq!(service.list_usb_devices().unwrap().items.len(), 1);
 }
 
 #[test]

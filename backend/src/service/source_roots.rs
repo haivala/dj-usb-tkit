@@ -743,6 +743,50 @@ impl BackendService {
     }
 }
 
+/// Deletes those of `track_ids` that were made for a stick's tracks and that
+/// nothing keeps any more: the file on a known USB drive's path, outside
+/// every source folder, not from the rekordbox or Mixxx library, in no
+/// playlist and linked to no USB drive. Such rows only slow down every
+/// library listing. A library track never goes, whatever the source-folder
+/// setting says. Returns how many went.
+pub(crate) fn delete_unreferenced_tracks(
+    conn: &rusqlite::Connection,
+    track_ids: &[String],
+) -> BackendResult<usize> {
+    let sources = LibrarySources::load(conn)?;
+    let usb_roots = super::usb::identity::all_usb_device_root_paths(conn)?;
+    let mut unreferenced = conn.prepare(
+        "SELECT file_path FROM tracks t
+         WHERE id = ?1 AND rekordbox_db_source = 0 AND mixxx_db_source = 0
+           AND NOT EXISTS (SELECT 1 FROM playlist_tracks WHERE track_id = t.id)
+           AND NOT EXISTS (SELECT 1 FROM track_usb_links WHERE track_id = t.id)",
+    )?;
+    let mut removed = 0usize;
+    for id in track_ids {
+        let Some(file_path) = unreferenced
+            .query_row(params![id], |row| row.get::<_, String>(0))
+            .optional()?
+        else {
+            continue;
+        };
+        let on_a_stick = usb_roots
+            .iter()
+            .any(|root| browse_path_matches_root(&file_path, root));
+        let in_library = sources
+            .roots
+            .iter()
+            .any(|root| browse_path_matches_root(&file_path, root));
+        if !on_a_stick || in_library {
+            continue;
+        }
+        removed += conn.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+    }
+    if removed > 0 {
+        super::transcode::sweep_orphan_transcodes(conn)?;
+    }
+    Ok(removed)
+}
+
 /// Whether every one of `tracks` under `root` has its core analysis, and
 /// there is at least one. Callers pass the full, unfiltered track set so a
 /// folder's status never depends on a search query.
