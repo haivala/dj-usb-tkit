@@ -336,6 +336,8 @@ impl BackendService {
         svc.reset_mounted_usb_devices()?;
         // One-time upgrades of data older versions wrote; see `migrations.rs`.
         svc.run_startup_data_migrations();
+        // Whatever the USB cache holds is in the recent list, to forget.
+        svc.sync_recent_usbs_at_start();
         Ok(svc)
     }
 

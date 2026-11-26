@@ -1192,7 +1192,9 @@ fn removing_a_drive_forgets_its_tracks_links_and_cache() {
     let (_usb_dir, usb_root) = test_usb_root();
     set_name(&service, &usb_root, "Club Stick").expect("name drive");
     validate(&service, &usb_root);
-    let archived = cache.path().join("club-stick/backups/export_old.pdb");
+    let archived = cache
+        .path()
+        .join("club-stick/PIONEER/rekordbox/backups/export_2026-01-01_00-00-00.pdb");
     std::fs::create_dir_all(archived.parent().unwrap()).unwrap();
     std::fs::write(&archived, b"pdb").unwrap();
     let id = device_id(&service, &usb_root);
@@ -1227,6 +1229,29 @@ fn removing_a_drive_forgets_its_tracks_links_and_cache() {
         "#
     ))
     .unwrap();
+
+    // The dialog before it says what goes, and changes nothing.
+    let preview = service
+        .preview_prune_usb_device(crate::models::PruneUsbDeviceRequest { id: id.clone() })
+        .expect("preview");
+    assert_eq!(preview.title_text, "Delete Club Stick from this computer?");
+    let message = &preview.message_text;
+    assert!(
+        message.starts_with("Deletes from this computer:\n• 1 track read from it\n• "),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(
+            " of copies of its databases and 1 backup\nThe newest backup on the USB itself stays."
+        ),
+        "{message}"
+    );
+    assert_eq!(
+        ids(&conn, "SELECT id FROM tracks").len(),
+        4,
+        "the preview rolls back"
+    );
+    assert!(archived.exists());
 
     let pruned = service
         .prune_usb_device(crate::models::PruneUsbDeviceRequest { id: id.clone() })
@@ -1264,6 +1289,114 @@ fn removing_a_drive_forgets_its_tracks_links_and_cache() {
         !pruned_again.pruned,
         "a forgotten drive is no longer listed"
     );
+}
+
+// What the USB cache holds is always in the recent list: on app start, a
+// cache dir no listed drive has brings its drive back, to forget like any other.
+#[test]
+fn syncing_the_recent_list_brings_back_every_cached_drive() {
+    let (_dir, service) = test_service();
+    let cache = tempfile::tempdir().expect("cache dir");
+    let _cache_guard =
+        crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+    let (_usb_dir, usb_root) = test_usb_root();
+    let usb = usb_root.to_string_lossy();
+    let conn = service.db.connect().unwrap();
+    conn.execute_batch(&format!(
+        r#"
+        INSERT INTO usb_devices (id, root_path, root_path_key, label, name_slug, first_seen_at,
+                                 last_seen_at, deleted_at, created_at, updated_at)
+          VALUES ('live-id', '{usb}', '{usb}', 'Live', 'live', 'now', 'now', NULL, 'now', 'now'),
+                 ('uncached', '/media/uncached', '/media/uncached', 'Uncached', 'uncached',
+                  'now', 'now', NULL, 'now', 'now'),
+                 ('gone', '/media/gone', '/media/gone', NULL, NULL, 'now', 'now', 'then', 'now', 'now');
+        "#
+    ))
+    .unwrap();
+    let unnamed = super::staging::cache_key(None, std::path::Path::new("/media/gone"));
+    let live_before_named = super::staging::cache_key(None, &usb_root);
+    let backups = |key: &str| cache.path().join(key).join("PIONEER/rekordbox/backups");
+    for key in ["live", "kerde", "Not A Key", &unnamed, &live_before_named] {
+        std::fs::create_dir_all(backups(key)).unwrap();
+    }
+    for stamp in ["2026-01-01_00-00-00", "2026-01-02_00-00-00"] {
+        for file in [
+            format!("export_{stamp}.pdb"),
+            format!("exportLibrary_{stamp}.db"),
+        ] {
+            std::fs::write(backups("kerde").join(file), [0u8; 1024]).unwrap();
+        }
+    }
+
+    assert_eq!(super::identity::sync_recent_usbs(&conn, "now").unwrap(), 2);
+    assert_eq!(
+        super::identity::sync_recent_usbs(&conn, "now").unwrap(),
+        0,
+        "a synced drive is listed"
+    );
+
+    let listed = service.list_usb_devices().expect("list").items;
+    let mut entries: Vec<(Option<&str>, &str, bool)> = listed
+        .iter()
+        .map(|d| (d.label.as_deref(), d.root_path.as_str(), d.missing))
+        .collect();
+    entries.sort();
+    assert_eq!(
+        entries,
+        vec![
+            // A forgotten drive comes back with its folder.
+            (None, "/media/gone", false),
+            (Some("Live"), usb.as_ref(), false),
+            // Listed, but this computer keeps nothing of it: the only red one.
+            (Some("Uncached"), "/media/uncached", true),
+            // A cache with no row: named by its key, no known folder.
+            (Some("kerde"), "", false),
+        ]
+    );
+    assert!(
+        super::identity::all_usb_device_root_paths(&conn)
+            .unwrap()
+            .iter()
+            .all(|path| !path.is_empty())
+    );
+
+    let kerde = listed
+        .iter()
+        .find(|d| d.label.as_deref() == Some("kerde"))
+        .unwrap();
+    let preview = service
+        .preview_prune_usb_device(crate::models::PruneUsbDeviceRequest {
+            id: kerde.id.clone(),
+        })
+        .expect("preview");
+    assert_eq!(preview.title_text, "Delete kerde from this computer?");
+    assert_eq!(
+        preview.message_text,
+        "Deletes from this computer:\n\
+         • 4.0 KB of copies of its databases and 2 backups\n\
+         The newest backup on the USB itself stays."
+    );
+
+    let synced = |d: &&crate::models::UsbDeviceSummary| {
+        d.label.as_deref() == Some("kerde") || d.root_path == "/media/gone"
+    };
+    for device in listed.iter().filter(synced) {
+        let pruned = service
+            .prune_usb_device(crate::models::PruneUsbDeviceRequest {
+                id: device.id.clone(),
+            })
+            .expect("prune");
+        assert!(pruned.pruned);
+    }
+    assert!(!cache.path().join("kerde").exists());
+    assert!(!cache.path().join(&unnamed).exists());
+    assert!(cache.path().join("live").exists());
+    assert!(
+        cache.path().join(&live_before_named).exists(),
+        "the listed drive's"
+    );
+    assert!(cache.path().join("Not A Key").exists(), "not the app's");
+    assert_eq!(super::identity::sync_recent_usbs(&conn, "now").unwrap(), 0);
 }
 
 // One drive letter on Windows, or one volume label on Linux, serves many sticks:

@@ -138,10 +138,12 @@ export function syncLibraryOnboardingMode(ctx) {
 export function createConfirmDialogController(el) {
   const dialog = createDialogLifecycle(el.confirmOverlay, { cancelValue: "cancel" });
 
-  function show({ title, message, confirmLabel, altLabel = null, cancelLabel = null }) {
+  // `danger`: the confirm button deletes what can't be got back, and looks it.
+  function show({ title, message, confirmLabel, altLabel = null, cancelLabel = null, danger = false }) {
     el.confirmTitle.textContent = title || t("ui-common-confirm");
     el.confirmMessage.textContent = message || "";
     el.confirmOkBtn.textContent = confirmLabel || t("ui-common-confirm");
+    el.confirmOkBtn.toggleAttribute("data-danger", danger);
     el.confirmAltBtn.hidden = !altLabel;
     el.confirmAltBtn.textContent = altLabel || "";
     el.confirmCancelBtn.textContent = cancelLabel || t("ui-common-cancel");

@@ -218,6 +218,7 @@ pub fn command_block(command: &str) -> Option<CommandBlock> {
         | "get_frontend_settings"
         | "get_track_columns"
         | "list_usb_devices"
+        | "preview_prune_usb_device"
         | "list_usb_backups"
         | "fetch_usb_playlists"
         | "fetch_usb_histories"

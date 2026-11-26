@@ -14,17 +14,23 @@ function installTauriMock(
     // A name saved before a reload (`sessionStorage`) is the drive's from the start.
     let storedName = sessionStorage.getItem("deviceName") || deviceName;
     const usbRoot = "/Volumes/USB-TEST";
-    let forgotten = false;
-    const devices = () => forgotten ? [] : [{
+    const forgotten = new Set();
+    const devices = () => [{
       id: "dev-1", rootPath: usbRoot, label: storedName, mounted: false,
-      firstSeenAt: "2024-01-01T00:00:00Z", lastSeenAt: "2024-01-01T00:00:00Z"
-    }];
+      firstSeenAt: "2024-01-01T00:00:00Z", lastSeenAt: "2024-01-01T00:00:00Z", missing: false, tooltipText: usbRoot
+    }, {
+      // This computer keeps no cache of it.
+      id: "dev-2", rootPath: "/Volumes/GONE", label: "Old Stick", mounted: false,
+      firstSeenAt: "2024-01-01T00:00:00Z", lastSeenAt: "2024-01-01T00:00:00Z", missing: true, tooltipText: "mock missing tooltip"
+    }].filter((d) => !forgotten.has(d.id));
 
     backend.install((command, r) => {
       switch (command) {
         case "list_usb_devices": return backend.ok({ items: devices() });
+        case "preview_prune_usb_device":
+          return backend.ok({ titleText: `mock delete ${r.id}?`, messageText: `mock what ${r.id} keeps` });
         case "prune_usb_device":
-          forgotten = true;
+          forgotten.add(r.id);
           return backend.ok({ pruned: true, devices: devices() });
         case "select_usb":
           return backend.ok({
@@ -107,31 +113,45 @@ test("naming a drive from its recent pill", async ({ page }) => {
   }
 });
 
-test("forgetting a recent USB asks first, then drops it from the list the prune answers with", async ({ page }) => {
+test("deleting a recent USB asks first, saying what goes, then drops it from the list the prune answers with", async ({ page }) => {
   await installTauriMock(page, { deviceName: "Club Stick" });
   await page.goto("/");
   await page.locator('.nav-item[data-view="usb"]').click();
   const pill = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]');
   // Sticks sharing a path (one drive letter) tell apart by name; the path is the tooltip.
   await expect(pill).toHaveText("Club Stick");
+  await expect(page.locator("#usbRecentList .usb-cfg-recent-item").first()).not.toHaveClass(/usb-cfg-recent-missing/);
   await expect(pill).toHaveAttribute("data-tooltip", "/Volumes/USB-TEST");
   const lists = await page.evaluate(() => window.__calls.filter((c) => c.command === "list_usb_devices").length);
   const prunes = () => page.evaluate(() => window.__calls.filter((c) => c.command === "prune_usb_device").length);
 
-  // It deletes what this computer kept of the stick, so it asks; cancelling keeps it.
-  await page.locator("#usbRecentList .usb-cfg-recent-prune-btn").click();
-  await expect(page.locator("#confirmTitle")).toHaveText("Forget Club Stick?");
-  await expect(page.locator("#confirmMessage")).toContainText("backups of it kept on this computer are deleted too");
+  // It deletes what this computer kept of the stick, so it asks with the backend's
+  // count of it, on a red Delete; cancelling keeps it.
+  await page.locator("#usbRecentList .usb-cfg-recent-prune-btn").first().click();
+  await expect(page.locator("#confirmTitle")).toHaveText("mock delete dev-1?");
+  await expect(page.locator("#confirmMessage")).toHaveText("mock what dev-1 keeps");
+  await expect(page.locator("#confirmOkBtn")).toHaveText("Delete");
+  await expect(page.locator("#confirmOkBtn")).toHaveAttribute("data-danger", "");
   await page.locator("#confirmCancelBtn").click();
   await expect(pill).toBeVisible();
   expect(await prunes()).toBe(0);
 
-  await page.locator("#usbRecentList .usb-cfg-recent-prune-btn").click();
+  await page.locator("#usbRecentList .usb-cfg-recent-prune-btn").first().click();
   await page.locator("#confirmOkBtn").click();
   await expect(pill).toHaveCount(0);
   expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "prune_usb_device").map((c) => c.request.id))).toEqual(["dev-1"]);
   // The list came with the prune's answer: no second read.
   expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "list_usb_devices").length)).toBe(lists);
+
+  // A USB this computer keeps no cache of is red, saying why, and deletes the same way.
+  const missing = page.locator("#usbRecentList .usb-cfg-recent-missing");
+  await expect(missing).toHaveCount(1);
+  await expect(missing.locator(".usb-cfg-recent-btn")).toHaveText("Old Stick");
+  await expect(missing.locator(".usb-cfg-recent-btn")).toHaveAttribute("data-tooltip", "mock missing tooltip");
+  await missing.locator(".usb-cfg-recent-prune-btn").click();
+  await expect(page.locator("#confirmTitle")).toHaveText("mock delete dev-2?");
+  await page.locator("#confirmOkBtn").click();
+  await expect(missing).toHaveCount(0);
 });
 
 test("selecting the same USB again picks up a session recorded since the last read", async ({ page }) => {

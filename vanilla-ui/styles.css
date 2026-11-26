@@ -1874,6 +1874,18 @@ button[data-primary]:hover {
   box-shadow: 0 0 14px var(--accent-glow);
 }
 
+/* A primary button that deletes for good (the confirm dialog's `danger`). */
+button[data-primary][data-danger] {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--ink-on-accent);
+}
+
+button[data-primary][data-danger]:hover {
+  background: color-mix(in srgb, var(--danger) 85%, #000);
+  box-shadow: 0 0 14px var(--danger-glow);
+}
+
 /* disabled buttons */
 button:disabled,
 button[disabled] {
@@ -3880,6 +3892,16 @@ td button[data-action]:disabled,
   background: none;
   border: none;
   box-shadow: none;
+}
+
+/* A recent USB this computer keeps no cache of. */
+.usb-cfg-recent-missing {
+  border-color: color-mix(in srgb, var(--danger) 64%, var(--line));
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-elevated));
+}
+
+.usb-cfg-recent-missing .usb-cfg-recent-btn {
+  color: color-mix(in srgb, var(--danger) 76%, var(--ink));
 }
 
 .usb-cfg-recent-prune-btn {

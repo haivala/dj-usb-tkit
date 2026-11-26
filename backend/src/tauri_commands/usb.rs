@@ -137,6 +137,18 @@ pub async fn list_usb_devices(
 }
 
 #[tauri::command]
+pub async fn preview_prune_usb_device(
+    state: State<'_, BackendCommands>,
+    request: PruneUsbDeviceRequest,
+) -> Result<ApiResponse<crate::models::PreviewPruneUsbDeviceData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("preview_prune_usb_device", move || {
+        commands.preview_prune_usb_device(request)
+    })
+    .await)
+}
+
+#[tauri::command]
 pub async fn prune_usb_device(
     state: State<'_, BackendCommands>,
     request: PruneUsbDeviceRequest,

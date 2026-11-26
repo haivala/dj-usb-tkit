@@ -59,6 +59,23 @@ usb-error-no-player-database = Cette clé USB n'a pas de base de données pour l
 usb-error-no-pdb = Cette clé USB n'a que l'eDB, pas la PDB nécessaire ici. « Aperçu des corrections » peut créer la PDB à partir de l'eDB.
 usb-error-track-not-found = morceau { $id } introuvable sur la clé USB
 
+usb-forget-title = Supprimer { $name } de cet ordinateur ?
+usb-forget-intro = Supprime de cet ordinateur :
+usb-forget-nothing-kept = Cet ordinateur ne garde rien de cette clé, sauf sa place dans la liste.
+usb-forget-tracks = { $count ->
+    [one] { $count } morceau lu depuis cette clé
+   *[other] { $count } morceaux lus depuis cette clé
+}
+usb-forget-cache = { $size } de copies de ses bases de données et { $backups ->
+    [0] aucune sauvegarde
+    [one] { $backups } sauvegarde
+   *[other] { $backups } sauvegardes
+}
+usb-forget-usb-backup-stays = La sauvegarde la plus récente sur la clé USB elle-même reste.
+usb-recent-no-cache-tooltip = { $path } : cet ordinateur ne garde aucune copie de ses bases de données ni de ses sauvegardes
+usb-recent-no-folder-tooltip = Son dossier n'est pas connu : seul ce que cet ordinateur garde de cette clé est là
+usb-error-device-not-listed = { $id } n'est plus dans la liste des clés USB récentes
+
 usb-warning-path-empty = Le chemin USB est vide
 usb-warning-path-not-found = Le chemin n'existe pas : { $path }
 usb-warning-missing-vendor-root = Dossier racine du fabricant manquant
@@ -2381,7 +2398,7 @@ ui-usb-diag-back-to-report = Retour au rapport
 ui-usb-diag-log-link = → journal des événements
 ui-usb-drag-to-set-tooltip = Glisser pour définir l'ordre de préférence
 ui-usb-edb = eDB
-ui-usb-forget-tooltip = Oublier cette clé USB
+ui-usb-forget-tooltip = Supprimer cette clé USB de cet ordinateur
 ui-usb-health-card = État et diagnostics
 ui-usb-health-unknown = État de la clé USB : inconnu
 ui-usb-empty-heading = Branchez une clé USB pour la parcourir et exporter
@@ -2413,10 +2430,7 @@ ui-usb-export-playlists-running = { $count ->
 ui-usb-export-starting = Démarrage de l'export USB...
 ui-usb-export-failed = Échec de l'export : { $error }. Voir le Journal des événements pour les détails.
 ui-usb-export-failed-unknown = Échec de l'export USB
-ui-usb-forget-path-aria-label = Oublier { $path }
-ui-usb-forget-title = Oublier { $name } ?
-ui-usb-forget-message = Les morceaux lus depuis cette clé et ses sauvegardes conservées sur cet ordinateur sont aussi supprimés. La sauvegarde la plus récente sur la clé USB elle-même reste.
-ui-usb-forget-confirm = Oublier
+ui-usb-forget-path-aria-label = Supprimer { $path }
 ui-usb-parity-running = Rapport de parité USB en cours...
 ui-usb-repair-applying = Application des corrections USB prises en charge...
 ui-usb-repair-previewing = Aperçu des corrections USB...

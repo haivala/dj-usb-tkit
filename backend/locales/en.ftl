@@ -99,6 +99,29 @@ usb-error-no-pdb = This USB has only the eDB, not the PDB this needs. Preview Fi
 # $id: the track's id in the USB's databases.
 usb-error-track-not-found = track { $id } not found on the USB
 
+# Removing a USB from the recent list (prune_usb_device) and its confirmation. $name: its name, or its folder when it has none.
+usb-forget-title = Delete { $name } from this computer?
+usb-forget-intro = Deletes from this computer:
+usb-forget-nothing-kept = This computer keeps nothing of it but its place in the list.
+# $count: the tracks read from it that nothing else keeps.
+usb-forget-tracks = { $count ->
+    [one] { $count } track read from it
+   *[other] { $count } tracks read from it
+}
+# $size: what its copies of the databases and its backups take. $backups: the backups.
+usb-forget-cache = { $size } of copies of its databases and { $backups ->
+    [0] no backups
+    [one] { $backups } backup
+   *[other] { $backups } backups
+}
+usb-forget-usb-backup-stays = The newest backup on the USB itself stays.
+# A recent USB this computer keeps nothing of (no staged databases or backups). $path: its folder.
+usb-recent-no-cache-tooltip = { $path }: this computer keeps no copy of its databases or backups
+# A recent USB known only by what this computer keeps of it.
+usb-recent-no-folder-tooltip = Its folder isn't known: only what this computer keeps of it is here
+# $id: the entry's id.
+usb-error-device-not-listed = { $id } isn't in the recent USB list any more
+
 # Event Log warnings while connecting a USB (choosing its folder).
 usb-warning-path-empty = USB path is empty
 # $path: the folder chosen.
@@ -3104,7 +3127,7 @@ ui-usb-diag-back-to-report = Back to Report
 ui-usb-diag-log-link = → event log
 ui-usb-drag-to-set-tooltip = Drag to set the order of preference
 ui-usb-edb = eDB
-ui-usb-forget-tooltip = Forget this USB device
+ui-usb-forget-tooltip = Delete this USB from this computer
 ui-usb-health-card = Health & Diagnostics
 # The USB health dots' tooltip before diagnostics ran (after, the diagnostics send theirs).
 ui-usb-health-unknown = USB health: unknown
@@ -3145,13 +3168,9 @@ ui-usb-export-starting = Starting USB export...
 # $error: why it failed, or ui-usb-export-failed-unknown when nothing says.
 ui-usb-export-failed = Export failed: { $error }. See Event Log for details.
 ui-usb-export-failed-unknown = USB export failed
-# The aria-label of the button that forgets a recent USB.
+# The aria-label of the button that deletes a recent USB.
 # $path: the USB's folder.
-ui-usb-forget-path-aria-label = Forget { $path }
-# The confirmation before a USB device leaves the recent list. $name: its name, or its path when it has none.
-ui-usb-forget-title = Forget { $name }?
-ui-usb-forget-message = The tracks read from it and the backups of it kept on this computer are deleted too. The newest backup on the USB itself stays.
-ui-usb-forget-confirm = Forget
+ui-usb-forget-path-aria-label = Delete { $path }
 ui-usb-parity-running = Running USB parity report...
 ui-usb-repair-applying = Applying supported USB repair fixes...
 ui-usb-repair-previewing = Previewing USB repair fixes...

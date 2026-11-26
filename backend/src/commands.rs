@@ -560,6 +560,13 @@ impl BackendCommands {
         wrap(self.service.list_usb_devices())
     }
 
+    pub fn preview_prune_usb_device(
+        &self,
+        req: PruneUsbDeviceRequest,
+    ) -> ApiResponse<crate::models::PreviewPruneUsbDeviceData> {
+        wrap(self.service.preview_prune_usb_device(req))
+    }
+
     pub fn prune_usb_device(&self, req: PruneUsbDeviceRequest) -> ApiResponse<PruneUsbDeviceData> {
         wrap(self.service.prune_usb_device(req))
     }

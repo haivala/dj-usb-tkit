@@ -498,27 +498,85 @@ fn unnamed_device_id(conn: &rusqlite::Connection, root_key: &str) -> BackendResu
 }
 
 impl BackendService {
+    /// The recent list, each drive with whether this computer keeps a cache
+    /// of it (`missing` when it keeps none). Without a cache root (only tests
+    /// run without one) nothing is missing.
     pub fn list_usb_devices(&self) -> BackendResult<crate::models::ListUsbDevicesData> {
         let conn = self.db.connect()?;
+        let cached: Option<std::collections::HashSet<String>> =
+            super::staging::cache_dirs().map(|dirs| dirs.into_iter().map(|(key, _)| key).collect());
         let mut stmt = conn.prepare(
-            "SELECT id, root_path, label, mounted, first_seen_at, last_seen_at
+            "SELECT id, root_path, label, mounted, first_seen_at, last_seen_at, name_slug
              FROM usb_devices
              WHERE deleted_at IS NULL
              ORDER BY last_seen_at DESC",
         )?;
         let items = stmt
             .query_map([], |row| {
+                let root_path: String = row.get(1)?;
+                let label: Option<String> = row.get(2)?;
+                let name_slug: Option<String> = row.get(6)?;
+                let root = Path::new(&root_path);
+                // Its name's cache, or the one from before it was named.
+                let missing = cached.as_ref().is_some_and(|cached| {
+                    let name = name_slug.and(label.clone());
+                    !cached.contains(&super::staging::cache_key(name.as_deref(), root))
+                        && !cached.contains(&super::staging::cache_key(None, root))
+                });
                 Ok(crate::models::UsbDeviceSummary {
                     id: row.get(0)?,
-                    root_path: row.get(1)?,
-                    label: row.get(2)?,
+                    tooltip_text: if root_path.is_empty() {
+                        tr::usb_recent_no_folder_tooltip().render()
+                    } else if missing {
+                        tr::usb_recent_no_cache_tooltip(&root_path).render()
+                    } else {
+                        root_path.clone()
+                    },
+                    root_path,
+                    label,
                     mounted: row.get::<_, i64>(3)? != 0,
                     first_seen_at: row.get(4)?,
                     last_seen_at: row.get(5)?,
+                    missing,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(crate::models::ListUsbDevicesData { items })
+    }
+
+    /// What removing the list entry `id` would delete, for the dialog before
+    /// `prune_usb_device`: forgets the drive in a transaction it rolls back,
+    /// to count the tracks that would go.
+    pub fn preview_prune_usb_device(
+        &self,
+        req: crate::models::PruneUsbDeviceRequest,
+    ) -> BackendResult<crate::models::PreviewPruneUsbDeviceData> {
+        let mut conn = self.db.connect()?;
+        let tx = conn.transaction()?;
+        let drive = forget_usb_device(&tx, &req.id, &now())?
+            .ok_or_else(|| BackendError::NotFound(tr::usb_error_device_not_listed(&req.id)))?;
+        tx.rollback()?;
+        Ok(forget_confirm_texts(&drive))
+    }
+
+    /// `sync_recent_usbs` at app start (`new()`). A failure is logged; the
+    /// list then shows what it had, and the next start syncs again.
+    pub(crate) fn sync_recent_usbs_at_start(&self) {
+        let synced = self
+            .db
+            .connect()
+            .and_then(|conn| sync_recent_usbs(&conn, &now()));
+        match synced {
+            Ok(0) => {}
+            Ok(n) => crate::logging::debug(
+                "usb-devices",
+                format!("{n} USB cache folders came back into the recent list"),
+            ),
+            Err(err) => crate::logging::debug(
+                "usb-devices",
+                format!("syncing the recent USB list with the cache failed: {err:?}"),
+            ),
+        }
     }
 
     /// Forgets a drive removed from the list (`forget_usb_device`), and its
@@ -533,10 +591,11 @@ impl BackendService {
         tx.commit()?;
         drop(conn);
         if let Some(drive) = &forgotten {
-            crate::service::usb::staging::remove_cache_dir(drive.name.as_deref(), &drive.root_path)
-                .map_err(|e| {
+            for key in &drive.cache_keys {
+                crate::service::usb::staging::remove_cache_dir(key).map_err(|e| {
                     BackendError::Internal(format!("failed to remove the drive's cache: {e}"))
                 })?;
+            }
             self.invalidate_usb_parse_cache();
         }
         Ok(crate::models::PruneUsbDeviceData {
@@ -928,12 +987,17 @@ pub(crate) fn rename_drive(
     Ok(())
 }
 
-/// What `forget_usb_device` leaves to clear off this computer's disk: the
-/// drive's cache, found by its name, or by the path for an unnamed drive.
+/// What `forget_usb_device` forgot, and what it leaves to clear off this
+/// computer's disk: the drive's cache, keyed by its name, or by the path for
+/// an unnamed drive (`staging::cache_key`). A named drive also has its path's
+/// cache from before it was named, unless a listed drive mounts there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ForgottenDrive {
-    pub name: Option<String>,
-    pub root_path: PathBuf,
+    /// Its name, or its folder when it has none.
+    pub shown_name: String,
+    pub cache_keys: Vec<String>,
+    /// The track rows that went with its links.
+    pub tracks: usize,
 }
 
 /// Forgets the drive of row `id`, one the user removed from the list (usually
@@ -989,11 +1053,129 @@ pub(crate) fn forget_usb_device(
             rusqlite::params![now_ts, id],
         )?;
     }
-    crate::service::delete_unreferenced_tracks(conn, &linked)?;
+    let tracks = crate::service::delete_unreferenced_tracks(conn, &linked)?;
+    let name = name_slug.and(label);
+    let root = Path::new(&root_path);
+    let mut cache_keys = vec![super::staging::cache_key(name.as_deref(), root)];
+    let path_listed: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM usb_devices WHERE root_path_key = ?1 AND deleted_at IS NULL)",
+        rusqlite::params![key],
+        |row| row.get(0),
+    )?;
+    let path_key = super::staging::cache_key(None, root);
+    if !root_path.is_empty() && !path_listed && !cache_keys.contains(&path_key) {
+        cache_keys.push(path_key);
+    }
     Ok(Some(ForgottenDrive {
-        name: name_slug.and(label),
-        root_path: PathBuf::from(root_path),
+        shown_name: name.unwrap_or(root_path),
+        cache_keys,
+        tracks,
     }))
+}
+
+/// Syncs the recent list with this computer's USB cache, on every app
+/// start: a cache dir no listed drive has (staged databases and archived
+/// backups whose drive was removed while removing kept them, or whose delete
+/// failed) puts its drive back in the list, to see and forget like any
+/// other. A forgotten row the dir is for comes back; otherwise the dir comes
+/// back as a drive named by its key, with no known folder. Answers how many
+/// came back.
+pub(crate) fn sync_recent_usbs(conn: &rusqlite::Connection, now_ts: &str) -> BackendResult<usize> {
+    let dirs = super::staging::cache_dirs().unwrap_or_default();
+    if dirs.is_empty() {
+        return Ok(0);
+    }
+    let rows: Vec<(String, String, Option<String>, Option<String>, bool)> = conn
+        .prepare("SELECT id, root_path, name_slug, label, deleted_at IS NOT NULL FROM usb_devices")?
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })?
+        .collect::<Result<_, _>>()?;
+    let mut listed = std::collections::HashSet::new();
+    let mut forgotten = std::collections::HashMap::new();
+    for (id, root_path, name_slug, label, deleted) in rows {
+        let root = Path::new(&root_path);
+        // A forgotten row has no name: its cache is its path's.
+        let path_key = super::staging::cache_key(None, root);
+        if deleted {
+            forgotten.entry(path_key).or_insert(id);
+        } else {
+            // A drive read before it was named staged under its path's key.
+            listed.insert(super::staging::cache_key(
+                name_slug.and(label).as_deref(),
+                root,
+            ));
+            listed.insert(path_key);
+        }
+    }
+    let mut synced = 0;
+    // A dir whose name no drive's key can be isn't the app's.
+    let unlisted = dirs
+        .into_iter()
+        .filter(|(key, _)| !listed.contains(key) && slug(key) == *key);
+    for (key, _) in unlisted {
+        if let Some(id) = forgotten.get(&key) {
+            conn.execute(
+                "UPDATE usb_devices SET deleted_at = NULL, mounted = 0, updated_at = ?1
+                 WHERE id = ?2",
+                params![now_ts, id],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT INTO usb_devices (id, root_path, root_path_key, label, name_slug,
+                                          mounted, first_seen_at, last_seen_at, created_at,
+                                          updated_at)
+                 VALUES (?1, '', '', ?2, ?3, 0, ?4, ?4, ?4, ?4)",
+                params![uuid::Uuid::now_v7().to_string(), key, key, now_ts],
+            )?;
+        }
+        synced += 1;
+    }
+    Ok(synced)
+}
+
+/// "Delete …?" before `prune_usb_device`: what deleting the entry `id` takes
+/// off this computer.
+fn forget_confirm_texts(drive: &ForgottenDrive) -> crate::models::PreviewPruneUsbDeviceData {
+    let mut lines = Vec::new();
+    if drive.tracks > 0 {
+        lines.push(tr::usb_forget_tracks(drive.tracks).render());
+    }
+    let usages: Vec<_> = drive
+        .cache_keys
+        .iter()
+        .filter_map(|key| super::staging::cache_dir_usage(key))
+        .collect();
+    if !usages.is_empty() {
+        let bytes = usages.iter().map(|usage| usage.bytes).sum::<u64>();
+        let backups = usages
+            .iter()
+            .map(|usage| super::backups::snapshot_count(&usage.backups_dir))
+            .sum::<usize>();
+        lines.push(tr::usb_forget_cache(crate::utils::byte_size_precise(bytes), backups).render());
+    }
+    let mut message = if lines.is_empty() {
+        tr::usb_forget_nothing_kept()
+    } else {
+        tr::usb_forget_intro()
+    }
+    .render();
+    for line in lines {
+        message.push_str("\n• ");
+        message.push_str(&line);
+    }
+    message.push('\n');
+    message.push_str(&tr::usb_forget_usb_backup_stays().render());
+    crate::models::PreviewPruneUsbDeviceData {
+        title_text: tr::usb_forget_title(&drive.shown_name).render(),
+        message_text: message,
+    }
 }
 
 /// All known device root paths (display form), ANY mount state, ANY age,
@@ -1007,7 +1189,8 @@ pub(crate) fn forget_usb_device(
 /// `WHERE deleted_at IS NULL`) on purpose -- those two read paths have
 /// different correctness requirements and must not share a single query.
 pub(crate) fn all_usb_device_root_paths(conn: &rusqlite::Connection) -> BackendResult<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT root_path FROM usb_devices")?;
+    // A drive back from the cache with no known folder has none to count.
+    let mut stmt = conn.prepare("SELECT root_path FROM usb_devices WHERE root_path != ''")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let mut paths = Vec::new();
     for row in rows {

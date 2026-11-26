@@ -22,7 +22,9 @@ stable cache directory yet, so everything is left on the USB until it's named. T
 kept (USB + cache, combined) is capped by a user-configurable retention count in Settings
 (default 10; oldest cache-side snapshots are pruned first once the cap is exceeded).
 Removing the drive from the USB page's recent list deletes its cache, archived snapshots
-included, after asking; the newest snapshot on the drive itself stays with it.
+included, after asking with their count and size; the newest snapshot on the drive itself stays
+with it. A drive whose cache is on this computer is always in the recent list: at app start, a
+cache no listed drive has brings its drive back into the list.
 
 Backups are managed through a dedicated **Backups** panel (the **Backups** button on the USB page): it lists
 every snapshot (bundling each timestamp's PDB+eDB pair into one "eDB and PDB" row, tagged with

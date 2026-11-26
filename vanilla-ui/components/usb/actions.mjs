@@ -1329,14 +1329,15 @@ function applyUsbDevices(ctx, devices) {
 }
 
 // Forgetting a drive deletes what this computer kept of it (its tracks, its
-// archived backups), so it asks first.
+// archived backups), so it asks first, saying how much (the backend's text).
 export async function pruneUsbDevice(ctx, id) {
   if (!id) return;
-  const device = ctx.state.usbDevices.find((d) => d.id === id);
+  const preview = await ctx.command("preview_prune_usb_device", { id });
   const confirmed = await ctx.openConfirmDialog({
-    title: t("ui-usb-forget-title", { name: device?.label || device?.rootPath || "" }),
-    message: t("ui-usb-forget-message"),
-    confirmLabel: t("ui-usb-forget-confirm")
+    title: preview.titleText,
+    message: preview.messageText,
+    confirmLabel: t("ui-common-delete"),
+    danger: true
   });
   if (!confirmed) return;
   try {
@@ -1358,7 +1359,9 @@ export function renderUsbRecentRoots(ctx) {
     const row = cloneTemplate(document, "tplUsbRecentItem");
     const btn = row.querySelector(".usb-cfg-recent-btn");
     btn.dataset.usbRecentPath = path;
-    btn.dataset.tooltip = path;
+    // In the list, but this computer keeps no cache of it (the tooltip says so).
+    row.classList.toggle("usb-cfg-recent-missing", !!device.missing);
+    btn.dataset.tooltip = device.tooltipText || path;
     // Sticks that mount at the same path (one drive letter) tell apart by name.
     btn.textContent = device.label || path;
 

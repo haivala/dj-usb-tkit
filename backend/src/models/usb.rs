@@ -144,6 +144,14 @@ pub struct UsbDeviceSummary {
     pub mounted: bool,
     pub first_seen_at: String,
     pub last_seen_at: String,
+    /// This computer keeps no cache of it (staged databases, archived
+    /// backups), checked when listed.
+    #[serde(default)]
+    pub missing: bool,
+    /// The folder, saying so when nothing of it is kept, or that the folder
+    /// isn't known (a drive back from the cache, `sync_recent_usbs`).
+    #[serde(default)]
+    pub tooltip_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +164,14 @@ pub struct ListUsbDevicesData {
 #[serde(rename_all = "camelCase")]
 pub struct PruneUsbDeviceRequest {
     pub id: String,
+}
+
+/// The confirmation before `prune_usb_device`: what it deletes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewPruneUsbDeviceData {
+    pub title_text: String,
+    pub message_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

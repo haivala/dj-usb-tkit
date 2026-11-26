@@ -91,10 +91,20 @@ The name of record is a marker file on the drive itself.
 Removing a drive from the recent list forgets it: its links and export
 records go, then the track rows only those links kept (rows under a source
 folder, from rekordbox or Mixxx, or in a playlist stay), its name is free, and
-its HDD cache with the archived backups is deleted. A mount path left without
+its HDD cache with the archived backups is deleted, and so is the cache its
+mount path had before it was named (unless a listed drive mounts there). A mount path left without
 a row keeps a forgotten one (`deleted_at`), so it still counts as removable
 media. A drive that stays in the list keeps its links, also to files since
 deleted from it; only removing the drive clears them.
+
+The recent list always holds every drive this computer keeps anything of: on
+each app start, `sync_recent_usbs` brings back the drive of each HDD cache dir
+no listed drive has (a removal that kept the cache, or whose delete failed). A
+forgotten row the dir is for comes back as it was; otherwise a row named by
+the dir's key, with no known folder (`root_path` empty, never counted as
+removable media). The list marks a drive this computer keeps no cache of
+`missing` (shown red); it's forgotten like any other. A drive that isn't
+plugged in isn't red: being away is normal.
 
 ### WarningEntry
 
@@ -162,7 +172,8 @@ stay in `db.rs` `migrate()` and are versioned by `schema_version`.
   track rows made for its tracks, which slowed every library listing. Those links and export
   records go, then the track rows from a stick (linked to a removed drive, or with their file
   on a known drive's path) that nothing keeps; a library track is never looked at. The
-  removed drives' HDD caches stay: removing them didn't say they would go.
+  removed drives' HDD caches stay: removing them didn't say they would go. They come back
+  into the recent list (`sync_recent_usbs`), to forget there.
 - **Background** migrations run through the `run_data_migrations` command. The frontend
   calls it once after the initial load, and it shows in the footer progress bar as a
   `migration` job. With nothing pending it returns at once and emits no job events. While

@@ -428,9 +428,18 @@ applies them as they come and never asks for the list again after a change.
   valid USB it also answers `audioFormats` (below) and `deviceName` (`{ name, suggestedName,
   nameTakenBy }`), each `null` when it can't be read (an Event Log warning says why); `devices`
   is the known drives, as `list_usb_devices` lists them. Plus the playlist state (see Playlists)
-- `list_usb_devices`
+- `list_usb_devices` — `{ items: [{ id, rootPath, label, mounted, firstSeenAt, lastSeenAt,
+  missing, tooltipText }] }`: the recent list. `missing`: this computer keeps no HDD cache of the
+  drive. `rootPath` is empty for a drive back from the cache with no
+  known folder (`sync_recent_usbs` in `docs/APP_DATA_MODEL.md`). `tooltipText` is the folder,
+  saying so when nothing of the drive is kept, or that its folder isn't known.
+- `preview_prune_usb_device` — `{ id }` → `{ titleText, messageText }`: the confirmation before
+  `prune_usb_device`, counting what it deletes: the tracks only the drive's links keep (worked
+  out by forgetting it in a transaction that's rolled back), and the size of its HDD caches with
+  the backups archived there.
 - `prune_usb_device` — `{ id }` → `{ pruned, devices }`: forgets the drive (its links, the
-  track rows only they kept, its name, its HDD cache and archived backups); `devices` is the
+  track rows only they kept, its name, its HDD cache and archived backups, and the cache its
+  mount path had before it was named, unless a listed drive mounts there). `devices` is the
   list `list_usb_devices` would answer after the prune.
 - `set_usb_device_name`
 - `audioFormats` (`select_usb`) →

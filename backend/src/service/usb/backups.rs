@@ -323,6 +323,11 @@ fn backup_time_text(timestamp: &str) -> String {
     }
 }
 
+/// The backups (one per timestamp) in the cache-side `dir`.
+pub(crate) fn snapshot_count(dir: &Path) -> usize {
+    entries_by_timestamp(&[(dir.to_path_buf(), "cache")]).len()
+}
+
 fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
     let mut by_timestamp: BTreeMap<String, Vec<(UsbBackupFile, &str)>> = BTreeMap::new();
     for (dir, location) in dirs {

@@ -182,7 +182,7 @@ fn cache_key_for_root(usb_root: &Path) -> String {
     )
 }
 
-fn cache_key(name: Option<&str>, usb_root: &Path) -> String {
+pub(crate) fn cache_key(name: Option<&str>, usb_root: &Path) -> String {
     if let Some(name) = name {
         return crate::service::usb::identity::slug(name);
     }
@@ -194,22 +194,68 @@ fn cache_key(name: Option<&str>, usb_root: &Path) -> String {
     format!("unnamed-{:016x}", hasher.finish())
 }
 
-/// Deletes a forgotten drive's cache dir: its staged databases and the
-/// backups archived from it. `name` is the drive's name, or `None` for an
-/// unnamed drive, whose cache is its mount path's. A drive still plugged in
+/// The drives' cache dirs on disk, by key (`cache_key`), sorted. `None`
+/// without a cache root (only tests run without one).
+pub(crate) fn cache_dirs() -> Option<Vec<(String, PathBuf)>> {
+    let cache_root = cache_root()?;
+    let mut dirs: Vec<(String, PathBuf)> = std::fs::read_dir(cache_root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|entry| {
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                entry.path(),
+            )
+        })
+        .collect();
+    dirs.sort();
+    Some(dirs)
+}
+
+/// What the cache dir of key `key` takes on disk, and where its archived
+/// backups are. `None` when it has no cache dir (or staging is off).
+pub(crate) struct CacheDirUsage {
+    pub bytes: u64,
+    pub backups_dir: PathBuf,
+}
+
+pub(crate) fn cache_dir_usage(key: &str) -> Option<CacheDirUsage> {
+    let dir = cache_root()?.join(key);
+    if !dir.is_dir() {
+        return None;
+    }
+    let bytes = walkdir::WalkDir::new(&dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.metadata().ok())
+        .filter(|meta| meta.is_file())
+        .map(|meta| meta.len())
+        .sum();
+    Some(CacheDirUsage {
+        bytes,
+        backups_dir: local_vendor_db_dir(&dir).join("backups"),
+    })
+}
+
+/// Deletes the cache dir of key `key` (`cache_key`): a drive's staged
+/// databases and the backups archived from it. A drive still plugged in
 /// stages again on its next read.
-pub(crate) fn remove_cache_dir(name: Option<&str>, usb_root: &Path) -> std::io::Result<()> {
+pub(crate) fn remove_cache_dir(key: &str) -> std::io::Result<()> {
     let Some(cache_root) = cache_root() else {
         return Ok(());
     };
-    let key = cache_key(name, usb_root);
     let _guard = STATE_LOCK.lock().unwrap();
-    VERIFIED_THIS_CONNECT.lock().unwrap().retain(|k| *k != key);
+    VERIFIED_THIS_CONNECT
+        .lock()
+        .unwrap()
+        .retain(|k| k.as_str() != key);
     RESOLVED_CACHE_KEYS
         .lock()
         .unwrap()
-        .retain(|(_, resolved)| *resolved != key);
-    match std::fs::remove_dir_all(cache_root.join(&key)) {
+        .retain(|(_, resolved)| resolved.as_str() != key);
+    match std::fs::remove_dir_all(cache_root.join(key)) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
     }

@@ -968,6 +968,7 @@ fn main() {
             backend::tauri_commands::usb::set_export_sync_mode,
             backend::tauri_commands::usb::select_usb,
             backend::tauri_commands::usb::list_usb_devices,
+            backend::tauri_commands::usb::preview_prune_usb_device,
             backend::tauri_commands::usb::prune_usb_device,
             backend::tauri_commands::usb::set_usb_device_name,
             backend::tauri_commands::usb::set_usb_audio_formats,
