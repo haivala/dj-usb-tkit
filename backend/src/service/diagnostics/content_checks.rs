@@ -223,7 +223,9 @@ pub(crate) fn detect_bpm_key_mismatches(
     app_master_db_id: Option<u32>,
 ) -> Vec<BpmKeyMismatch> {
     type EdbBpmKey = (Option<i64>, Option<String>);
-    let edb_by_path: HashMap<String, EdbBpmKey> = edb
+    // Every eDB row of a path: one per rekordbox library that exported the
+    // file, like the PDB's rows below.
+    let edb_by_path: HashMap<String, Vec<EdbBpmKey>> = edb
         .and_then(|conn| {
             let with_key = table_exists(conn, "key");
             let sql = if with_key {
@@ -244,7 +246,11 @@ pub(crate) fn detect_bpm_key_mismatches(
                     ))
                 })
                 .ok()?;
-            Some(rows.filter_map(Result::ok).collect())
+            let mut by_path = HashMap::<String, Vec<EdbBpmKey>>::new();
+            for (path, values) in rows.filter_map(Result::ok) {
+                by_path.entry(path).or_default().push(values);
+            }
+            Some(by_path)
         })
         .unwrap_or_default();
 
@@ -257,39 +263,94 @@ pub(crate) fn detect_bpm_key_mismatches(
     } else {
         HashSet::new()
     };
-    let mut out = Vec::new();
+    // Rows naming one audio file (a stick exported from more than one
+    // rekordbox library has them, each with its own library's analysis, in
+    // the PDB and in the eDB alike) share the file's bundle. An eDB row or
+    // the bundle agrees when it matches any of the file's PDB rows. A file
+    // is reported once, aligned to its first PDB row: the fix writes every
+    // eDB row of the path, and aligning to one row's values while another
+    // row is checked would flag the file again on every pass.
+    let mut files = std::collections::BTreeMap::<&str, Vec<&crate::pdb_reader::PdbTrackRow>>::new();
     for track in &parsed.tracks {
+        files
+            .entry(track.track_file_path.as_str())
+            .or_default()
+            .push(track);
+    }
+    let mut out = Vec::new();
+    for (path, mut rows) in files {
+        rows.sort_by_key(|t| t.id);
+        let tempos = rows
+            .iter()
+            .map(|t| t.tempo_x100)
+            .filter(|t| *t > 0)
+            .collect::<HashSet<_>>();
+        let Some(track) = rows
+            .iter()
+            .find(|t| t.tempo_x100 > 0)
+            .or(rows.first())
+            .copied()
+        else {
+            continue;
+        };
         let pdb_tempo_x100 = track.tempo_x100;
-        let edb_row = edb_by_path.get(&track.track_file_path);
+        let edb_rows = edb_by_path.get(path).map_or(&[][..], Vec::as_slice);
 
-        let dat = (scan_anlz && pdb_tempo_x100 > 0 && !shared_bundle_tracks.contains(&track.id))
-            .then(|| crate::service::usb::root::resolve_usb_side_path(usb_root, &track.anlz_path))
-            .flatten();
-        let anlz_tempos_x100 = dat.as_ref().map_or([None, None], |dat| {
-            // Only the beat-grid chunks: an `.EXT` is mostly waveforms.
-            [dat.clone(), dat.with_extension("EXT")].map(|p| {
-                crate::service::anlz::read_anlz_chunks(&p, &[*b"PQTZ", *b"PQT2"])
-                    .and_then(|bytes| crate::service::anlz::read_beatgrid_tempo_from_anlz(&bytes))
-            })
-        });
-        let anlz_dat_path = dat.filter(|_| {
-            anlz_tempos_x100
-                .iter()
-                .flatten()
-                .any(|t| u32::from(*t) != pdb_tempo_x100)
-        });
-        let edb_bpmx100 = edb_row
-            .and_then(|(bpm, _)| *bpm)
-            .filter(|v| pdb_tempo_x100 > 0 && *v != i64::from(pdb_tempo_x100));
-        let pdb_key_for_edb = parsed
-            .keys
-            .get(&track.key_id)
-            .map(|name| name.trim())
-            .filter(|name| !name.is_empty())
-            .filter(|pdb_key| {
-                edb_row.is_some_and(|(_, edb_key)| {
-                    !edb_key.as_deref().is_some_and(|edb_key| {
-                        crate::service::export_helpers::key_names_match(pdb_key, edb_key)
+        // Each bundle the file's rows point at, unless it is another track's.
+        let mut anlz_tempos_x100 = [None, None];
+        let mut anlz_dat_path = None;
+        if scan_anlz && pdb_tempo_x100 > 0 {
+            let mut seen = HashSet::new();
+            for row in &rows {
+                if shared_bundle_tracks.contains(&row.id) {
+                    continue;
+                }
+                let Some(dat) =
+                    crate::service::usb::root::resolve_usb_side_path(usb_root, &row.anlz_path)
+                else {
+                    continue;
+                };
+                if !seen.insert(dat.clone()) {
+                    continue;
+                }
+                // Only the beat-grid chunks: an `.EXT` is mostly waveforms.
+                let read = [dat.clone(), dat.with_extension("EXT")].map(|p| {
+                    crate::service::anlz::read_anlz_chunks(&p, &[*b"PQTZ", *b"PQT2"]).and_then(
+                        |bytes| crate::service::anlz::read_beatgrid_tempo_from_anlz(&bytes),
+                    )
+                });
+                if anlz_tempos_x100 == [None, None] {
+                    anlz_tempos_x100 = read;
+                }
+                if read
+                    .iter()
+                    .flatten()
+                    .any(|t| !tempos.contains(&u32::from(*t)))
+                {
+                    anlz_tempos_x100 = read;
+                    anlz_dat_path = Some(dat);
+                    break;
+                }
+            }
+        }
+        let edb_bpmx100 = edb_rows
+            .iter()
+            .filter_map(|(bpm, _)| *bpm)
+            .find(|v| pdb_tempo_x100 > 0 && !tempos.iter().any(|t| i64::from(*t) == *v));
+        let key_name = |row: &crate::pdb_reader::PdbTrackRow| {
+            parsed
+                .keys
+                .get(&row.key_id)
+                .map(|name| name.trim())
+                .filter(|name| !name.is_empty())
+        };
+        let pdb_key_for_edb = key_name(track)
+            .filter(|_| {
+                edb_rows.iter().any(|(_, edb_key)| {
+                    !rows.iter().filter_map(|row| key_name(row)).any(|pdb_key| {
+                        edb_key.as_deref().is_some_and(|edb_key| {
+                            crate::service::export_helpers::key_names_match(pdb_key, edb_key)
+                        })
                     })
                 })
             })
@@ -757,11 +818,6 @@ where
                 pdb_match_rate: 0.0,
                 edb_match_rate: 0.0,
             });
-            checks.push(DiagCheck::named(
-                edb_name.clone(),
-                DiagStatus::Fail,
-                tr::diagnostics_check_playlist_edb_only(edb_entries),
-            ));
         }
     }
 
@@ -789,12 +845,31 @@ where
             grouped_leaves.len(),
         ),
     ));
+    // The window says how many; the Event Log names each playlist
+    // (`playlist_resolution_warnings`).
     if edb_only_playlist_count > 0 {
-        checks.push(DiagCheck::new(
-            tr::diagnostics_check_db_only_playlists(),
-            DiagStatus::Fail,
-            tr::diagnostics_check_db_only_playlists_detail(edb_only_playlist_count),
-        ));
+        checks.push(
+            DiagCheck::new(
+                tr::diagnostics_check_db_only_playlists(),
+                DiagStatus::Fail,
+                tr::diagnostics_check_db_only_playlists_detail(edb_only_playlist_count),
+            )
+            .with_link("event-log"),
+        );
+    }
+    let unresolved = playlist_details
+        .iter()
+        .filter(|pd| pd.resolution_rate < 1.0 && !is_edb_only_playlist(pd))
+        .collect::<Vec<_>>();
+    if !unresolved.is_empty() {
+        checks.push(
+            DiagCheck::new(
+                tr::diagnostics_check_unresolved_playlists(),
+                DiagStatus::worst_of(&unresolved.iter().map(|pd| &pd.status).collect::<Vec<_>>()),
+                tr::diagnostics_check_unresolved_playlists_detail(unresolved.len()),
+            )
+            .with_link("event-log"),
+        );
     }
     if edb_playlist_tracks.is_some() {
         let pdb_rate = if cross_source_pdb_total > 0 {
@@ -825,21 +900,6 @@ where
         tr::diagnostics_check_operational_detail(),
     ));
 
-    // List playlists with issues
-    for pd in &playlist_details {
-        if pd.resolution_rate < 1.0 {
-            checks.push(DiagCheck::named(
-                pd.name.clone(),
-                pd.status.clone(),
-                tr::diagnostics_check_playlist_resolution(
-                    pd.resolved_entries,
-                    pd.total_entries,
-                    Num::fixed(pd.resolution_rate * 100.0, 1),
-                ),
-            ));
-        }
-    }
-
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     (
         DiagSection {
@@ -851,4 +911,36 @@ where
         },
         playlist_details,
     )
+}
+
+/// A playlist only the eDB has: the PDB lists none of its entries.
+fn is_edb_only_playlist(pd: &PlaylistDiagEntry) -> bool {
+    pd.pdb_entries == 0 && pd.resolution_rate < 1.0
+}
+
+/// The Event Log lines naming each playlist the Playlist Resolution checks
+/// count: the eDB-only ones and those with entries whose track is missing.
+pub(crate) fn playlist_resolution_warnings(details: &[PlaylistDiagEntry]) -> Vec<WarningEntry> {
+    details
+        .iter()
+        .filter(|pd| pd.resolution_rate < 1.0)
+        .map(|pd| {
+            let text = if is_edb_only_playlist(pd) {
+                tr::diagnostics_warning_playlist_edb_only(&pd.name, pd.edb_entries)
+            } else {
+                tr::diagnostics_warning_playlist_unresolved(
+                    &pd.name,
+                    pd.resolved_entries,
+                    pd.total_entries,
+                    Num::fixed(pd.resolution_rate * 100.0, 1),
+                )
+            };
+            logging::log_text(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.playlist-resolution",
+                &text,
+            )
+        })
+        .collect()
 }

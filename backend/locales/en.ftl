@@ -730,11 +730,11 @@ diagnostics-check-path-agreement-history-only = { $count ->
 diagnostics-check-beat-grid = Beat grid format
 diagnostics-check-beat-grid-not-exported = no tracks on this USB were exported by this app
 diagnostics-check-beat-grid-current = every beat grid this app wrote to this USB is in the current format
-# $count: the tracks. $examples: up to three of their paths, joined with ", ".
+# $count: the tracks.
 diagnostics-check-beat-grid-outdated = Tracks with a beat grid in an outdated format that some players (e.g. the XDJ-AZ) reject, so Beat Sync is unavailable on them: { $count }; re-export or run the repair (update_app_analysis_files) to fix. See Event Log for the list.
 diagnostics-check-long-waveforms = Long-track waveforms
 diagnostics-check-long-waveforms-ok = no track longer than about 9 minutes has a waveform analysis up to 0.6.6 drew
-# $count: the tracks. $examples: up to three of their paths, joined with ", ".
+# $count: the tracks.
 diagnostics-check-long-waveforms-stretched = Tracks longer than about 9 minutes whose waveform analysis up to 0.6.6 drew stretched, so the sound shows later than it plays and the end is missing: { $count }; run the repair (update_app_analysis_files) to fix. See Event Log for the list.
 diagnostics-check-pdb-analysis = PDB analysis refs
 # $with: the track rows with an analysis path. $total: all track rows. $refs: the different analysis files they point to.
@@ -755,8 +755,8 @@ diagnostics-check-edb-analysis-detail = { $with }/{ $total } playlist-linked con
 diagnostics-check-edb-analysis-no-tracks = No tracks in the eDB
 diagnostics-check-edb-analysis-no-data = No eDB playlist data available
 diagnostics-check-playlist-data = Playlist data
-# A row named after a playlist only the eDB has. $count: its tracks.
-diagnostics-check-playlist-edb-only = present in eDB only ({ $count ->
+# Event Log line for a playlist only the eDB has. $playlist: its name. $count: its tracks.
+diagnostics-warning-playlist-edb-only = { $playlist }: present in eDB only ({ $count ->
     [one] { $count } entry
    *[other] { $count } entries
 }), missing from PDB
@@ -771,14 +771,20 @@ diagnostics-check-db-only-playlists = DB-only playlists
 diagnostics-check-db-only-playlists-detail = { $count ->
     [one] { $count } playlist
    *[other] { $count } playlists
-} in eDB but not in PDB
+} in eDB but not in PDB. See Event Log for the list.
+diagnostics-check-unresolved-playlists = Unresolved playlists
+# $count: the playlists with entries whose track is missing.
+diagnostics-check-unresolved-playlists-detail = { $count ->
+    [one] { $count } playlist
+   *[other] { $count } playlists
+} with entries whose track is missing. See Event Log for the list.
 diagnostics-check-key-overlap = PDB vs eDB key overlap (informational)
 # $matched: the tracks both databases list. $pdbshare, $edbshare: their share of each database's tracks, such as 98.5. $pdb, $edb: each database's tracks.
 diagnostics-check-key-overlap-detail = matched { $matched } track keys; PDB { NUMBER($pdbshare) }% ({ $matched }/{ $pdb }), DB { NUMBER($edbshare) }% ({ $matched }/{ $edb })
 diagnostics-check-operational = Operational interpretation
 diagnostics-check-operational-detail = pass/warn here means operationally usable; strict parity may still fail on the same USB
-# A row named after a playlist with missing tracks. $resolved: its rows whose track exists. $total: its rows. $percent: the share, such as 98.5.
-diagnostics-check-playlist-resolution = { $resolved }/{ $total } entries ({ NUMBER($percent) }%)
+# Event Log line for a playlist with missing tracks. $playlist: its name. $resolved: its rows whose track exists. $total: its rows. $percent: the share, such as 98.5.
+diagnostics-warning-playlist-unresolved = { $playlist }: { $resolved }/{ $total } entries resolve ({ NUMBER($percent) }%)
 
 # The player counter checks. t00, t08, t11, t12, t17, t18, t19, ec, nrs, num_rl, rowpf0 and
 # tranrf0 are the PDB format's own names: keep them as they are.
@@ -809,11 +815,11 @@ diagnostics-check-edb-history-counts = { $playlists ->
 }
 diagnostics-check-string-alignment = Track/album string alignment
 diagnostics-check-string-alignment-ok = All UTF-16 and long ASCII string slots are 4-byte aligned
-# $count: the rows. $examples: up to three, such as "track #12 (title)", joined with ", ". The repair_* names are commands: keep them.
+# $count: the rows. The repair_* names are commands: keep them.
 diagnostics-check-string-alignment-misaligned = { $count ->
     [one] { $count } row
    *[other] { $count } rows
-} with a misaligned UTF-16 or long ASCII string slot — freezes/comm-errors CDJ hardware while browsing; e.g. { $examples }; run repair_pdb_track_string_alignment / repair_pdb_album_string_alignment / repair_pdb_artist_name_layout to fix
+} with a misaligned UTF-16 or long ASCII string slot — freezes/comm-errors CDJ hardware while browsing; run repair_pdb_track_string_alignment / repair_pdb_album_string_alignment / repair_pdb_artist_name_layout to fix. See Event Log for the list.
 diagnostics-check-artist-layout = Artist name layout
 diagnostics-check-artist-layout-ok = All artist names are where rekordbox puts them
 # $count: the artist rows.
@@ -823,11 +829,11 @@ diagnostics-check-artist-layout-moved = { $count ->
 } with the name at a different offset than rekordbox uses; an Engine DJ player importing export.pdb shows the artist's tracks without an artist; run repair_pdb_artist_name_layout to fix
 diagnostics-check-bpm-key = BPM/key consistency
 diagnostics-check-bpm-key-ok = export.pdb and exportLibrary.db agree on BPM and key for every track
-# $count: the tracks. $examples: up to three of their paths, joined with ", ".
+# $count: the tracks.
 diagnostics-check-bpm-key-mismatch = { $count ->
     [one] { $count } track
    *[other] { $count } tracks
-} whose BPM/key in exportLibrary.db differs from export.pdb -- CDJs may show a different BPM/key than the app; e.g. { $examples }; run the repair (fix_bpm_key_mismatch, which also checks the ANLZ beat grids) to fix
+} whose BPM/key in exportLibrary.db differs from export.pdb -- CDJs may show a different BPM/key than the app; run the repair (fix_bpm_key_mismatch, which also checks the ANLZ beat grids) to fix. See Event Log for the list.
 diagnostics-check-shared-analysis = Shared analysis files
 diagnostics-check-shared-analysis-ok = every track has its own analysis file
 # $tracks: the tracks. $files: the analysis files they share.
@@ -975,6 +981,10 @@ diagnostics-warning-beat-grid-outdated = beat grid in an outdated format: { $pat
 # $path: the track's USB path.
 diagnostics-warning-long-waveform = waveform stretched by analysis up to 0.6.6: { $path }
 diagnostics-warning-shared-analysis = shared analysis file: { $path } used by { $tracks }
+# $path: the track's USB path.
+diagnostics-warning-bpm-key-mismatch = BPM/key differs between export.pdb and exportLibrary.db: { $path }
+# $row: the PDB row, such as "track #12 (title)".
+diagnostics-warning-string-misalignment = misaligned string slot: { $row }
 # A track only a history session lists. $path: the track's file. $playlists: the sessions,
 # comma-separated.
 diagnostics-warning-history-only-track = history-only track: { $path } ({ $playlists })

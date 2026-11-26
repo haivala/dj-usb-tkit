@@ -641,7 +641,7 @@ impl BackendService {
         for bundle in &ownership.shared {
             for &id in &bundle.track_ids {
                 if let Some(update) = get(&mut updates, &rows, id, &bundle.dat) {
-                    if Some(id) == bundle.owner {
+                    if bundle.owners.contains(&id) {
                         update.track_path_missing = true;
                     } else {
                         update.own_bundle = true;

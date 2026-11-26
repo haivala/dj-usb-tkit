@@ -1085,7 +1085,9 @@ pub(crate) fn sync_recent_usbs(conn: &rusqlite::Connection, now_ts: &str) -> Bac
     if dirs.is_empty() {
         return Ok(0);
     }
-    let rows: Vec<(String, String, Option<String>, Option<String>, bool)> = conn
+    /// A `usb_devices` row: id, root path, name slug, label, forgotten.
+    type DeviceRow = (String, String, Option<String>, Option<String>, bool);
+    let rows: Vec<DeviceRow> = conn
         .prepare("SELECT id, root_path, name_slug, label, deleted_at IS NOT NULL FROM usb_devices")?
         .query_map([], |row| {
             Ok((

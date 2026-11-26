@@ -902,7 +902,7 @@ impl BackendService {
             let movers = analysis_ownership
                 .shared
                 .iter()
-                .map(|b| b.track_ids.len() - usize::from(b.owner.is_some()))
+                .map(|b| b.track_ids.len() - b.owners.len())
                 .sum::<usize>();
             detected_issues.push(format!(
                 "{} shared by tracks that need their own ({})",
@@ -920,7 +920,7 @@ impl BackendService {
                     .map(path_of)
                     .collect::<Vec<_>>()
                     .join(", ");
-                let line = match bundle.owner.as_ref() {
+                let line = match bundle.owners.first() {
                     Some(owner) => tr::repair_warning_shared_analysis(
                         bundle_rel(&bundle.dat),
                         &tracks,

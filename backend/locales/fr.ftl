@@ -573,7 +573,7 @@ diagnostics-check-edb-analysis-detail = { $with }/{ $total } lignes de contenu l
 diagnostics-check-edb-analysis-no-tracks = Aucun morceau dans l'eDB
 diagnostics-check-edb-analysis-no-data = Aucune donnée de playlist eDB disponible
 diagnostics-check-playlist-data = Données des playlists
-diagnostics-check-playlist-edb-only = présente seulement dans l'eDB ({ $count ->
+diagnostics-warning-playlist-edb-only = { $playlist } : présente seulement dans l'eDB ({ $count ->
     [one] { $count } entrée
    *[other] { $count } entrées
 }), absente de la PDB
@@ -586,12 +586,17 @@ diagnostics-check-db-only-playlists = Playlists seulement dans la base
 diagnostics-check-db-only-playlists-detail = { $count ->
     [one] { $count } playlist
    *[other] { $count } playlists
-} dans l'eDB mais pas dans la PDB
+} dans l'eDB mais pas dans la PDB. Voir le Journal des événements pour la liste.
+diagnostics-check-unresolved-playlists = Playlists non résolues
+diagnostics-check-unresolved-playlists-detail = { $count ->
+    [one] { $count } playlist
+   *[other] { $count } playlists
+} avec des entrées dont le morceau manque. Voir le Journal des événements pour la liste.
 diagnostics-check-key-overlap = Recouvrement des clés PDB et eDB (pour information)
 diagnostics-check-key-overlap-detail = { $matched } clés de morceaux concordantes ; PDB { NUMBER($pdbshare) } % ({ $matched }/{ $pdb }), DB { NUMBER($edbshare) } % ({ $matched }/{ $edb })
 diagnostics-check-operational = Interprétation opérationnelle
 diagnostics-check-operational-detail = OK/attention signifie ici utilisable en pratique ; la parité stricte peut quand même échouer sur la même clé USB
-diagnostics-check-playlist-resolution = { $resolved }/{ $total } entrées ({ NUMBER($percent) } %)
+diagnostics-warning-playlist-unresolved = { $playlist } : { $resolved }/{ $total } entrées résolues ({ NUMBER($percent) } %)
 
 diagnostics-check-history-page = Page d'historique PDB
 diagnostics-check-history-page-mismatch = t19 ne correspond pas au nombre de morceaux ni à la ligne de propriétés de l'eDB — les anciens lecteurs peuvent afficher 0 ou 1 morceau. La réparation corrige cela.
@@ -619,7 +624,7 @@ diagnostics-check-string-alignment-ok = Tous les emplacements de chaînes UTF-16
 diagnostics-check-string-alignment-misaligned = { $count ->
     [one] { $count } ligne
    *[other] { $count } lignes
-} avec un emplacement de chaîne UTF-16 ou ASCII longue mal aligné — fige le CDJ ou provoque des erreurs de communication pendant la navigation ; p. ex. { $examples } ; lancez repair_pdb_track_string_alignment / repair_pdb_album_string_alignment / repair_pdb_artist_name_layout pour corriger
+} avec un emplacement de chaîne UTF-16 ou ASCII longue mal aligné — fige le CDJ ou provoque des erreurs de communication pendant la navigation ; lancez repair_pdb_track_string_alignment / repair_pdb_album_string_alignment / repair_pdb_artist_name_layout pour corriger. Voir le Journal des événements pour la liste.
 diagnostics-check-artist-layout = Disposition des noms d'artistes
 diagnostics-check-artist-layout-ok = Tous les noms d'artistes sont là où rekordbox les place
 diagnostics-check-artist-layout-moved = { $count ->
@@ -631,7 +636,7 @@ diagnostics-check-bpm-key-ok = export.pdb et exportLibrary.db concordent sur le 
 diagnostics-check-bpm-key-mismatch = { $count ->
     [one] { $count } morceau
    *[other] { $count } morceaux
-} dont le BPM/la tonalité dans exportLibrary.db diffère d'export.pdb -- les CDJ peuvent afficher un autre BPM/une autre tonalité que l'application ; p. ex. { $examples } ; lancez la réparation (fix_bpm_key_mismatch, qui vérifie aussi les beatgrids ANLZ) pour corriger
+} dont le BPM/la tonalité dans exportLibrary.db diffère d'export.pdb -- les CDJ peuvent afficher un autre BPM/une autre tonalité que l'application ; lancez la réparation (fix_bpm_key_mismatch, qui vérifie aussi les beatgrids ANLZ) pour corriger. Voir le Journal des événements pour la liste.
 diagnostics-check-shared-analysis = Fichiers d'analyse partagés
 diagnostics-check-shared-analysis-ok = chaque morceau a son propre fichier d'analyse
 diagnostics-check-shared-analysis-shared = { $tracks ->
@@ -744,6 +749,8 @@ diagnostics-warning-unindexed-audio = fichier audio non indexé : { $path }
 diagnostics-warning-beat-grid-outdated = beatgrid dans un format obsolète : { $path }
 diagnostics-warning-long-waveform = forme d'onde étirée par l'analyse jusqu'à 0.6.6 : { $path }
 diagnostics-warning-shared-analysis = fichier d'analyse partagé : { $path } utilisé par { $tracks }
+diagnostics-warning-bpm-key-mismatch = BPM/tonalité différents entre export.pdb et exportLibrary.db : { $path }
+diagnostics-warning-string-misalignment = emplacement de chaîne mal aligné : { $row }
 diagnostics-warning-history-only-track = morceau seulement dans l'historique : { $path } ({ $playlists })
 diagnostics-warning-history-only-track-unknown = morceau seulement dans l'historique : { $path } (playlist d'historique inconnue)
 diagnostics-warning-anlz-malformed = entrée d'analyse mal formée : { $path }

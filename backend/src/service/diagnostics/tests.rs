@@ -1968,6 +1968,45 @@ fn playlist_resolution_summary_remains_operational_not_player_validation_wording
 }
 
 #[test]
+fn playlist_resolution_counts_edb_only_playlists_and_logs_each() {
+    let parsed = make_single_playlist_parsed("Both", 10, 1);
+    let edb = HashMap::from([(
+        "Only eDB".to_string(),
+        vec![
+            make_usb_track("1", "One", "Artist", "/Contents/A/One.mp3"),
+            make_usb_track("2", "Two", "Artist", "/Contents/A/Two.mp3"),
+        ],
+    )]);
+
+    let (section, details) = diagnose_playlist_resolution_with_db(Some(&parsed), Some(&edb));
+    // No row per playlist: one count, linked to the Event Log.
+    assert!(section.checks.iter().all(|c| c.label != "Only eDB"));
+    let db_only = section
+        .checks
+        .iter()
+        .find(|c| c.label == "DB-only playlists")
+        .expect("DB-only playlists check");
+    assert!(
+        db_only.detail.starts_with("1 playlist in eDB"),
+        "{db_only:?}"
+    );
+    assert_eq!(db_only.link.as_deref(), Some("event-log"));
+    // An eDB-only playlist isn't counted again as unresolved.
+    assert!(
+        section
+            .checks
+            .iter()
+            .all(|c| c.label != "Unresolved playlists")
+    );
+    let warnings = super::playlist_resolution_warnings(&details);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(
+        warnings[0].message,
+        "Only eDB: present in eDB only (2 entries), missing from PDB"
+    );
+}
+
+#[test]
 fn playlist_resolution_emits_stage_and_per_playlist_progress_messages() {
     let parsed = make_single_playlist_parsed("Progress", 10, 1);
     let mut progress = Vec::<String>::new();
@@ -2158,18 +2197,18 @@ fn analysis_ownership_picks_the_owner_of_a_shared_bundle() {
         let found = super::scan_analysis_ownership(root, &parsed, app, true);
         assert_eq!(found.shared.len(), 1, "{found:?}");
         assert_eq!(found.shared[0].track_ids, vec![1, 2]);
-        found.shared[0].owner
+        found.shared[0].owners.clone()
     };
 
     let root = tempdir().expect("tempdir");
     // No PPTH: the track this app exported wrote the file; without knowing
     // the app's id, nobody owns it.
     write_dat_naming(root.path(), shared, "");
-    assert_eq!(owner(root.path(), Some(APP)), Some(2));
-    assert_eq!(owner(root.path(), None), None);
+    assert_eq!(owner(root.path(), Some(APP)), vec![2]);
+    assert_eq!(owner(root.path(), None), Vec::<u32>::new());
     // A PPTH decides, whoever exported.
     write_dat_naming(root.path(), shared, "/Contents/A/First.mp3");
-    assert_eq!(owner(root.path(), Some(APP)), Some(1));
+    assert_eq!(owner(root.path(), Some(APP)), vec![1]);
     // Database-only: shared, owner unknown.
     let db_only = super::scan_analysis_ownership(root.path(), &parsed, Some(APP), false);
     assert_eq!(db_only.shared.len(), 1);
@@ -2208,8 +2247,147 @@ fn analysis_ownership_finds_unmarked_and_foreign_single_bundles() {
     );
     assert_eq!(found.shared.len(), 1, "{found:?}");
     assert_eq!(found.shared[0].track_ids, vec![3]);
-    assert_eq!(found.shared[0].owner, None);
+    assert!(found.shared[0].owners.is_empty());
     assert_eq!(found.non_owner_track_ids(), HashSet::from([3]));
+}
+
+/// Track rows naming one audio file, as on a stick exported from more than
+/// one rekordbox library: each library's export adds its own row.
+fn same_file_rows(ids: &[u32], path: &str, anlz: &str) -> Vec<PdbTrackRow> {
+    ids.iter()
+        .map(|&id| PdbTrackRow {
+            anlz_path: anlz.to_string(),
+            master_db_id: Some(id),
+            ..make_pdb_track(id, "Track", 1, path)
+        })
+        .collect()
+}
+
+#[test]
+fn analysis_ownership_rows_of_one_file_are_one_track() {
+    let root = tempdir().expect("tempdir");
+    let named = "/PIONEER/USBANLZ/P005/00000005/ANLZ0000.DAT";
+    let bare = "/PIONEER/USBANLZ/P006/00000006/ANLZ0000.DAT";
+    write_dat_naming(root.path(), named, "/Contents/A/Twice.mp3");
+    write_dat_naming(root.path(), bare, "");
+    let parsed = ParsedPdb {
+        tracks: [
+            same_file_rows(&[1, 2], "/Contents/A/Twice.mp3", named),
+            same_file_rows(&[3, 4], "/Contents/A/Bare.mp3", bare),
+        ]
+        .concat(),
+        ..ParsedPdb::default()
+    };
+    // Database-only, and with each bundle's PPTH read: nothing shared.
+    let db_only = super::scan_analysis_ownership(root.path(), &parsed, None, false);
+    assert!(db_only.shared.is_empty(), "{db_only:?}");
+    let found = super::scan_analysis_ownership(root.path(), &parsed, None, true);
+    assert!(found.shared.is_empty(), "{found:?}");
+    // The bundle without a PPTH gets one, once.
+    assert_eq!(
+        found
+            .unmarked
+            .iter()
+            .map(|b| b.track_id)
+            .collect::<Vec<_>>(),
+        vec![3]
+    );
+}
+
+#[test]
+fn analysis_ownership_owner_keeps_all_rows_of_its_file() {
+    let root = tempdir().expect("tempdir");
+    let shared = "/PIONEER/USBANLZ/P007/00000007/ANLZ0000.DAT";
+    let foreign = "/PIONEER/USBANLZ/P008/00000008/ANLZ0000.DAT";
+    write_dat_naming(root.path(), shared, "/Contents/A/Kept.mp3");
+    write_dat_naming(root.path(), foreign, "/Contents/A/Kept.mp3");
+    let parsed = ParsedPdb {
+        tracks: [
+            same_file_rows(&[1, 2], "/Contents/A/Kept.mp3", shared),
+            same_file_rows(&[3], "/Contents/B/Other.mp3", shared),
+            // Both rows' bundle names another track on the stick.
+            same_file_rows(&[4, 5], "/Contents/C/Moved.mp3", foreign),
+        ]
+        .concat(),
+        ..ParsedPdb::default()
+    };
+    let found = super::scan_analysis_ownership(root.path(), &parsed, None, true);
+    assert_eq!(found.shared.len(), 2, "{found:?}");
+    let kept = found
+        .shared
+        .iter()
+        .find(|b| b.track_ids.contains(&3))
+        .expect("bundle shared by two files");
+    assert_eq!(kept.owners, vec![1, 2]);
+    let moved = found
+        .shared
+        .iter()
+        .find(|b| b.track_ids.contains(&4))
+        .expect("bundle naming another track");
+    assert_eq!(moved.track_ids, vec![4, 5]);
+    assert!(moved.owners.is_empty());
+    assert_eq!(found.non_owner_track_ids(), HashSet::from([3, 4, 5]));
+}
+
+/// An eDB with only what the BPM/key check reads: each path's BPM and key.
+fn bpm_key_edb(rows: &[(&str, i64, &str)]) -> rusqlite::Connection {
+    let conn = rusqlite::Connection::open_in_memory().expect("in-memory eDB");
+    conn.execute_batch(
+        r#"CREATE TABLE content (path TEXT, bpmx100 INTEGER, key_id INTEGER);
+           CREATE TABLE "key" (key_id INTEGER PRIMARY KEY, name TEXT);"#,
+    )
+    .expect("schema");
+    for (id, (path, bpm, key)) in rows.iter().enumerate() {
+        conn.execute(
+            r#"INSERT INTO "key" (key_id, name) VALUES (?1, ?2)"#,
+            rusqlite::params![id as i64 + 1, key],
+        )
+        .expect("key");
+        conn.execute(
+            "INSERT INTO content (path, bpmx100, key_id) VALUES (?1, ?2, ?3)",
+            rusqlite::params![path, bpm, id as i64 + 1],
+        )
+        .expect("content");
+    }
+    conn
+}
+
+#[test]
+fn bpm_key_mismatch_is_per_file_when_rows_of_one_file_disagree() {
+    let root = tempdir().expect("tempdir");
+    let path = "/Contents/A/Twice.mp3";
+    let anlz = "/PIONEER/USBANLZ/P009/00000009/ANLZ0000.DAT";
+    // Two libraries analysed one file: 95 BPM in 8A, and 190 BPM in 9A.
+    let mut rows = same_file_rows(&[7, 3], path, anlz);
+    rows[0].tempo_x100 = 9_500;
+    rows[0].key_id = 1;
+    rows[1].tempo_x100 = 19_000;
+    rows[1].key_id = 2;
+    let parsed = ParsedPdb {
+        tracks: rows,
+        keys: HashMap::from([(1, "8A".to_string()), (2, "9A".to_string())]),
+        ..ParsedPdb::default()
+    };
+    let detect = |edb: &rusqlite::Connection| {
+        super::detect_bpm_key_mismatches(root.path(), &parsed, Some(edb), false, None)
+    };
+    // The eDB holds one row's values: it agrees with the file.
+    assert!(detect(&bpm_key_edb(&[(path, 9_500, "8A")])).is_empty());
+    assert!(detect(&bpm_key_edb(&[(path, 19_000, "9A")])).is_empty());
+    // Values neither row has: one finding for the file, aligned to its first
+    // row (lowest id), so the repair leaves nothing to flag.
+    let found = detect(&bpm_key_edb(&[(path, 12_800, "1A")]));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].pdb_tempo_x100, 19_000);
+    assert_eq!(found[0].edb_bpmx100, Some(12_800));
+    assert_eq!(found[0].pdb_key_for_edb.as_deref(), Some("9A"));
+    // Each library's eDB row is checked: one matching a PDB row doesn't
+    // hide another that matches none.
+    assert!(detect(&bpm_key_edb(&[(path, 9_500, "8A"), (path, 19_000, "9A")])).is_empty());
+    let found = detect(&bpm_key_edb(&[(path, 9_500, "8A"), (path, 9_500, "3B")]));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].edb_bpmx100, None);
+    assert_eq!(found[0].pdb_key_for_edb.as_deref(), Some("9A"));
 }
 
 /// rekordbox's own page shapes pass: ACTV (0x34) pages inside a multi-page
@@ -2499,4 +2677,19 @@ fn playlist_resolution_multiple_playlists() {
     assert!(matches!(details[1].status, DiagStatus::Fail));
     // Overall should be FAIL
     assert!(matches!(section.status, DiagStatus::Fail));
+    // The window counts the playlist and links to the Event Log, which names it.
+    assert!(section.checks.iter().all(|c| c.label != "Half"));
+    let unresolved = section
+        .checks
+        .iter()
+        .find(|c| c.label == "Unresolved playlists")
+        .expect("unresolved playlists check");
+    assert!(matches!(unresolved.status, DiagStatus::Fail));
+    assert_eq!(unresolved.link.as_deref(), Some("event-log"));
+    let warnings = super::playlist_resolution_warnings(&details);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].message.contains("Half: 1/2 entries"),
+        "{warnings:?}"
+    );
 }

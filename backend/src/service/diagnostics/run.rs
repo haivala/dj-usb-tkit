@@ -280,34 +280,29 @@ impl BackendService {
             let detail = if misaligned.is_empty() {
                 tr::diagnostics_check_string_alignment_ok()
             } else {
-                let examples = misaligned
-                    .iter()
-                    .take(3)
-                    .map(|m| {
-                        format!(
-                            "{} #{} ({})",
-                            table_type_label(m.table_type),
-                            m.id,
-                            m.slot_label
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                tr::diagnostics_check_string_alignment_misaligned(misaligned.len(), examples)
+                tr::diagnostics_check_string_alignment_misaligned(misaligned.len())
             };
-            if matches!(status, DiagStatus::Fail) {
+            // The window says how many; the Event Log names each row.
+            for m in &misaligned {
                 raw_warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.pdb-string-misalignment",
-                    &detail,
+                    &tr::diagnostics_warning_string_misalignment(format!(
+                        "{} #{} ({})",
+                        table_type_label(m.table_type),
+                        m.id,
+                        m.slot_label
+                    )),
                 ));
             }
-            contents_integrity.checks.push(DiagCheck::new(
-                tr::diagnostics_check_string_alignment(),
-                status,
-                detail,
-            ));
+            let alignment_check =
+                DiagCheck::new(tr::diagnostics_check_string_alignment(), status, detail);
+            contents_integrity.checks.push(if misaligned.is_empty() {
+                alignment_check
+            } else {
+                alignment_check.with_link("event-log")
+            });
 
             // Artist rows with a short ASCII name at 12 instead of rekordbox's 10: CDJs read
             // them fine, but an Engine DJ player's own import of export.pdb shows no artist.
@@ -361,30 +356,26 @@ impl BackendService {
             let (status, detail) = if mismatches.is_empty() {
                 (DiagStatus::Pass, tr::diagnostics_check_bpm_key_ok())
             } else {
-                let examples = mismatches
-                    .iter()
-                    .take(3)
-                    .map(|m| m.track_path.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 (
                     DiagStatus::Warn,
-                    tr::diagnostics_check_bpm_key_mismatch(mismatches.len(), examples),
+                    tr::diagnostics_check_bpm_key_mismatch(mismatches.len()),
                 )
             };
-            if matches!(status, DiagStatus::Warn) {
+            // The window says how many; the Event Log names each track.
+            for m in &mismatches {
                 raw_warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.bpm-key-mismatch",
-                    &detail,
+                    &tr::diagnostics_warning_bpm_key_mismatch(&m.track_path),
                 ));
             }
-            analysis_integrity.checks.push(DiagCheck::new(
-                tr::diagnostics_check_bpm_key(),
-                status,
-                detail,
-            ));
+            let bpm_key_check = DiagCheck::new(tr::diagnostics_check_bpm_key(), status, detail);
+            analysis_integrity.checks.push(if mismatches.is_empty() {
+                bpm_key_check
+            } else {
+                bpm_key_check.with_link("event-log")
+            });
             note_stage("BPM/key check");
         }
         if let Some(parsed) = catalog {
@@ -510,6 +501,7 @@ impl BackendService {
                     on_progress(pct, 100, message);
                 },
             );
+        raw_warnings.extend(playlist_resolution_warnings(&playlist_details));
         note_stage("playlist resolution");
 
         let engine_library_section = self.engine_library_section(&usb_root);
