@@ -30,7 +30,7 @@ impl AnalysisEngine {
     /// `refine_bpm`.
     pub fn bpm_analyzer(&self) -> &'static str {
         match self {
-            Self::Stratum => "stratum-v2",
+            Self::Stratum => "stratum-v3",
             Self::Essentia => "essentia",
         }
     }

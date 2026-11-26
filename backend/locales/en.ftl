@@ -2349,7 +2349,7 @@ playback-playing = Playing from { $source }: { $track }
 track-table-bpm-source-user = Manually set
 track-table-bpm-source-mixxx = From Mixxx
 track-table-bpm-source-rekordbox = From rekordbox
-# The same, for a BPM this app's analysis found. $analyzer: the analyzer's id, such as stratum-v2 or essentia.
+# The same, for a BPM this app's analysis found. $analyzer: the analyzer's id, such as stratum-v3 or essentia.
 track-table-bpm-source-analyzer = Analyzed with: { $analyzer }
 
 # The FMT badge for a file with no extension.

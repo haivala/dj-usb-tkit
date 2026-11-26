@@ -2606,7 +2606,7 @@ mod tests {
         // A detected key comes with its source; a kept one is written
         // without, as `run_local_analysis` does.
         for (id, key, source) in [
-            ("reanalyzed", "C", Some("stratum-v2")),
+            ("reanalyzed", "C", Some("stratum-v3")),
             ("kept", "Am", None),
         ] {
             conn.execute(
@@ -2636,7 +2636,7 @@ mod tests {
         };
         assert_eq!(
             key("reanalyzed"),
-            ("C".to_string(), "stratum-v2".to_string())
+            ("C".to_string(), "stratum-v3".to_string())
         );
         assert_eq!(key("kept"), ("Am".to_string(), "rekordbox".to_string()));
     }

@@ -18,17 +18,17 @@ pub struct Track {
     pub genre: Option<String>,
     pub track_number: Option<u32>,
     pub bpm: Option<f64>,
-    /// `AnalysisEngine::bpm_analyzer` for a detected value (`"stratum-v2"`,
+    /// `AnalysisEngine::bpm_analyzer` for a detected value (`"stratum-v3"`,
     /// `"essentia"`; a bare `"stratum"` is from before BPM refinement),
     /// `"user"` after a manual edit.
     pub bpm_analyzer: Option<String>,
     /// The BPM pill's tooltip: where `bpm` came from ("Manually set",
-    /// "Analyzed with: stratum-v2"). Display only; set by
+    /// "Analyzed with: stratum-v3"). Display only; set by
     /// `service::apply_frontend_track_fields`.
     #[serde(default)]
     pub bpm_source_text: Option<String>,
     pub key: Option<String>,
-    /// `AnalysisEngine::bpm_analyzer` for a detected value (`"stratum-v2"`,
+    /// `AnalysisEngine::bpm_analyzer` for a detected value (`"stratum-v3"`,
     /// `"essentia"`; none for a key analyzed before the source was written),
     /// `"user"` after a manual edit, `"rekordbox"` / `"mixxx"` from an import.
     pub key_source: Option<String>,

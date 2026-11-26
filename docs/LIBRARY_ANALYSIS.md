@@ -65,7 +65,8 @@ analysis keeps (step 1).
    `docs/USB_EXPORT.md`.
 8. **Saved, with where each value came from.** The coordinator saves the
    result in one transaction per track: BPM with `bpm_analyzer` (the engine
-   and its version, `stratum-v2` or `essentia`), key with `key_source`, first
+   and its version, such as `stratum-v3` or `essentia`; see "stratum
+   versions" below), key with `key_source`, first
    beat with `first_beat_ms_source = 'estimated'` when this run placed it,
    length, cover and the analysis files' path. A kept value keeps its source,
    so the app always knows whether a value is its own detection, yours or an
@@ -119,10 +120,22 @@ falls half a beat off (drum & bass analyzed at 87 instead of 174).
    place it more precisely. stratum's first beat is used only when that
    isn't possible (silence).
 
-A BPM detected this way is stored with `bpm_analyzer = "stratum-v2"`; a bare
-`"stratum"` marks a track analyzed before these steps existed. Bump the
-version in `AnalysisEngine::bpm_analyzer` whenever a change here would give
-already-analyzed tracks a different BPM.
+#### stratum versions
+
+A detected BPM is stored with the engine and the version of these steps in
+`bpm_analyzer`, and a detected key with the same in `key_source`. The BPM's
+tooltip shows it ("Analyzed with: stratum-v3"), and it tells which tracks an
+analysis change leaves behind:
+
+| Value | Written by | What it is |
+| --- | --- | --- |
+| `stratum` | up to 0.3.3 | stratum's raw whole-BPM estimate, no refinement. On the first start of 0.7.0 these tracks lose their analysis and show as needing it (`0.6.7-stratum-v1-analysis`, `docs/APP_DATA_MODEL.md`) |
+| `stratum-v2` | 0.3.4 to 0.6.6 | the refinement above with the 3/2, 3/4, 2/3 and 4/3 tempo family, the precise tempo search and the first beat placed from the onsets |
+| `stratum-v3` | 0.7.0 on | `stratum-v2` plus the 5/4 and 4/5 relatives in the tempo family, which change the BPM of tracks stratum answered 5:4 off. A `stratum-v2` track keeps its BPM until it's reanalyzed |
+
+`essentia` has no versions yet. Bump the version in
+`AnalysisEngine::bpm_analyzer` whenever a change here would give
+already-analyzed tracks a different BPM, and say in the table what changed.
 
 The opt-in `bpm_reference_accuracy` test (`service/bpm_reference_eval.rs`)
 compares the BPM and first beat with rekordbox's analysis of a USB playlist
