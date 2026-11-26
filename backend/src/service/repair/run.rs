@@ -834,20 +834,15 @@ impl BackendService {
         note_stage("BPM/key check with analysis files");
         if !bpm_key_mismatches.is_empty() {
             detected_issues.push(format!(
-                "{} with ANLZ beat-grid tempo or eDB BPM/key differing from the PDB",
-                counted(bpm_key_mismatches.len(), "track", "tracks")
+                "{} whose rows disagree on BPM or key",
+                counted(bpm_key_mismatches.len(), "audio file", "audio files")
             ));
-            let anlz_writes = bpm_key_mismatches
+            let writes = bpm_key_mismatches
                 .iter()
-                .filter(|m| m.anlz_dat_path.is_some())
-                .count()
-                * 2;
-            let edb_writes = bpm_key_mismatches
-                .iter()
-                .filter(|m| m.edb_bpmx100.is_some() || m.pdb_key_for_edb.is_some())
-                .count();
+                .map(|m| m.pdb_rows.len() + m.edb_rows.len())
+                .sum::<usize>();
             proposed_fixes.push(RepairFixProposal {
-                estimated_writes: anlz_writes + edb_writes,
+                estimated_writes: writes,
                 link: Some("event-log".to_string()),
                 ..fix_proposal(
                     BPM_KEY_MISMATCH_FIX_ID,
@@ -856,27 +851,11 @@ impl BackendService {
                 )
             });
             for m in &bpm_key_mismatches {
-                let tempo = |t: Option<u16>| {
-                    t.map_or("-".to_string(), |t| format!("{:.2}", f64::from(t) / 100.0))
-                };
                 warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.bpm-key-mismatch",
-                    &tr::repair_warning_bpm_key_mismatch(
-                        &m.track_path,
-                        format!(
-                            "PDB {:.2}, DAT grid {}, EXT grid {}, eDB {}{}",
-                            f64::from(m.pdb_tempo_x100) / 100.0,
-                            tempo(m.anlz_tempos_x100[0]),
-                            tempo(m.anlz_tempos_x100[1]),
-                            m.edb_bpmx100
-                                .map_or("same".to_string(), |v| format!("{:.2}", v as f64 / 100.0)),
-                            m.pdb_key_for_edb
-                                .as_deref()
-                                .map_or(String::new(), |k| format!(", eDB key differs from {k}")),
-                        ),
-                    ),
+                    &tr::repair_warning_bpm_key_mismatch(&m.track_path, &m.values),
                 ));
             }
         }
@@ -2729,12 +2708,11 @@ impl BackendService {
                     usb_root,
                     app_master_db_id,
                     session.edb_conn(),
-                    warnings,
                     &mut |done, total| progress.item_done(done, total),
                 )
             })
-            .map(|(anlz_fixed, edb_fixed)| {
-                Detail::Text(tr::repair_outcome_detail_bpm_key(anlz_fixed, edb_fixed))
+            .map(|(pdb_fixed, edb_fixed)| {
+                Detail::Text(tr::repair_outcome_detail_bpm_key(pdb_fixed, edb_fixed))
             })
         });
         if bpm_selected && bpm_found {

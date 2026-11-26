@@ -311,68 +311,90 @@ pub(super) fn track_not_in_usb_database(media_path: &str) -> BackendError {
 /// The staged PDB's bytes (`bytes`, parsed as `parsed`) with the t00 tempo
 /// and/or key of the track `row` set to `bpm` / `key` -- the same values the
 /// USB save writes to the ANLZ beat grid and eDB `content`, so the three never
-/// disagree (older CDJs read the PDB). Tempo uses export's `round(bpm*100)`; a
-/// key the PDB doesn't have yet gets a new t05 row, matched with export's own
-/// rule (`key_names_match`). Returns the new bytes to write, or `None` when
-/// nothing changes. Nothing is written here, so the caller can block before
-/// touching the device.
+/// disagree (older CDJs read the PDB). See [`build_pdb_tracks_patch`].
 fn build_pdb_track_patch(
-    mut bytes: Vec<u8>,
+    bytes: Vec<u8>,
     parsed: &crate::pdb_reader::ParsedPdb,
     row: &crate::pdb_reader::PdbTrackRow,
     bpm: Option<f64>,
     key: Option<&str>,
 ) -> BackendResult<Option<Vec<u8>>> {
-    if bpm.is_none() && key.is_none() {
-        return Ok(None);
-    }
+    build_pdb_tracks_patch(bytes, parsed, &[(row, bpm, key)])
+}
+
+/// The staged PDB's bytes (`bytes`, parsed as `parsed`) with each given
+/// track row's t00 tempo and/or key set. Tempo uses export's
+/// `round(bpm*100)`; a key the PDB doesn't have yet gets one new t05 row,
+/// matched with export's own rule (`key_names_match`). Returns the new bytes
+/// to write, or `None` when nothing changes. Nothing is written here, so the
+/// caller can block before touching the device.
+pub(crate) fn build_pdb_tracks_patch(
+    mut bytes: Vec<u8>,
+    parsed: &crate::pdb_reader::ParsedPdb,
+    rows: &[(&crate::pdb_reader::PdbTrackRow, Option<f64>, Option<&str>)],
+) -> BackendResult<Option<Vec<u8>>> {
     let page_size = pdb_page_size(&bytes)?;
-    let mut data = super::repair::track_row_data_from_reader_row(row);
-    let mut changed_fields = Vec::<&'static str>::new();
+    // Keys this patch adds, so a second row with one reuses its new row.
+    let mut new_keys = Vec::<(u32, String)>::new();
+    let mut next_key_id = parsed.keys.keys().copied().max().unwrap_or(0) + 1;
+    let mut mutations = Vec::<crate::pdb_writer::PdbTrackRowMutation>::new();
+    for (row, bpm, key) in rows {
+        let mut data = super::repair::track_row_data_from_reader_row(row);
+        let mut changed_fields = Vec::<&'static str>::new();
 
-    if let Some(bpm) = bpm {
-        let tempo_x100 = (bpm * 100.0).round().max(0.0) as u32;
-        if row.tempo_x100 != tempo_x100 {
-            data.bpm = Some(bpm);
-            changed_fields.push("tempo_x100");
+        if let Some(bpm) = bpm {
+            let tempo_x100 = (bpm * 100.0).round().max(0.0) as u32;
+            if row.tempo_x100 != tempo_x100 {
+                data.bpm = Some(*bpm);
+                changed_fields.push("tempo_x100");
+            }
+        }
+
+        if let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) {
+            let current = parsed.keys.get(&row.key_id);
+            if !current.is_some_and(|name| key_names_match(name, key)) {
+                let existing = parsed
+                    .keys
+                    .iter()
+                    .filter(|(_, name)| key_names_match(name, key))
+                    .map(|(id, _)| *id)
+                    .min()
+                    .or_else(|| {
+                        new_keys
+                            .iter()
+                            .find(|(_, name)| key_names_match(name, key))
+                            .map(|(id, _)| *id)
+                    });
+                data.key_id = existing.unwrap_or_else(|| {
+                    let id = next_key_id;
+                    next_key_id += 1;
+                    new_keys.push((id, key.to_string()));
+                    id
+                });
+                changed_fields.push("key_id");
+            }
+        }
+        if !changed_fields.is_empty() {
+            mutations.push(crate::pdb_writer::PdbTrackRowMutation {
+                row: data,
+                changed_fields,
+            });
         }
     }
 
-    if let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) {
-        let current = parsed.keys.get(&row.key_id);
-        if !current.is_some_and(|name| key_names_match(name, key)) {
-            let key_id = match parsed
-                .keys
-                .iter()
-                .filter(|(_, name)| key_names_match(name, key))
-                .map(|(id, _)| *id)
-                .min()
-            {
-                Some(id) => id,
-                None => {
-                    let new_id = parsed.keys.keys().copied().max().unwrap_or(0) + 1;
-                    crate::pdb_writer::append_keys_in_place(
-                        &mut bytes,
-                        &[(new_id, key)],
-                        page_size,
-                    )?;
-                    new_id
-                }
-            };
-            data.key_id = key_id;
-            changed_fields.push("key_id");
-        }
-    }
-
-    if changed_fields.is_empty() {
+    if mutations.is_empty() {
         return Ok(None);
+    }
+    if !new_keys.is_empty() {
+        let keys = new_keys
+            .iter()
+            .map(|(id, name)| (*id, name.as_str()))
+            .collect::<Vec<_>>();
+        crate::pdb_writer::append_keys_in_place(&mut bytes, &keys, page_size)?;
     }
     crate::pdb_writer::mutate_tracks_in_place(
         &mut bytes,
-        &[crate::pdb_writer::PdbTrackRowMutation {
-            row: data,
-            changed_fields,
-        }],
+        &mutations,
         PdbLayoutProfile::DEFAULT,
         page_size,
     )?;

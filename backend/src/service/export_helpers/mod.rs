@@ -76,7 +76,9 @@ use std::path::Path;
 
 #[cfg(test)]
 use super::usb::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
-use crate::service::usb::text::{canonicalize_playlist_name, repair_utf8_mojibake};
+use crate::service::usb::text::{
+    canonicalize_playlist_name, dictionary_name_key, repair_utf8_mojibake,
+};
 
 pub(crate) fn canonicalize_track_path_identity(value: &str) -> String {
     let normalized = repair_utf8_mojibake(value.trim()).replace('\\', "/");
@@ -100,6 +102,23 @@ pub(crate) fn canonicalize_track_path_identity(value: &str) -> String {
         format!("/{lower}")
     } else {
         lower
+    }
+}
+
+/// A track path as written, for matching it exactly before falling back to
+/// [`canonicalize_track_path_identity`]: rekordbox can list two files whose
+/// paths differ only in case (`Song (Mix).mp3`, `Song (MIX).mp3`), each with
+/// its own rows and analysis file. Only separators, surrounding blanks and
+/// anything before `/Contents/` are normalized; case is kept.
+pub(crate) fn exact_track_path_identity(value: &str) -> String {
+    let normalized = repair_utf8_mojibake(value.trim()).replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    if let Some(idx) = lower.rfind("/contents/") {
+        normalized[idx..].to_string()
+    } else if lower.starts_with("contents/") {
+        format!("/{normalized}")
+    } else {
+        normalized
     }
 }
 

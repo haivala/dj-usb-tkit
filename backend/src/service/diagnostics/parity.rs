@@ -219,6 +219,8 @@ pub(crate) fn build_usb_parity_comparison(
         .iter()
         .map(|leaf| tree.path(leaf))
         .collect::<Vec<_>>();
+    // Playlists per folder-and-name key, in both databases together.
+    let mut same_name_count = HashMap::<String, usize>::new();
     for (leaf, leaf_path) in leaves.iter().zip(&leaf_paths) {
         let mut rows = parsed
             .playlist_entries
@@ -254,8 +256,18 @@ pub(crate) fn build_usb_parity_comparison(
         let duplicate_entries = track_keys
             .len()
             .saturating_sub(unique_preserve_order(&track_keys).len());
+        // Several playlists of one name in one folder: the first in the
+        // folder's order stands for them (the repair merges the rest into it).
+        let key = leaf_path.key();
+        *same_name_count.entry(key.clone()).or_default() += 1;
+        if pdb_info_by_playlist
+            .get(&key)
+            .is_some_and(|kept| (kept.sort_order, kept.playlist_id) <= (leaf.sort_order, leaf.id))
+        {
+            continue;
+        }
         pdb_info_by_playlist.insert(
-            leaf_path.key(),
+            key,
             PdbPlaylistInfo {
                 playlist_id: leaf.id,
                 sort_order: leaf.sort_order,
@@ -269,6 +281,7 @@ pub(crate) fn build_usb_parity_comparison(
     }
 
     let mut edb_info_by_playlist = HashMap::<String, EdbPlaylistInfo>::new();
+    let mut edb_ranks = HashMap::<String, (i64, i64)>::new();
     for playlist in edb_playlists.values() {
         let mut track_keys = Vec::<String>::new();
         let mut track_details_by_key = HashMap::<String, UsbTrack>::new();
@@ -301,8 +314,15 @@ pub(crate) fn build_usb_parity_comparison(
                 .or_insert_with(|| track.clone());
         }
 
+        let key = playlist.path.key();
+        *same_name_count.entry(key.clone()).or_default() += 1;
+        let rank = (playlist.sort_order, playlist.playlist_id);
+        if edb_ranks.get(&key).is_some_and(|kept| *kept <= rank) {
+            continue;
+        }
+        edb_ranks.insert(key.clone(), rank);
         edb_info_by_playlist.insert(
-            playlist.path.key(),
+            key,
             EdbPlaylistInfo {
                 playlist_id: u32::try_from(playlist.playlist_id).ok(),
                 sort_order: u32::try_from(playlist.sort_order).ok(),
@@ -746,16 +766,25 @@ pub(crate) fn build_usb_parity_comparison(
             if pdb_title != edb_title {
                 mismatches.push("title".to_string());
             }
-            if pdb_artist != edb_artist {
+            // Artist and album names are PDB dictionary rows, matched by
+            // `dictionary_name_key`: names differing only in case or
+            // punctuation share one row, so the PDB can't hold both.
+            let dict_key = crate::service::usb::text::dictionary_name_key;
+            if dict_key(&pdb_artist) != dict_key(&edb_artist) {
                 mismatches.push("artist".to_string());
             }
-            if pdb_album != edb_album {
+            if dict_key(&pdb_album) != dict_key(&edb_album) {
                 mismatches.push("album".to_string());
             }
-            if pdb_key != edb_key {
+            // Players show their own key notation whatever the databases hold.
+            let same_key = pdb_key == edb_key
+                || crate::service::key_notation::same_key_any_notation(&pdb_key, &edb_key);
+            if !same_key {
                 mismatches.push("key".to_string());
             }
-            if pdb_detail.track_number != edb_detail.track_number {
+            // The PDB stores "no track number" as 0, which reads as `None`;
+            // rekordbox writes 0 to the eDB for the same.
+            if pdb_detail.track_number != edb_detail.track_number.filter(|n| *n > 0) {
                 mismatches.push("trackNumber".to_string());
             }
             if pdb_detail.tempo_x100 != edb_bpm_x100 {
@@ -884,9 +913,17 @@ pub(crate) fn build_usb_parity_comparison(
             && dictionary_id_issue_tracks == 0
             && sort_order_match;
 
+        let same_name_copies = same_name_count
+            .get(&key)
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(usize::from(pdb_info.is_some()) + usize::from(edb_info.is_some()));
         let status = if !structural_pass {
             DiagStatus::Fail
-        } else if pdb_missing_core_metadata > 0 || edb_missing_core_metadata > 0 {
+        } else if pdb_missing_core_metadata > 0
+            || edb_missing_core_metadata > 0
+            || same_name_copies > 0
+        {
             DiagStatus::Warn
         } else {
             DiagStatus::Pass
@@ -911,6 +948,7 @@ pub(crate) fn build_usb_parity_comparison(
             artwork_mismatch_tracks,
             rating_colour_mismatch_tracks,
             field_note_tracks,
+            same_name_copies,
             path_mismatch_tracks,
             dictionary_id_issue_tracks,
             playlist_in_both,

@@ -188,33 +188,62 @@ pub(crate) fn diagnose_contents_integrity_db_only(
     }
 }
 
-/// A track whose BPM or key disagrees between its PDB row and its ANLZ beat
-/// grid / eDB `content` row. The PDB is the reference: it is what older CDJs
-/// read and what `fix_empty_analysis_files` already trusts.
+/// An audio file whose rows disagree on BPM or key, with what every row of
+/// it gets. A stick exported from several rekordbox libraries has a row per
+/// library for one file, in the PDB and the eDB alike; the newest of them
+/// carries the newest data: the eDB row with the highest `content_id` when
+/// the eDB has the file, else the PDB row with the highest id. The key is
+/// the newest row's (the next newest with one, when it has none). The BPM is
+/// the beat-grid tempo of the newest row's analysis file (`.DAT`, else
+/// `.EXT`), else the newest row's BPM likewise. Analysis files are never
+/// changed.
 #[derive(Debug, Clone)]
 pub(crate) struct BpmKeyMismatch {
     pub track_path: String,
-    pub pdb_tempo_x100: u32,
-    pub duration_ms: Option<u64>,
-    /// Absolute `.DAT` path, set when the DAT or EXT beat-grid tempo differs.
-    pub anlz_dat_path: Option<std::path::PathBuf>,
-    /// The `.DAT` and `.EXT` beat-grid tempos (x100) read, when there is a grid.
-    pub anlz_tempos_x100: [Option<u16>; 2],
-    /// Current eDB `bpmx100`, set when it differs.
-    pub edb_bpmx100: Option<i64>,
-    /// The PDB key name, set when the eDB key differs (or is missing).
-    pub pdb_key_for_edb: Option<String>,
+    /// Tempo (x100) every row gets.
+    pub tempo_x100: Option<u32>,
+    /// Key every row gets.
+    pub key: Option<String>,
+    /// PDB rows that differ: (track id, tempo differs, key differs).
+    pub pdb_rows: Vec<(u32, bool, bool)>,
+    /// eDB rows that differ: (content id, BPM differs, key differs).
+    pub edb_rows: Vec<(i64, bool, bool)>,
+    /// What each row and the analysis file hold, for the Event Log: data,
+    /// not translated.
+    pub values: String,
 }
 
-/// Compare each PDB track's tempo and key against, when an eDB connection is
-/// given, `content.bpmx100` and the `key` row `content.key_id` points at, and
-/// -- only with `scan_anlz` -- its ANLZ beat grid (`.DAT` and `.EXT`, tempo
-/// only; ANLZ has no key). `scan_anlz` reads two files per track off the
-/// stick, so the automatic USB diagnosis (a database-only check) leaves it
-/// off and only the repair flow, which scans analysis files anyway, turns it
-/// on. Key names match by export's rule (`key_names_match`: `Db` == `C#`).
-/// Tracks without a PDB tempo/key, without an eDB row, or with a
-/// missing/unparseable bundle are skipped for that field.
+/// One eDB `content` row's BPM, key and analysis file.
+struct EdbBpmKeyRow {
+    content_id: i64,
+    bpmx100: Option<i64>,
+    key: Option<String>,
+    analysis_path: Option<String>,
+}
+
+/// The beat-grid tempo (x100) of the bundle at `dat`: the `.DAT`'s, else
+/// the `.EXT`'s. Only the beat-grid chunks are read.
+fn bundle_grid_tempo(dat: &std::path::Path) -> Option<u32> {
+    [dat.to_path_buf(), dat.with_extension("EXT")]
+        .iter()
+        .find_map(|p| {
+            crate::service::anlz::read_anlz_chunks(p, &[*b"PQTZ", *b"PQT2"])
+                .and_then(|bytes| crate::service::anlz::read_beatgrid_tempo_from_anlz(&bytes))
+        })
+        .map(u32::from)
+        .filter(|t| *t > 0)
+}
+
+/// Every audio file the PDB lists whose PDB rows, eDB rows (when an eDB
+/// connection is given) and -- only with `scan_anlz` -- newest analysis
+/// file disagree on BPM or key; see [`BpmKeyMismatch`] for what wins.
+/// `scan_anlz` reads the analysis files off the stick, so the automatic USB
+/// diagnosis (a database-only check) leaves it off and only the repair flow,
+/// which scans analysis files anyway, turns it on; without it the BPM is the
+/// newest row's. Key names match in any notation (`same_key_any_notation`:
+/// `Db` == `C#`, `B` == `1B`): players show their own notation whatever the
+/// database holds. An analysis file shared with another track
+/// (`analysis_ownership`) isn't this file's to take a BPM from.
 pub(crate) fn detect_bpm_key_mismatches(
     usb_root: &std::path::Path,
     parsed: &crate::pdb_reader::ParsedPdb,
@@ -222,54 +251,61 @@ pub(crate) fn detect_bpm_key_mismatches(
     scan_anlz: bool,
     app_master_db_id: Option<u32>,
 ) -> Vec<BpmKeyMismatch> {
-    type EdbBpmKey = (Option<i64>, Option<String>);
-    // Every eDB row of a path: one per rekordbox library that exported the
-    // file, like the PDB's rows below.
-    let edb_by_path: HashMap<String, Vec<EdbBpmKey>> = edb
-        .and_then(|conn| {
-            let with_key = table_exists(conn, "key");
-            let sql = if with_key {
-                r#"SELECT c.path, c.bpmx100, k.name FROM content c
-                   LEFT JOIN "key" k ON k.key_id = c.key_id WHERE c.path IS NOT NULL"#
-            } else {
-                "SELECT path, bpmx100, NULL FROM content WHERE path IS NOT NULL"
-            };
-            let mut stmt = conn.prepare(sql).ok()?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        (
-                            row.get::<_, Option<i64>>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                        ),
-                    ))
-                })
-                .ok()?;
-            let mut by_path = HashMap::<String, Vec<EdbBpmKey>>::new();
-            for (path, values) in rows.filter_map(Result::ok) {
-                by_path.entry(path).or_default().push(values);
+    use crate::service::key_notation::same_key_any_notation;
+    let mut edb_by_path = HashMap::<String, Vec<EdbBpmKeyRow>>::new();
+    if let Some(conn) = edb {
+        let key_name = if table_exists(conn, "key") {
+            "k.name"
+        } else {
+            "NULL"
+        };
+        let key_join = if table_exists(conn, "key") {
+            r#"LEFT JOIN "key" k ON k.key_id = c.key_id"#
+        } else {
+            ""
+        };
+        let analysis = crate::edb::content_column_or_null(conn, "analysisDataFilePath");
+        let sql = format!(
+            "SELECT c.content_id, c.path, c.bpmx100, {key_name}, {analysis} FROM content c \
+             {key_join} WHERE c.path IS NOT NULL"
+        );
+        if let Ok(mut stmt) = conn.prepare(&sql)
+            && let Ok(rows) = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    EdbBpmKeyRow {
+                        content_id: row.get(0)?,
+                        bpmx100: row.get(2)?,
+                        key: row.get(3)?,
+                        analysis_path: row.get(4)?,
+                    },
+                ))
+            })
+        {
+            for (path, row) in rows.filter_map(Result::ok) {
+                edb_by_path.entry(path).or_default().push(row);
             }
-            Some(by_path)
-        })
-        .unwrap_or_default();
+        }
+    }
 
-    // A shared bundle is only its owner's to align: rebuilding it for
-    // another track breaks it for the owner, and the next scan flags the
-    // owner. `update_app_analysis_files` gives the other tracks their own
-    // bundle, analysed with their own BPM, before this fix runs.
-    let shared_bundle_tracks = if scan_anlz {
+    let non_owners = if scan_anlz {
         scan_analysis_ownership(usb_root, parsed, app_master_db_id, true).non_owner_track_ids()
     } else {
         HashSet::new()
     };
-    // Rows naming one audio file (a stick exported from more than one
-    // rekordbox library has them, each with its own library's analysis, in
-    // the PDB and in the eDB alike) share the file's bundle. An eDB row or
-    // the bundle agrees when it matches any of the file's PDB rows. A file
-    // is reported once, aligned to its first PDB row: the fix writes every
-    // eDB row of the path, and aligning to one row's values while another
-    // row is checked would flag the file again on every pass.
+    let key_name = |row: &crate::pdb_reader::PdbTrackRow| {
+        parsed
+            .keys
+            .get(&row.key_id)
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty())
+    };
+    let nonblank = |key: &Option<String>| {
+        key.as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_string)
+    };
     let mut files = std::collections::BTreeMap::<&str, Vec<&crate::pdb_reader::PdbTrackRow>>::new();
     for track in &parsed.tracks {
         files
@@ -278,98 +314,108 @@ pub(crate) fn detect_bpm_key_mismatches(
             .push(track);
     }
     let mut out = Vec::new();
-    for (path, mut rows) in files {
-        rows.sort_by_key(|t| t.id);
-        let tempos = rows
-            .iter()
-            .map(|t| t.tempo_x100)
-            .filter(|t| *t > 0)
-            .collect::<HashSet<_>>();
-        let Some(track) = rows
-            .iter()
-            .find(|t| t.tempo_x100 > 0)
-            .or(rows.first())
-            .copied()
-        else {
-            continue;
-        };
-        let pdb_tempo_x100 = track.tempo_x100;
-        let edb_rows = edb_by_path.get(path).map_or(&[][..], Vec::as_slice);
+    for (path, mut pdb_rows) in files {
+        // Newest first: eDB rows by content id, then PDB rows by id.
+        pdb_rows.sort_by_key(|t| std::cmp::Reverse(t.id));
+        let mut edb_rows = edb_by_path
+            .get(path)
+            .map(|rows| rows.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        edb_rows.sort_by_key(|r| std::cmp::Reverse(r.content_id));
 
-        // Each bundle the file's rows point at, unless it is another track's.
-        let mut anlz_tempos_x100 = [None, None];
-        let mut anlz_dat_path = None;
-        if scan_anlz && pdb_tempo_x100 > 0 {
-            let mut seen = HashSet::new();
-            for row in &rows {
-                if shared_bundle_tracks.contains(&row.id) {
-                    continue;
-                }
-                let Some(dat) =
-                    crate::service::usb::root::resolve_usb_side_path(usb_root, &row.anlz_path)
-                else {
-                    continue;
-                };
-                if !seen.insert(dat.clone()) {
-                    continue;
-                }
-                // Only the beat-grid chunks: an `.EXT` is mostly waveforms.
-                let read = [dat.clone(), dat.with_extension("EXT")].map(|p| {
-                    crate::service::anlz::read_anlz_chunks(&p, &[*b"PQTZ", *b"PQT2"]).and_then(
-                        |bytes| crate::service::anlz::read_beatgrid_tempo_from_anlz(&bytes),
-                    )
-                });
-                if anlz_tempos_x100 == [None, None] {
-                    anlz_tempos_x100 = read;
-                }
-                if read
+        let newest_bundle = edb_rows
+            .first()
+            .and_then(|r| r.analysis_path.clone())
+            .or_else(|| pdb_rows.first().map(|t| t.anlz_path.clone()))
+            .filter(|p| !p.trim().is_empty());
+        let grid_tempo = newest_bundle
+            .filter(|_| scan_anlz)
+            .filter(|bundle| {
+                // Not this file's when its PDB rows there are another's.
+                !pdb_rows
                     .iter()
-                    .flatten()
-                    .any(|t| !tempos.contains(&u32::from(*t)))
-                {
-                    anlz_tempos_x100 = read;
-                    anlz_dat_path = Some(dat);
-                    break;
-                }
-            }
-        }
-        let edb_bpmx100 = edb_rows
-            .iter()
-            .filter_map(|(bpm, _)| *bpm)
-            .find(|v| pdb_tempo_x100 > 0 && !tempos.iter().any(|t| i64::from(*t) == *v));
-        let key_name = |row: &crate::pdb_reader::PdbTrackRow| {
-            parsed
-                .keys
-                .get(&row.key_id)
-                .map(|name| name.trim())
-                .filter(|name| !name.is_empty())
-        };
-        let pdb_key_for_edb = key_name(track)
-            .filter(|_| {
-                edb_rows.iter().any(|(_, edb_key)| {
-                    !rows.iter().filter_map(|row| key_name(row)).any(|pdb_key| {
-                        edb_key.as_deref().is_some_and(|edb_key| {
-                            crate::service::export_helpers::key_names_match(pdb_key, edb_key)
-                        })
-                    })
-                })
+                    .any(|t| t.anlz_path == *bundle && non_owners.contains(&t.id))
             })
-            .map(str::to_string);
+            .and_then(|bundle| crate::service::usb::root::resolve_usb_side_path(usb_root, &bundle))
+            .and_then(|dat| bundle_grid_tempo(&dat));
+        let tempo_x100 = grid_tempo.or_else(|| {
+            edb_rows
+                .iter()
+                .filter_map(|r| r.bpmx100.and_then(|v| u32::try_from(v).ok()))
+                .chain(pdb_rows.iter().map(|t| t.tempo_x100))
+                .find(|t| *t > 0)
+        });
+        let key = edb_rows
+            .iter()
+            .find_map(|r| nonblank(&r.key))
+            .or_else(|| pdb_rows.iter().find_map(|t| key_name(t)));
 
-        if anlz_dat_path.is_some() || edb_bpmx100.is_some() || pdb_key_for_edb.is_some() {
-            out.push(BpmKeyMismatch {
-                track_path: track.track_file_path.clone(),
-                pdb_tempo_x100,
-                duration_ms: track
-                    .duration_seconds
-                    .filter(|s| *s > 0)
-                    .map(|s| u64::from(s) * 1000),
-                anlz_dat_path,
-                anlz_tempos_x100,
-                edb_bpmx100,
-                pdb_key_for_edb,
-            });
+        let tempo_differs = |value: Option<u32>| tempo_x100.is_some_and(|t| value != Some(t));
+        let key_differs = |value: Option<&str>| {
+            key.as_deref()
+                .is_some_and(|k| !value.is_some_and(|v| same_key_any_notation(k, v)))
+        };
+        let pdb_wrong = pdb_rows
+            .iter()
+            .map(|t| {
+                (
+                    t.id,
+                    tempo_differs((t.tempo_x100 > 0).then_some(t.tempo_x100)),
+                    key_differs(key_name(t).as_deref()),
+                )
+            })
+            .filter(|(_, tempo, key)| *tempo || *key)
+            .collect::<Vec<_>>();
+        let edb_wrong = edb_rows
+            .iter()
+            .map(|r| {
+                (
+                    r.content_id,
+                    tempo_differs(r.bpmx100.and_then(|v| u32::try_from(v).ok())),
+                    key_differs(nonblank(&r.key).as_deref()),
+                )
+            })
+            .filter(|(_, tempo, key)| *tempo || *key)
+            .collect::<Vec<_>>();
+        if pdb_wrong.is_empty() && edb_wrong.is_empty() {
+            continue;
         }
+        let bpm =
+            |t: Option<u32>| t.map_or("-".to_string(), |t| format!("{:.2}", f64::from(t) / 100.0));
+        let mut values = vec![format!(
+            "set to {} / {}{}",
+            bpm(tempo_x100),
+            key.as_deref().unwrap_or("-"),
+            if grid_tempo.is_some() {
+                " (BPM from the analysis grid)"
+            } else {
+                ""
+            }
+        )];
+        values.extend(pdb_rows.iter().map(|t| {
+            format!(
+                "PDB #{} {} / {}",
+                t.id,
+                bpm((t.tempo_x100 > 0).then_some(t.tempo_x100)),
+                key_name(t).as_deref().unwrap_or("-")
+            )
+        }));
+        values.extend(edb_rows.iter().map(|r| {
+            format!(
+                "eDB #{} {} / {}",
+                r.content_id,
+                bpm(r.bpmx100.and_then(|v| u32::try_from(v).ok())),
+                nonblank(&r.key).as_deref().unwrap_or("-")
+            )
+        }));
+        out.push(BpmKeyMismatch {
+            track_path: path.to_string(),
+            tempo_x100,
+            key,
+            pdb_rows: pdb_wrong,
+            edb_rows: edb_wrong,
+            values: values.join(", "),
+        });
     }
     out
 }

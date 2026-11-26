@@ -567,6 +567,7 @@ parity-issue-dictionary = dict issues { $count }
 parity-issue-artwork = art mismatch { $count }
 parity-issue-rating-colour = rating/colour mismatch { $count }
 parity-issue-field-notes = field notes { $count }
+parity-issue-same-name-copies = same-name copies { $count }
 # The same, for a playlist-wide problem.
 parity-issue-in-one-database = in one database only
 parity-issue-sort-mismatch = sort mismatch
@@ -829,11 +830,11 @@ diagnostics-check-artist-layout-moved = { $count ->
 } with the name at a different offset than rekordbox uses; an Engine DJ player importing export.pdb shows the artist's tracks without an artist; run repair_pdb_artist_name_layout to fix
 diagnostics-check-bpm-key = BPM/key consistency
 diagnostics-check-bpm-key-ok = export.pdb and exportLibrary.db agree on BPM and key for every track
-# $count: the tracks.
+# $count: the audio files.
 diagnostics-check-bpm-key-mismatch = { $count ->
-    [one] { $count } track
-   *[other] { $count } tracks
-} whose BPM/key in exportLibrary.db differs from export.pdb -- CDJs may show a different BPM/key than the app; run the repair (fix_bpm_key_mismatch, which also checks the ANLZ beat grids) to fix. See Event Log for the list.
+    [one] { $count } audio file
+   *[other] { $count } audio files
+} whose rows in export.pdb and exportLibrary.db disagree on BPM or key -- CDJs may show a different BPM/key than the app; run the repair (fix_bpm_key_mismatch, which takes the BPM from the analysis file's beat grid) to fix. See Event Log for the list.
 diagnostics-check-shared-analysis = Shared analysis files
 diagnostics-check-shared-analysis-ok = every track has its own analysis file
 # $tracks: the tracks. $files: the analysis files they share.
@@ -843,7 +844,7 @@ diagnostics-check-shared-analysis-shared = { $tracks ->
 } sharing { $files ->
     [one] { $files } analysis file
    *[other] { $files } analysis files
-}, so players can show one track's waveform and beat grid for another; run the repair (separate_shared_analysis) to fix
+}, so players can show one track's waveform and beat grid for another; run the repair (update_app_analysis_files) to fix. See Event Log for the list.
 # The Engine DJ library's checks.
 diagnostics-check-engine-missing = Not on this USB
 diagnostics-check-engine-missing-detail = Only needed for Denon Prime / Numark Mixstream players. Turn on Settings → Export → "Write Engine DJ library" before using this USB in one; otherwise the player imports export.pdb itself and analyzes every track again
@@ -1052,7 +1053,7 @@ repair-summary = Apply Fixes repairs { $count ->
 repair-fix-empty-analysis = Fix Empty Analysis Files
 repair-fix-empty-analysis-description = Regenerate missing/empty DAT/EXT/2EX bundles when source audio is resolvable.
 repair-fix-bpm-key = Fix BPM/Key Mismatch
-repair-fix-bpm-key-description = Rebuild the ANLZ beat grid and set the eDB BPM and key from each track's PDB row, so every player reads the same BPM and key. Waveforms, cues and the first beat are kept. See Event Log for the tracks.
+repair-fix-bpm-key-description = Give every PDB and eDB row of a track the BPM and key of its newest version, so every player reads the same BPM and key: the BPM its analysis file's beat grid has, the key of its newest row. A USB exported from several rekordbox libraries has a row per library for one file; the newest is the eDB's latest row, else the PDB's. Analysis files are not changed. See Event Log for the tracks.
 repair-fix-app-analysis = Update Analysis Files From This App
 # $count: the tracks.
 repair-fix-app-analysis-description = Tracks whose analysis file an older version of this app wrote and that is out of date: { $count }. Each gets what it lacks: the library's waveform (drawn from its audio when the track isn't in the library) instead of a coarse or stretched one, a file of its own when it shares another track's, the track path (PPTH) players match by, the beat grid in rekordbox's format and the MP3 seek index (PVBR). A library track whose waveform isn't drawn yet is analyzed first. The BPM, beats, cues and what players wrote are kept; rekordbox's own analysis files are never changed. See Event Log for the list.
@@ -1143,6 +1144,12 @@ repair-strict-parity-flattened-copies = removed { $count ->
     [one] { $count } top-level eDB copy
    *[other] { $count } top-level eDB copies
 } of playlists in folders; { $summary }
+# The same, when playlists of one folder whose names differ only in case or punctuation were
+# merged into the first of them. $count: playlist rows removed (both databases); $summary: the line above.
+repair-strict-parity-same-name-merged = merged playlists of the same name in one folder ({ $count ->
+    [one] { $count } playlist removed
+   *[other] { $count } playlists removed
+}); { $summary }
 repair-fix-duplicate-entries = Remove Duplicate PDB Playlist Entries
 # $count: the rows.
 repair-fix-duplicate-entries-description = Remove { $count ->
@@ -1272,8 +1279,8 @@ repair-progress-applying-file = USB: Applying { $fix } — { $file }
 
 # Event Log warnings from the repair preview, the details its rows link to. $path: a file on
 # the stick, here and below.
-# $values: the tempos and key each database and analysis file holds ("PDB 128.00, DAT grid
-# 127.00, EXT grid -, eDB same"): data, not translated.
+# $values: the BPM and key the track gets and what each row holds ("set to 128.00 / 8A (BPM
+# from the analysis grid), PDB #12 127.00 / 8A, eDB #40 128.00 / 1A"): data, not translated.
 repair-warning-bpm-key-mismatch = BPM/key mismatch: { $path } ({ $values })
 # $tracks: the track files that name it, comma-separated. $owner: the one that keeps it.
 repair-warning-shared-analysis = shared analysis file: { $path } used by { $tracks }; kept by { $owner }
@@ -1386,10 +1393,10 @@ repair-outcome-detail-duplicate-copies = deleted { $count ->
     [one] { $count } file
    *[other] { $count } files
 }
-repair-outcome-detail-bpm-key = rebuilt { $grids ->
-    [one] { $grids } beat grid
-   *[other] { $grids } beat grids
-}, updated { $rows ->
+repair-outcome-detail-bpm-key = updated { $pdb ->
+    [one] { $pdb } PDB row
+   *[other] { $pdb } PDB rows
+} and { $rows ->
     [one] { $rows } eDB row
    *[other] { $rows } eDB rows
 }

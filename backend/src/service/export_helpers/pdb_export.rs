@@ -691,7 +691,7 @@ pub(crate) fn build_pdb_for_playlists(
     // ── Seed from existing PDB ──────────────────────────────────────────
     if let Some(ref parsed) = existing {
         for (id, name) in sorted_by_id(&parsed.artists) {
-            let key = canonicalize_playlist_name(name);
+            let key = dictionary_name_key(name);
             artist_id_by_name.entry(key).or_insert(*id);
             all_artists.push(PdbArtistRow {
                 id: *id,
@@ -700,7 +700,7 @@ pub(crate) fn build_pdb_for_playlists(
             next_artist_id = next_artist_id.max(id + 1);
         }
         for (id, name) in sorted_by_id(&parsed.albums) {
-            let key = canonicalize_playlist_name(name);
+            let key = dictionary_name_key(name);
             album_id_by_name.entry(key).or_insert(*id);
             all_albums.push(PdbAlbumRow {
                 id: *id,
@@ -719,7 +719,7 @@ pub(crate) fn build_pdb_for_playlists(
             next_key_id = next_key_id.max(id + 1);
         }
         for (id, name) in sorted_by_id(&parsed.genres) {
-            let key = canonicalize_playlist_name(name);
+            let key = dictionary_name_key(name);
             genre_id_by_name.entry(key).or_insert(*id);
             all_genres.push(crate::pdb_writer::PdbDictRow {
                 id: *id,
@@ -729,7 +729,7 @@ pub(crate) fn build_pdb_for_playlists(
         }
         for (id, name) in sorted_by_id(&parsed.labels) {
             label_id_by_name
-                .entry(canonicalize_playlist_name(name))
+                .entry(dictionary_name_key(name))
                 .or_insert(*id);
             all_labels.push(crate::pdb_writer::PdbDictRow {
                 id: *id,
@@ -988,7 +988,7 @@ pub(crate) fn build_pdb_for_playlists(
         make_row: impl FnOnce(u32, String) -> R,
     ) -> u32 {
         *id_by_name
-            .entry(canonicalize_playlist_name(name))
+            .entry(dictionary_name_key(name))
             .or_insert_with(|| {
                 let id = *next_id;
                 *next_id += 1;
@@ -1160,10 +1160,10 @@ pub(crate) fn build_pdb_for_playlists(
                         edb_artist_by_path.get(&path_key).map(String::as_str)
                     };
                     if let Some(artist_name) = resolved_artist_name {
-                        let artist_key = canonicalize_playlist_name(artist_name);
+                        let artist_key = dictionary_name_key(artist_name);
                         let aid = if let Some(id) =
                             still_named(existing_track.artist_id, &artist_names, |n| {
-                                canonicalize_playlist_name(n) == artist_key
+                                dictionary_name_key(n) == artist_key
                             }) {
                             id
                         } else if let Some(id) = artist_id_by_name.get(&artist_key).copied() {
@@ -1186,10 +1186,10 @@ pub(crate) fn build_pdb_for_playlists(
                         .filter(|v| !v.trim().is_empty())
                         .or_else(|| edb_album_by_path.get(&path_key).map(String::as_str))
                     {
-                        let album_key = canonicalize_playlist_name(album);
+                        let album_key = dictionary_name_key(album);
                         let aid = if let Some(id) =
                             still_named(existing_track.album_id, &album_names, |n| {
-                                canonicalize_playlist_name(n) == album_key
+                                dictionary_name_key(n) == album_key
                             }) {
                             id
                         } else if let Some(id) = album_id_by_name.get(&album_key).copied() {
@@ -1237,10 +1237,10 @@ pub(crate) fn build_pdb_for_playlists(
                     if let Some(genre_name) =
                         track.genre.as_deref().filter(|v| !v.trim().is_empty())
                     {
-                        let genre_key = canonicalize_playlist_name(genre_name);
+                        let genre_key = dictionary_name_key(genre_name);
                         let gid = if let Some(id) =
                             still_named(existing_track.genre_id, &genre_names, |n| {
-                                canonicalize_playlist_name(n) == genre_key
+                                dictionary_name_key(n) == genre_key
                             }) {
                             id
                         } else if let Some(id) = genre_id_by_name.get(&genre_key).copied() {
@@ -1384,10 +1384,10 @@ pub(crate) fn build_pdb_for_playlists(
                         }
                     }
                     if let Some(name) = named(&track.label) {
-                        let key = canonicalize_playlist_name(&name);
+                        let key = dictionary_name_key(&name);
                         existing_track.label_id =
                             still_named(existing_track.label_id, &label_names, |n| {
-                                canonicalize_playlist_name(n) == key
+                                dictionary_name_key(n) == key
                             })
                             .unwrap_or_else(|| {
                                 dict_id_for(
@@ -1400,10 +1400,10 @@ pub(crate) fn build_pdb_for_playlists(
                             });
                     }
                     if let Some(name) = named(&track.remixer) {
-                        let key = canonicalize_playlist_name(&name);
+                        let key = dictionary_name_key(&name);
                         existing_track.remixer_id =
                             still_named(existing_track.remixer_id, &artist_names, |n| {
-                                canonicalize_playlist_name(n) == key
+                                dictionary_name_key(n) == key
                             })
                             .unwrap_or_else(|| {
                                 dict_id_for(
@@ -1416,10 +1416,10 @@ pub(crate) fn build_pdb_for_playlists(
                             });
                     }
                     if let Some(name) = named(&track.composer) {
-                        let key = canonicalize_playlist_name(&name);
+                        let key = dictionary_name_key(&name);
                         existing_track.composer_id =
                             still_named(existing_track.composer_id, &artist_names, |n| {
-                                canonicalize_playlist_name(n) == key
+                                dictionary_name_key(n) == key
                             })
                             .unwrap_or_else(|| {
                                 dict_id_for(
@@ -1448,7 +1448,7 @@ pub(crate) fn build_pdb_for_playlists(
                     edb_artist_by_path.get(&path_key).map(String::as_str)
                 };
                 let artist_id = if let Some(artist_name) = resolved_artist_name {
-                    let artist_key = canonicalize_playlist_name(artist_name);
+                    let artist_key = dictionary_name_key(artist_name);
                     if let Some(existing) = artist_id_by_name.get(&artist_key).copied() {
                         existing
                     } else {
@@ -1470,7 +1470,7 @@ pub(crate) fn build_pdb_for_playlists(
                     .filter(|v| !v.trim().is_empty())
                     .or_else(|| edb_album_by_path.get(&path_key).map(String::as_str))
                     .map(|album| {
-                        let album_key = canonicalize_playlist_name(album);
+                        let album_key = dictionary_name_key(album);
                         if let Some(existing) = album_id_by_name.get(&album_key).copied() {
                             existing
                         } else {
@@ -1513,7 +1513,7 @@ pub(crate) fn build_pdb_for_playlists(
                     .as_deref()
                     .filter(|v| !v.trim().is_empty())
                     .map(|genre_name| {
-                        let genre_key = canonicalize_playlist_name(genre_name);
+                        let genre_key = dictionary_name_key(genre_name);
                         if let Some(existing) = genre_id_by_name.get(&genre_key).copied() {
                             existing
                         } else {

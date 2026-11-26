@@ -320,6 +320,7 @@ fn parity_detail() -> UsbParityPlaylistDetail {
         artwork_mismatch_tracks: 0,
         rating_colour_mismatch_tracks: 0,
         field_note_tracks: 0,
+        same_name_copies: 0,
         sample_only_in_pdb: Vec::new(),
         sample_only_in_edb: Vec::new(),
         sample_metadata_mismatches: Vec::new(),
@@ -2329,23 +2330,30 @@ fn analysis_ownership_owner_keeps_all_rows_of_its_file() {
     assert_eq!(found.non_owner_track_ids(), HashSet::from([3, 4, 5]));
 }
 
-/// An eDB with only what the BPM/key check reads: each path's BPM and key.
-fn bpm_key_edb(rows: &[(&str, i64, &str)]) -> rusqlite::Connection {
+/// An eDB with only what the BPM/key check reads: each row's path, BPM,
+/// key (none when empty) and analysis file. Content ids count from 1 in
+/// the order given.
+fn bpm_key_edb(rows: &[(&str, i64, &str)], anlz: &str) -> rusqlite::Connection {
     let conn = rusqlite::Connection::open_in_memory().expect("in-memory eDB");
     conn.execute_batch(
-        r#"CREATE TABLE content (path TEXT, bpmx100 INTEGER, key_id INTEGER);
+        r#"CREATE TABLE content (content_id INTEGER PRIMARY KEY, path TEXT, bpmx100 INTEGER,
+               key_id INTEGER, analysisDataFilePath TEXT);
            CREATE TABLE "key" (key_id INTEGER PRIMARY KEY, name TEXT);"#,
     )
     .expect("schema");
     for (id, (path, bpm, key)) in rows.iter().enumerate() {
+        let key_id = (!key.is_empty()).then_some(id as i64 + 1);
+        if let Some(key_id) = key_id {
+            conn.execute(
+                r#"INSERT INTO "key" (key_id, name) VALUES (?1, ?2)"#,
+                rusqlite::params![key_id, key],
+            )
+            .expect("key");
+        }
         conn.execute(
-            r#"INSERT INTO "key" (key_id, name) VALUES (?1, ?2)"#,
-            rusqlite::params![id as i64 + 1, key],
-        )
-        .expect("key");
-        conn.execute(
-            "INSERT INTO content (path, bpmx100, key_id) VALUES (?1, ?2, ?3)",
-            rusqlite::params![path, bpm, id as i64 + 1],
+            "INSERT INTO content (path, bpmx100, key_id, analysisDataFilePath) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![path, bpm, key_id, anlz],
         )
         .expect("content");
     }
@@ -2353,11 +2361,12 @@ fn bpm_key_edb(rows: &[(&str, i64, &str)]) -> rusqlite::Connection {
 }
 
 #[test]
-fn bpm_key_mismatch_is_per_file_when_rows_of_one_file_disagree() {
+fn bpm_key_mismatch_aligns_every_row_of_a_file_to_its_newest_version() {
     let root = tempdir().expect("tempdir");
     let path = "/Contents/A/Twice.mp3";
     let anlz = "/PIONEER/USBANLZ/P009/00000009/ANLZ0000.DAT";
-    // Two libraries analysed one file: 95 BPM in 8A, and 190 BPM in 9A.
+    // Two libraries analysed one file: row 7 at 95 BPM in 8A, row 3 at 190
+    // BPM in 9A.
     let mut rows = same_file_rows(&[7, 3], path, anlz);
     rows[0].tempo_x100 = 9_500;
     rows[0].key_id = 1;
@@ -2368,26 +2377,75 @@ fn bpm_key_mismatch_is_per_file_when_rows_of_one_file_disagree() {
         keys: HashMap::from([(1, "8A".to_string()), (2, "9A".to_string())]),
         ..ParsedPdb::default()
     };
-    let detect = |edb: &rusqlite::Connection| {
-        super::detect_bpm_key_mismatches(root.path(), &parsed, Some(edb), false, None)
+    let detect = |edb: Option<&rusqlite::Connection>, scan_anlz: bool| {
+        super::detect_bpm_key_mismatches(root.path(), &parsed, edb, scan_anlz, None)
     };
-    // The eDB holds one row's values: it agrees with the file.
-    assert!(detect(&bpm_key_edb(&[(path, 9_500, "8A")])).is_empty());
-    assert!(detect(&bpm_key_edb(&[(path, 19_000, "9A")])).is_empty());
-    // Values neither row has: one finding for the file, aligned to its first
-    // row (lowest id), so the repair leaves nothing to flag.
-    let found = detect(&bpm_key_edb(&[(path, 12_800, "1A")]));
+
+    // No eDB: the newest PDB row (id 7) wins; row 3 gets its values.
+    let found = detect(None, false);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found[0].pdb_tempo_x100, 19_000);
-    assert_eq!(found[0].edb_bpmx100, Some(12_800));
-    assert_eq!(found[0].pdb_key_for_edb.as_deref(), Some("9A"));
-    // Each library's eDB row is checked: one matching a PDB row doesn't
-    // hide another that matches none.
-    assert!(detect(&bpm_key_edb(&[(path, 9_500, "8A"), (path, 19_000, "9A")])).is_empty());
-    let found = detect(&bpm_key_edb(&[(path, 9_500, "8A"), (path, 9_500, "3B")]));
+    assert_eq!(
+        (found[0].tempo_x100, found[0].key.as_deref()),
+        (Some(9_500), Some("8A"))
+    );
+    assert_eq!(found[0].pdb_rows, vec![(3, true, true)]);
+
+    // An eDB row is newer than any PDB row: it wins, in any key notation.
+    let edb = bpm_key_edb(&[(path, 19_000, "Em")], anlz);
+    let found = detect(Some(&edb), false);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found[0].edb_bpmx100, None);
-    assert_eq!(found[0].pdb_key_for_edb.as_deref(), Some("9A"));
+    assert_eq!(
+        (found[0].tempo_x100, found[0].key.as_deref()),
+        (Some(19_000), Some("Em"))
+    );
+    assert_eq!(found[0].pdb_rows, vec![(7, true, true)]);
+    assert!(found[0].edb_rows.is_empty());
+
+    // The highest content id is the newest eDB row; one without a key takes
+    // the next newest key.
+    let edb = bpm_key_edb(&[(path, 9_500, "9A"), (path, 12_800, "")], anlz);
+    let found = detect(Some(&edb), false);
+    assert_eq!(
+        (found[0].tempo_x100, found[0].key.as_deref()),
+        (Some(12_800), Some("9A"))
+    );
+    assert_eq!(found[0].pdb_rows, vec![(7, true, true), (3, true, false)]);
+    assert_eq!(found[0].edb_rows, vec![(2, false, true), (1, true, false)]);
+
+    // With the analysis files read, the BPM is the newest version's grid.
+    let dat = root.path().join(anlz.trim_start_matches('/'));
+    fs::create_dir_all(dat.parent().expect("parent")).expect("bundle dir");
+    fs::write(
+        &dat,
+        crate::service::anlz::build_anlz_dat_file(
+            &crate::service::anlz::WaveformData::empty(),
+            path,
+            Some(120.5),
+            200_000,
+            None,
+            &[],
+        ),
+    )
+    .expect("write DAT");
+    let edb = bpm_key_edb(&[(path, 19_000, "9A")], anlz);
+    let found = detect(Some(&edb), true);
+    assert_eq!(
+        (found[0].tempo_x100, found[0].key.as_deref()),
+        (Some(12_050), Some("9A"))
+    );
+    assert_eq!(found[0].pdb_rows, vec![(7, true, true), (3, true, false)]);
+    assert_eq!(found[0].edb_rows, vec![(1, true, false)]);
+
+    // Everything agrees: nothing to report.
+    let mut agreed = parsed.clone();
+    for row in &mut agreed.tracks {
+        row.tempo_x100 = 12_050;
+        row.key_id = 2;
+    }
+    let edb = bpm_key_edb(&[(path, 12_050, "Em")], anlz);
+    assert!(
+        super::detect_bpm_key_mismatches(root.path(), &agreed, Some(&edb), true, None).is_empty()
+    );
 }
 
 /// rekordbox's own page shapes pass: ACTV (0x34) pages inside a multi-page

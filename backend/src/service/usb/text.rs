@@ -9,6 +9,20 @@ pub(crate) fn canonicalize_playlist_name(value: &str) -> String {
         .collect::<String>()
 }
 
+/// The key the PDB writer matches artist, album, genre and label names by:
+/// letters and digits only, ignoring case, so names that differ only in
+/// case or punctuation share one dictionary row (`NOVA` and `Nova`). A name
+/// that is all punctuation (rekordbox writes albums like `=` or `-`) keeps
+/// its own text as the key, so it doesn't collide with an empty name.
+pub(crate) fn dictionary_name_key(value: &str) -> String {
+    let key = canonicalize_playlist_name(value);
+    if key.is_empty() {
+        value.trim().to_string()
+    } else {
+        key
+    }
+}
+
 pub(crate) fn repair_utf8_mojibake(value: &str) -> String {
     fn suspicious_score(value: &str) -> usize {
         value

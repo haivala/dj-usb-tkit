@@ -301,6 +301,11 @@ pub struct UsbParityPlaylistDetail {
     /// differ between the PDB and the eDB. A note: never fails parity.
     #[serde(default)]
     pub field_note_tracks: usize,
+    /// Other playlists of the same folder and name (ignoring case and
+    /// punctuation), in either database: the strict parity repair merges
+    /// them into the first.
+    #[serde(default)]
+    pub same_name_copies: usize,
     #[serde(default)]
     pub sample_only_in_pdb: Vec<String>,
     #[serde(default)]

@@ -332,30 +332,8 @@ to the export writers. The repair writes nothing itself:
 - **Collect.** Parse the staged PDB once and read the eDB's playlists and
   every `content` row with its dictionary names (raw values; nothing is
   substituted for a missing one).
-- **Merge**, for the playlists that fail strict parity:
-  - per track field, a non-empty eDB value wins, else the PDB's; a side
-    without a value never blanks the other. The eDB's rating and colour win
-    whenever it has the track (0 is a rating);
-  - artwork only needs to resolve on both sides (not the same file): a PDB
-    row that has artwork keeps it, and a side without artwork takes the
-    other side's exact path;
-  - membership is the union: eDB members in eDB order, then members only the
-    PDB has. Membership on one side is never pruned;
-  - playlists are matched by folder path and name: same-named playlists in
-    different folders stay apart, and same-named ones in one folder are one
-    (rekordbox doesn't allow two: it offers to overwrite the existing one, so
-    two in one folder are left over from a damaged or broken write);
-  - matched and PDB-only playlists keep their PDB playlist id, sort order and
-    folder; eDB-only playlists keep their eDB folder and get a free id after
-    the existing ones. A folder one database lacks is created there, empty
-    ones too, found by name under its parent or added with the other
-    database's id when free;
-  - a top-level eDB playlist the PDB has only inside folders the eDB lacks
-    is a copy earlier versions of this repair flattened (they wrote every
-    playlist at the top level, same-named ones merged): it is removed, and
-    the PDB's playlists are written into their folders in its place;
-  - a track the eDB doesn't have yet takes its creation date from the audio
-    file on the USB, else its PDB date added.
+- **Merge** the playlists that fail strict parity, by the rules in
+  "Merge rules" below.
 - **Write once, all or nothing.** The eDB writer writes every merged playlist
   in one transaction; the PDB writer builds the new PDB in memory from the
   staged copy (same transaction's t19 property; duplicate playlist entries
@@ -386,6 +364,87 @@ have rewritten it.
 The strict repair converges on rerun. It does not compact PDB tables,
 rebuild an existing PDB from scratch, or remove playlist membership that
 exists on only one side.
+
+### Merge rules
+
+Every choice the merge makes about which value, row or order wins. Change
+one only on purpose, and update this list with it.
+
+**Which rows are one track**
+
+- A USB exported from several rekordbox libraries can list one audio file
+  as several rows, one per library, in the PDB and the eDB alike. That is
+  rekordbox's normal shape, not damage: such rows are one track and share
+  one analysis file.
+- The newest row of a file holds its newest data: the eDB row with the
+  highest `content_id` when the eDB lists the file, else the PDB row with
+  the highest id.
+- An eDB playlist entry pairs with its file's newest PDB row, and a PDB-only
+  entry with its file's newest eDB row. Ids never pair rows or playlists
+  across the databases: rekordbox numbers each database on its own.
+- Paths match exactly first. Only when no row has the exact path do they
+  match ignoring case (and a blank before the extension). rekordbox can list
+  two files whose paths differ only in case, each with its own rows and
+  analysis file.
+
+**Track fields**
+
+- Per field, a non-empty eDB value wins, else the PDB's. A side without a
+  value never blanks the other. The eDB's rating and colour win whenever it
+  has the track (0 is a rating).
+- A track number of 0 is no number: a PDB row with 0 and an eDB row
+  without one agree.
+- Keys in different notations are the same key (`Em` and `9A`, `B` and
+  `1B`): players show keys in their own notation, whatever the databases
+  hold.
+- Artist, album, genre and label names that differ only in case or
+  punctuation are one name (`dictionary_name_key`): the PDB keeps one
+  dictionary row for them. A name made only of punctuation, such as the
+  album `=` or `-` rekordbox writes, is matched by its own text.
+- A release date reads as `YYYY-MM-DD` where it can: rekordbox can write one
+  as `20150316-01-01`, which the PDB's ten characters cut to `20150316-0`;
+  both become `2015-03-16`. A release year is never left at 0 while another
+  row of the same file has one; else it comes from the release date.
+- A track without a title in either database gets its file name, without
+  the extension, as its title.
+- Artwork only needs to resolve on both sides (not the same file): a PDB row
+  that has artwork keeps it, and a side without artwork takes the other
+  side's exact path.
+- A track the eDB doesn't have yet takes its creation date from the audio
+  file on the USB, else its PDB date added. A 1970-01-01 date added or
+  created is the placeholder an older strict parity repair wrote and counts
+  as no date.
+
+**Playlists and folders**
+
+- Membership is the union: eDB members in eDB order, then members only the
+  PDB has. Membership on one side is never pruned.
+- Playlists are matched by folder path and name, the name ignoring case and
+  punctuation: same-named playlists in different folders stay apart, and
+  same-named ones in one folder become one. rekordbox doesn't allow two (it
+  offers to overwrite the existing one), so two in one folder are left over
+  from a damaged write or made by a user working around that, and merging
+  them keeps every track. The first in the folder's order keeps its name and
+  place and lists its own tracks, then the others' tracks it lacks, in their
+  order; the others are removed from both databases. Parity shows such a
+  folder's playlist with a "same-name copies" badge.
+- Matched and PDB-only playlists keep their PDB playlist id, sort order and
+  folder; eDB-only playlists keep their eDB folder and get a free id after
+  the existing ones. A folder one database lacks is created there, empty
+  ones too, found by name under its parent or added with the other
+  database's id when free.
+- The eDB's playlists and folders follow the PDB's order.
+- A top-level eDB playlist the PDB has only inside folders the eDB lacks is
+  a copy earlier versions of this repair flattened (they wrote every
+  playlist at the top level, same-named ones merged): it is removed, and the
+  PDB's playlists are written into their folders in its place.
+
+**BPM and key** (`fix_bpm_key_mismatch`, a fix of its own)
+
+- Every PDB and eDB row of a file gets the key of its newest row (the next
+  newest with one when it has none) and the BPM of its newest row's analysis
+  file beat grid (`.DAT`, else `.EXT`), else the newest row's BPM. Analysis
+  files are never changed.
 
 ### Missing database
 
@@ -424,12 +483,10 @@ field differences (note)" summary row and a per-playlist `field notes N`
 label. They never fail parity, but Preview Fixes offers the strict parity
 repair for a playlist that has them: its merge fills a value one side lacks
 and makes both carry the eDB's otherwise. A 1970-01-01 date added or created
-is the placeholder an older strict parity repair wrote and counts as no date,
-so the other side's real date replaces it. The eDB's date added matches when
+is no date (see "Merge rules"), so the other side's real date replaces it. The eDB's date added matches when
 either of the PDB track row's two date slots holds it: rekordbox writes it to
-the second and its collection date to the first (see `docs/PDB.md`). Genre, label and artist names
-that differ only in case or punctuation aren't noted: the writers match
-dictionary names that way, so they keep each side's spelling.
+the second and its collection date to the first (see `docs/PDB.md`). Names that are one
+name by the merge rules aren't noted.
 
 ## Write gate
 

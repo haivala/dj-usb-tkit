@@ -199,11 +199,19 @@ pub(super) fn compare_note_fields(
     parsed: &crate::pdb_reader::ParsedPdb,
     edb_playlists: &HashMap<String, ExportDbPlaylist>,
 ) -> FieldNoteParity {
-    let pdb_by_path = parsed
-        .tracks
-        .iter()
-        .map(|t| (normalize_pdb_path_for_edb_lookup(&t.track_file_path), t))
-        .collect::<HashMap<_, _>>();
+    // A file can have a PDB row per rekordbox library: the newest stands
+    // for it. Ids never pair rows across the databases: rekordbox numbers
+    // each on its own.
+    let mut pdb_by_path = HashMap::<String, &crate::pdb_reader::PdbTrackRow>::new();
+    for t in &parsed.tracks {
+        let slot = pdb_by_path
+            .entry(normalize_pdb_path_for_edb_lookup(&t.track_file_path))
+            .or_insert(t);
+        if t.id > slot.id {
+            *slot = t;
+        }
+    }
+
     let playlist_paths = edb_playlists
         .values()
         .flat_map(|playlist| playlist.tracks.iter())

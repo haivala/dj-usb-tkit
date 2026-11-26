@@ -11,8 +11,8 @@
 
 use super::*;
 use crate::service::export_helpers::{
-    EdbContentFields, canonicalize_track_path_identity, is_placeholder_date,
-    read_edb_content_fields,
+    EdbContentFields, canonicalize_track_path_identity, exact_track_path_identity,
+    is_placeholder_date, read_edb_content_fields,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -23,6 +23,9 @@ pub(super) struct StrictParityUpgradeApplyResult {
     /// Top-level eDB copies of playlists in folders, removed (see
     /// [`flattened_edb_copies`]).
     pub(super) flattened_copies_removed: usize,
+    /// Rows removed for playlists merged into another of the same folder
+    /// and name (ignoring case and punctuation), in both databases.
+    pub(super) same_name_playlists_merged: usize,
     pub(super) edb_rows_inserted: usize,
     pub(super) edb_rows_updated: usize,
     pub(super) pdb_tracks_inserted: usize,
@@ -84,6 +87,8 @@ pub(crate) fn playlist_requires_strict_upgrade(detail: &UsbParityPlaylistDetail)
         || detail.rating_colour_mismatch_tracks > 0
         // Notes don't fail parity, but the merge is what makes them agree.
         || detail.field_note_tracks > 0
+        // Same-named playlists in one folder are merged into the first.
+        || detail.same_name_copies > 0
         || !detail.playlist_in_both
         || !detail.sort_order_match
 }
@@ -210,6 +215,10 @@ pub(super) fn strict_parity_summary(result: &StrictParityUpgradeApplyResult) -> 
         0 => summary,
         count => tr::repair_strict_parity_flattened_copies(count, summary),
     };
+    let summary = match result.same_name_playlists_merged {
+        0 => summary,
+        count => tr::repair_strict_parity_same_name_merged(count, summary),
+    };
     match result.rebuilt_database {
         Some(staging::DbKind::Pdb) => tr::repair_strict_parity_rebuilt_pdb(summary),
         Some(staging::DbKind::Edb) => tr::repair_strict_parity_rebuilt_edb(summary),
@@ -274,9 +283,121 @@ fn merged_number(edb: Option<i64>, pdb: Option<i64>) -> Option<i64> {
     [edb, pdb].into_iter().flatten().find(|v| *v > 0)
 }
 
+/// A release date as `YYYY-MM-DD` when `raw` holds one: already in that
+/// form, or with its digits run together (`20150316`, which rekordbox can
+/// write as `20150316-01-01` -- and the PDB's 10-character field then cuts
+/// to `20150316-0`).
+fn normalized_release_date(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let valid = |y: &str, m: &str, d: &str| {
+        chrono::NaiveDate::from_ymd_opt(y.parse().ok()?, m.parse().ok()?, d.parse().ok()?)
+            .map(|date| date.format("%Y-%m-%d").to_string())
+    };
+    let digits =
+        |r: std::ops::Range<usize>| raw.get(r).filter(|s| s.bytes().all(|b| b.is_ascii_digit()));
+    if raw.get(4..5) == Some("-") && raw.get(7..8) == Some("-") {
+        return valid(digits(0..4)?, digits(5..7)?, digits(8..10)?);
+    }
+    valid(digits(0..4)?, digits(4..6)?, digits(6..8)?)
+}
+
+/// The track's release date: the first of the eDB's and the PDB's that reads
+/// as a date (normalized, see [`normalized_release_date`]), else the first
+/// non-empty one as it is.
+fn merged_release_date(edb: Option<&str>, pdb: Option<&str>) -> Option<String> {
+    [edb, pdb]
+        .into_iter()
+        .flatten()
+        .find_map(normalized_release_date)
+        .or_else(|| merged_text(edb, pdb))
+}
+
+/// The name a track without a title on either side gets: its file name
+/// without the extension.
+fn title_from_path(path: &str) -> String {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    match name.rsplit_once('.') {
+        Some((stem, _)) if !stem.trim().is_empty() => stem.to_string(),
+        _ => name.to_string(),
+    }
+}
+
+/// Every row the two databases hold for one audio file, newest first (eDB
+/// by `content_id`, PDB by id). A USB exported from several rekordbox
+/// libraries has a row per library for one file.
+#[derive(Default)]
+pub(super) struct FileRows<'a> {
+    edb: Vec<&'a EdbContentFields>,
+    pdb: Vec<&'a crate::pdb_reader::PdbTrackRow>,
+}
+
+/// [`FileRows`] of every audio file, by its exact path
+/// (`exact_track_path_identity`); [`FilesByPath::get`] falls back to the
+/// path ignoring case when no file has the exact one.
+struct FilesByPath<'a> {
+    exact: HashMap<String, FileRows<'a>>,
+    /// `canonicalize_track_path_identity` key -> the exact paths under it.
+    folded: HashMap<String, Vec<String>>,
+}
+
+impl<'a> FilesByPath<'a> {
+    fn new(
+        parsed: &'a crate::pdb_reader::ParsedPdb,
+        edb_rows: &'a HashMap<i64, EdbContentFields>,
+    ) -> Self {
+        let mut exact = HashMap::<String, FileRows<'a>>::new();
+        for row in edb_rows.values() {
+            if let Some(path) = row.path.as_deref() {
+                let key = exact_track_path_identity(path);
+                if !key.is_empty() {
+                    exact.entry(key).or_default().edb.push(row);
+                }
+            }
+        }
+        for track in &parsed.tracks {
+            let key = exact_track_path_identity(&track.track_file_path);
+            if !key.is_empty() {
+                exact.entry(key).or_default().pdb.push(track);
+            }
+        }
+        let mut folded = HashMap::<String, Vec<String>>::new();
+        for (key, rows) in &mut exact {
+            rows.edb.sort_by_key(|r| std::cmp::Reverse(r.content_id));
+            rows.pdb.sort_by_key(|t| std::cmp::Reverse(t.id));
+            folded
+                .entry(canonicalize_track_path_identity(key))
+                .or_default()
+                .push(key.clone());
+        }
+        Self { exact, folded }
+    }
+
+    /// The rows of the file at `path`: the exact path's, else the one file
+    /// whose path matches ignoring case (none when several do).
+    fn get(&self, path: &str) -> Option<&FileRows<'a>> {
+        self.exact
+            .get(&exact_track_path_identity(path))
+            .or_else(|| {
+                match self
+                    .folded
+                    .get(&canonicalize_track_path_identity(path))?
+                    .as_slice()
+                {
+                    [only] => self.exact.get(only),
+                    _ => None,
+                }
+            })
+    }
+}
+
 /// One track as the repair hands it to the writers: per field, a non-empty
 /// eDB value wins, else the PDB's. A side without a value never blanks the
-/// other. Nothing is derived, except two dates: the date added of a track
+/// other. Three fields are fixed up: a release date reads as `YYYY-MM-DD`
+/// where it can ([`merged_release_date`]), a release year neither side has
+/// comes from that date, and a track neither side names gets its file name
+/// as its title. The release year and date never stay empty while another
+/// row of the same audio file (`file`, newest first) has one. Nothing else
+/// is derived, except two dates: the date added of a track
 /// neither side has one for (today, the date the PDB writer would give a new
 /// row; carried on the track so both writers store the same date in one
 /// pass), and the creation date of a track whose eDB row has none (the audio
@@ -286,6 +407,7 @@ pub(super) fn merged_manifest_track(
     usb_root: &std::path::Path,
     edb: Option<&EdbContentFields>,
     pdb: Option<&crate::pdb_reader::PdbTrackRow>,
+    file: Option<&FileRows<'_>>,
     parsed: &crate::pdb_reader::ParsedPdb,
     position: usize,
 ) -> ExportManifestTrack {
@@ -341,6 +463,26 @@ pub(super) fn merged_manifest_track(
     }
     .and_then(|v| u32::try_from(v).ok());
     let to_u32 = |v: Option<i64>| v.and_then(|v| u32::try_from(v).ok());
+    let file_edb = file.map(|f| f.edb.as_slice()).unwrap_or_default();
+    let file_pdb = file.map(|f| f.pdb.as_slice()).unwrap_or_default();
+    let release_date = merged_release_date(
+        e(|r| r.release_date.as_deref()),
+        p_text(|t| t.release_date.as_deref()),
+    )
+    .or_else(|| {
+        file_edb
+            .iter()
+            .map(|r| r.release_date.as_deref())
+            .chain(file_pdb.iter().map(|t| t.release_date.as_deref()))
+            .find_map(|d| merged_release_date(d, None))
+    });
+    let file_release_year = || {
+        file_edb
+            .iter()
+            .map(|r| r.release_year)
+            .chain(file_pdb.iter().map(|t| t.release_year.map(i64::from)))
+            .find_map(|y| merged_number(y, None))
+    };
 
     ExportManifestTrack {
         id: match (edb, pdb) {
@@ -369,7 +511,7 @@ pub(super) fn merged_manifest_track(
             e(|r| r.title.as_deref()),
             p_text(|t| Some(t.title.as_str())),
         )
-        .unwrap_or_default(),
+        .unwrap_or_else(|| title_from_path(&exported_path)),
         artist: merged_text(
             e(|r| r.artist.as_deref()),
             pdb_name(&parsed.artists, pdb.map(|t| t.artist_id)),
@@ -427,11 +569,15 @@ pub(super) fn merged_manifest_track(
         release_year: to_u32(merged_number(
             en(|r| r.release_year),
             p_num(|t| t.release_year.map(i64::from)),
-        )),
-        release_date: merged_text(
-            e(|r| r.release_date.as_deref()),
-            p_text(|t| t.release_date.as_deref()),
-        ),
+        ))
+        .or_else(|| to_u32(file_release_year()))
+        .or_else(|| {
+            release_date
+                .as_deref()
+                .and_then(normalized_release_date)
+                .and_then(|d| d[..4].parse().ok())
+        }),
+        release_date,
         recorded_date: None,
         file_type: merged_number(en(|r| r.file_type), p_num(|t| t.file_type.map(i64::from))),
         owns_exported_media: false,
@@ -486,6 +632,11 @@ pub(super) struct MergedPlaylist {
     /// for a playlist only the eDB has.
     folders: Vec<crate::pdb_reader::PdbPlaylistTreeRow>,
     tracks: Vec<ExportManifestTrack>,
+    /// Playlists of the same folder and name (ignoring case and
+    /// punctuation) merged into this one, removed after the write: PDB
+    /// playlist ids and eDB playlist ids.
+    absorbed_pdb: Vec<u32>,
+    absorbed_edb: Vec<i64>,
 }
 
 /// Merge both databases' playlists (all of them, or those whose path key is
@@ -540,13 +691,7 @@ pub(super) fn merge_strict_parity_playlists(
         .collect();
     let pdb_track_by_id: HashMap<u32, &crate::pdb_reader::PdbTrackRow> =
         parsed.tracks.iter().map(|t| (t.id, t)).collect();
-    let edb_row_by_path: HashMap<String, &EdbContentFields> = edb_rows
-        .values()
-        .filter_map(|row| {
-            let key = canonicalize_track_path_identity(row.path.as_deref()?);
-            (!key.is_empty()).then_some((key, row))
-        })
-        .collect();
+    let file_rows = FilesByPath::new(parsed, edb_rows);
 
     struct PdbPlaylistInfo {
         playlist_id: u32,
@@ -556,7 +701,9 @@ pub(super) fn merge_strict_parity_playlists(
         entries: Vec<crate::pdb_reader::PdbPlaylistEntryRow>,
     }
     let pdb_tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
-    let mut pdb_playlists_by_key: HashMap<String, PdbPlaylistInfo> = HashMap::new();
+    // Several playlists of one name in one folder: the first in the folder's
+    // order is kept, and the others are merged into it.
+    let mut pdb_playlists_by_key: HashMap<String, Vec<PdbPlaylistInfo>> = HashMap::new();
     for leaf in parsed.playlist_tree.iter().filter(|r| !r.is_folder) {
         let mut entries: Vec<_> = parsed
             .playlist_entries
@@ -565,8 +712,6 @@ pub(super) fn merge_strict_parity_playlists(
             .cloned()
             .collect();
         entries.sort_by_key(|e| e.entry_index);
-        // Several rows of the same name in one folder: prefer better track
-        // coverage, then the lower sort order.
         let candidate = PdbPlaylistInfo {
             playlist_id: leaf.id,
             sort_order: leaf.sort_order,
@@ -578,24 +723,24 @@ pub(super) fn merge_strict_parity_playlists(
                 .collect(),
             entries,
         };
-        let key = pdb_tree.path(leaf).key();
-        let replace = pdb_playlists_by_key.get(&key).is_none_or(|existing| {
-            candidate.entries.len() > existing.entries.len()
-                || (candidate.entries.len() == existing.entries.len()
-                    && candidate.sort_order < existing.sort_order)
-        });
-        if replace {
-            pdb_playlists_by_key.insert(key, candidate);
-        }
+        pdb_playlists_by_key
+            .entry(pdb_tree.path(leaf).key())
+            .or_default()
+            .push(candidate);
     }
-    let edb_by_key: HashMap<String, &ExportDbPlaylist> = edb_playlists
-        .map(|playlists| {
-            playlists
-                .values()
-                .map(|playlist| (playlist.path.key(), playlist))
-                .collect()
-        })
-        .unwrap_or_default();
+    for same in pdb_playlists_by_key.values_mut() {
+        same.sort_by_key(|p| (p.sort_order, p.playlist_id));
+    }
+    let mut edb_by_key: HashMap<String, Vec<&ExportDbPlaylist>> = HashMap::new();
+    for playlist in edb_playlists.into_iter().flat_map(|p| p.values()) {
+        edb_by_key
+            .entry(playlist.path.key())
+            .or_default()
+            .push(playlist);
+    }
+    for same in edb_by_key.values_mut() {
+        same.sort_by_key(|p| (p.sort_order, p.playlist_id));
+    }
     let edb_tree_index = crate::pdb_reader::PlaylistTree::new(edb_tree);
     let edb_folders_of = |playlist: &ExportDbPlaylist| {
         edb_tree
@@ -631,8 +776,13 @@ pub(super) fn merge_strict_parity_playlists(
         if flattened.contains_key(key) {
             continue;
         }
-        let edb_pl = edb_by_key.get(key).copied();
-        let pdb_pl = pdb_playlists_by_key.get(key);
+        let edb_same = edb_by_key.get(key).map(Vec::as_slice).unwrap_or_default();
+        let pdb_same = pdb_playlists_by_key
+            .get(key)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let edb_pl = edb_same.first().copied();
+        let pdb_pl = pdb_same.first();
         let (pdb_row_id, playlist_id, sort_order, name, folders) = match (edb_pl, pdb_pl) {
             // PDB ids, sort orders and folders are kept: the PDB order is
             // what players show, and eDB and PDB orders may legitimately
@@ -669,8 +819,9 @@ pub(super) fn merge_strict_parity_playlists(
 
         let mut tracks = Vec::<ExportManifestTrack>::new();
         let mut seen = HashSet::<String>::new();
-        // eDB members first, in the eDB's order.
-        for edb_track in edb_pl.map(|pl| pl.tracks.as_slice()).unwrap_or_default() {
+        // eDB members first, in the eDB's order: the kept playlist's, then
+        // the ones merged into it.
+        for edb_track in edb_same.iter().flat_map(|pl| pl.tracks.iter()) {
             let ident = track_identity_key(
                 edb_track.identity_path(),
                 &edb_track.title,
@@ -680,11 +831,15 @@ pub(super) fn merge_strict_parity_playlists(
             if !seen.insert(ident.clone()) {
                 continue;
             }
-            // The PDB track: by path identity, then analysis path, then
-            // title and artist for a PDB track without a path.
-            let pdb_track = pdb_track_by_key
-                .get(&ident)
-                .copied()
+            // The PDB track: the newest row of the same file (exact path
+            // first; ids never pair rows across the databases, rekordbox
+            // numbers each on its own); then by path identity, analysis
+            // path, and title and artist for a PDB track without a path.
+            let same_file = file_rows
+                .get(edb_track.identity_path())
+                .and_then(|f| f.pdb.first().copied());
+            let pdb_track = same_file
+                .or_else(|| pdb_track_by_key.get(&ident).copied())
                 .or_else(|| {
                     let analysis = edb_track_analysis_key(edb_track);
                     (!analysis.is_empty())
@@ -704,17 +859,22 @@ pub(super) fn merge_strict_parity_playlists(
                 .parse::<i64>()
                 .ok()
                 .and_then(|id| edb_rows.get(&id));
+            let file = edb_row
+                .and_then(|r| r.path.as_deref())
+                .or(pdb_track.map(|t| t.track_file_path.as_str()))
+                .and_then(|path| file_rows.get(path));
             tracks.push(merged_manifest_track(
                 usb_root,
                 edb_row,
                 pdb_track,
+                file,
                 parsed,
                 tracks.len() + 1,
             ));
         }
         // Then members only the PDB has: device-side membership is never
         // pruned because one side is sparser.
-        for entry in pdb_pl.map(|pl| pl.entries.as_slice()).unwrap_or_default() {
+        for entry in pdb_same.iter().flat_map(|pl| pl.entries.iter()) {
             let Some(pdb_track) = pdb_track_by_id.get(&entry.track_id).copied() else {
                 continue;
             };
@@ -723,15 +883,14 @@ pub(super) fn merge_strict_parity_playlists(
             if !seen.insert(pdb_identity(pdb_track)) {
                 continue;
             }
-            let edb_row = edb_row_by_path
-                .get(&canonicalize_track_path_identity(
-                    &pdb_track.track_file_path,
-                ))
-                .copied();
+            // A PDB-only member pairs with its file's newest eDB row.
+            let file = file_rows.get(&pdb_track.track_file_path);
+            let edb_row = file.and_then(|f| f.edb.first().copied());
             tracks.push(merged_manifest_track(
                 usb_root,
                 edb_row,
                 Some(pdb_track),
+                file,
                 parsed,
                 tracks.len() + 1,
             ));
@@ -744,6 +903,8 @@ pub(super) fn merge_strict_parity_playlists(
             sort_order,
             folders,
             tracks,
+            absorbed_pdb: pdb_same.iter().skip(1).map(|p| p.playlist_id).collect(),
+            absorbed_edb: edb_same.iter().skip(1).map(|p| p.playlist_id).collect(),
         });
     }
     merged
@@ -811,6 +972,42 @@ pub(super) fn run_strict_parity_upgrade(
             Err(err)
         }
     }
+}
+
+/// Gives every eDB playlist and folder the PDB has (same path) the PDB's
+/// sort order, before the eDB's folders are numbered 0..n. The writers set it
+/// only on the playlists the upgrade rewrites; the other playlists in those
+/// folders kept their own eDB numbers, and the two numberings together gave
+/// a folder an order neither database has, failing the next parity check.
+/// A playlist only the eDB has keeps its number: the upgrade writes each of
+/// those into the PDB with the same one.
+fn align_edb_order_to_pdb(
+    tx: &rusqlite::Transaction<'_>,
+    pdb_tree_rows: &[crate::pdb_reader::PdbPlaylistTreeRow],
+) -> BackendResult<()> {
+    let pdb_tree = crate::pdb_reader::PlaylistTree::new(pdb_tree_rows);
+    let mut pdb_sort = HashMap::<(bool, String), u32>::new();
+    for row in pdb_tree_rows {
+        // Same path twice: the lower sort order, as the merge picks it.
+        pdb_sort
+            .entry((row.is_folder, pdb_tree.path(row).key()))
+            .and_modify(|sort| *sort = (*sort).min(row.sort_order))
+            .or_insert(row.sort_order);
+    }
+    let edb_rows = crate::edb::read_edb_playlist_tree(tx)?;
+    let edb_tree = crate::pdb_reader::PlaylistTree::new(&edb_rows);
+    for row in &edb_rows {
+        let Some(&sort) = pdb_sort.get(&(row.is_folder, edb_tree.path(row).key())) else {
+            continue;
+        };
+        if sort != row.sort_order {
+            tx.execute(
+                "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2",
+                rusqlite::params![sort, row.id],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn collect_merge_write(
@@ -957,8 +1154,20 @@ fn collect_merge_write(
         crate::edb::ensure_edb_folder_path(&tx, &path, crate::edb::PlaylistPlacement::AsGiven)?;
     }
     let edb_results = write_edb_playlists_in_tx(&tx, &edb_writes)?;
+    // Playlists merged into another of their folder go.
+    for id in merged.iter().flat_map(|m| m.absorbed_edb.iter()) {
+        tx.execute(
+            "DELETE FROM playlist_content WHERE playlist_id = ?1",
+            rusqlite::params![id],
+        )?;
+        result.same_name_playlists_merged += tx.execute(
+            "DELETE FROM playlist WHERE playlist_id = ?1",
+            rusqlite::params![id],
+        )?;
+    }
     // The writers take the PDB's sort orders; the eDB numbers each folder
     // 0..n, as rekordbox does. The order stays the PDB's.
+    align_edb_order_to_pdb(&tx, &parsed.playlist_tree)?;
     crate::edb::renumber_edb_playlist_siblings(&tx)?;
     let t19_property = t19_property_from_conn(&tx);
     // Every eDB folder in the PDB, empty ones too.
@@ -976,8 +1185,27 @@ fn collect_merge_write(
             path
         })
         .collect::<Vec<_>>();
-    let build =
+    let mut build =
         build_pdb_for_playlists(usb_root, &pdb_writes, t19_property, true, &edb_folder_paths)?;
+    let absorbed_pdb = merged
+        .iter()
+        .flat_map(|m| m.absorbed_pdb.iter().copied())
+        .collect::<HashSet<_>>();
+    if !absorbed_pdb.is_empty() {
+        crate::pdb_writer::remove_rows_inplace(
+            &mut build.bytes,
+            8,
+            &absorbed_pdb,
+            crate::pdb_row::playlist_entry_playlist_id,
+        );
+        result.same_name_playlists_merged += crate::pdb_writer::remove_rows_inplace(
+            &mut build.bytes,
+            7,
+            &absorbed_pdb,
+            crate::pdb_row::playlist_tree_id,
+        );
+        crate::pdb_writer::rebuild_sentinel_btrees_inplace(&mut build.bytes);
+    }
 
     result.edb_playlists_written = edb_results.len();
     result.edb_rows_inserted = edb_results.iter().map(|r| r.inserted_content).sum();
@@ -1008,4 +1236,54 @@ fn collect_merge_write(
     let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
     let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn release_dates_normalize_where_they_read_as_a_date() {
+        assert_eq!(
+            normalized_release_date("2015-03-16").as_deref(),
+            Some("2015-03-16")
+        );
+        // rekordbox's run-together form, and the PDB's 10-character cut of it.
+        assert_eq!(
+            normalized_release_date("20150316-01-01").as_deref(),
+            Some("2015-03-16")
+        );
+        assert_eq!(
+            normalized_release_date("20150316-0").as_deref(),
+            Some("2015-03-16")
+        );
+        assert_eq!(normalized_release_date("2015"), None);
+        assert_eq!(normalized_release_date("2015-13-40"), None);
+        // The first side that reads as a date wins; else the first non-empty.
+        assert_eq!(
+            merged_release_date(Some("20150316-01-01"), Some("20150316-0")).as_deref(),
+            Some("2015-03-16")
+        );
+        assert_eq!(
+            merged_release_date(Some("2015"), Some("2016-01-02")).as_deref(),
+            Some("2016-01-02")
+        );
+        assert_eq!(
+            merged_release_date(Some("2015"), None).as_deref(),
+            Some("2015")
+        );
+    }
+
+    #[test]
+    fn a_track_without_a_title_is_named_after_its_file() {
+        assert_eq!(
+            title_from_path("/Contents/A/B/Some Track (Mix).mp3"),
+            "Some Track (Mix)"
+        );
+        assert_eq!(
+            title_from_path("/Contents/A/B/no extension"),
+            "no extension"
+        );
+        assert_eq!(title_from_path("/Contents/A/.mp3"), ".mp3");
+    }
 }

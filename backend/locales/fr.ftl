@@ -411,6 +411,7 @@ parity-issue-dictionary = problèmes de dict. { $count }
 parity-issue-artwork = pochettes différentes { $count }
 parity-issue-rating-colour = note/couleur différente { $count }
 parity-issue-field-notes = notes de champs { $count }
+parity-issue-same-name-copies = copies de même nom { $count }
 parity-issue-in-one-database = dans une seule base
 parity-issue-sort-mismatch = tri différent
 parity-issue-order-mismatch = ordre différent
@@ -634,9 +635,9 @@ diagnostics-check-artist-layout-moved = { $count ->
 diagnostics-check-bpm-key = Cohérence BPM/tonalité
 diagnostics-check-bpm-key-ok = export.pdb et exportLibrary.db concordent sur le BPM et la tonalité de chaque morceau
 diagnostics-check-bpm-key-mismatch = { $count ->
-    [one] { $count } morceau
-   *[other] { $count } morceaux
-} dont le BPM/la tonalité dans exportLibrary.db diffère d'export.pdb -- les CDJ peuvent afficher un autre BPM/une autre tonalité que l'application ; lancez la réparation (fix_bpm_key_mismatch, qui vérifie aussi les beatgrids ANLZ) pour corriger. Voir le Journal des événements pour la liste.
+    [one] { $count } fichier audio
+   *[other] { $count } fichiers audio
+} dont les lignes dans export.pdb et exportLibrary.db divergent sur le BPM ou la tonalité -- les CDJ peuvent afficher un autre BPM/une autre tonalité que l'application ; lancez la réparation (fix_bpm_key_mismatch, qui prend le BPM dans la beatgrid du fichier d'analyse) pour corriger. Voir le Journal des événements pour la liste.
 diagnostics-check-shared-analysis = Fichiers d'analyse partagés
 diagnostics-check-shared-analysis-ok = chaque morceau a son propre fichier d'analyse
 diagnostics-check-shared-analysis-shared = { $tracks ->
@@ -645,7 +646,7 @@ diagnostics-check-shared-analysis-shared = { $tracks ->
 } partageant { $files ->
     [one] { $files } fichier d'analyse
    *[other] { $files } fichiers d'analyse
-}, les lecteurs peuvent donc afficher la forme d'onde et la beatgrid d'un morceau pour un autre ; lancez la réparation (separate_shared_analysis) pour corriger
+}, les lecteurs peuvent donc afficher la forme d'onde et la beatgrid d'un morceau pour un autre ; lancez la réparation (update_app_analysis_files) pour corriger. Voir le Journal des événements pour la liste.
 diagnostics-check-engine-missing = Absente de cette clé USB
 diagnostics-check-engine-missing-detail = Nécessaire uniquement pour les lecteurs Denon Prime / Numark Mixstream. Activez Paramètres → Export → « Écrire la bibliothèque Engine DJ » avant d'utiliser cette clé USB dans l'un d'eux ; sinon le lecteur importe lui-même export.pdb et analyse à nouveau chaque morceau
 diagnostics-check-engine-upkeep = Tenue à jour
@@ -804,7 +805,7 @@ repair-summary = « Appliquer les corrections » répare { $count ->
 repair-fix-empty-analysis = Corriger les fichiers d'analyse vides
 repair-fix-empty-analysis-description = Régénère les bundles DAT/EXT/2EX manquants ou vides quand l'audio source est retrouvable.
 repair-fix-bpm-key = Corriger les écarts de BPM/tonalité
-repair-fix-bpm-key-description = Reconstruit la beatgrid ANLZ et règle le BPM et la tonalité de l'eDB d'après la ligne PDB de chaque morceau, pour que tous les lecteurs lisent le même BPM et la même tonalité. Les formes d'onde, les cues et le premier temps sont conservés. Voir le Journal des événements pour les morceaux.
+repair-fix-bpm-key-description = Donne à chaque ligne PDB et eDB d'un morceau le BPM et la tonalité de sa version la plus récente, pour que tous les lecteurs lisent le même BPM et la même tonalité : le BPM de la beatgrid de son fichier d'analyse, la tonalité de sa ligne la plus récente. Une clé USB exportée depuis plusieurs bibliothèques rekordbox a une ligne par bibliothèque pour un même fichier ; la plus récente est la dernière ligne de l'eDB, sinon celle de la PDB. Les fichiers d'analyse ne sont pas modifiés. Voir le Journal des événements pour les morceaux.
 repair-fix-app-analysis = Mettre à jour les fichiers d'analyse de l'application
 repair-fix-app-analysis-description = Morceaux dont le fichier d'analyse, écrit par une ancienne version de l'application, est obsolète : { $count }. Chacun reçoit ce qui lui manque : la forme d'onde de la bibliothèque (tirée de son audio quand le morceau n'est pas dans la bibliothèque) à la place d'une forme grossière ou étirée, son propre fichier quand il partage celui d'un autre morceau, le chemin du morceau (PPTH) d'après lequel les lecteurs le retrouvent, la beatgrid au format de rekordbox et l'index de recherche MP3 (PVBR). Un morceau de la bibliothèque dont la forme d'onde n'est pas encore tracée est d'abord analysé. Le BPM, les temps, les cues et ce qu'ont écrit les lecteurs sont conservés ; les fichiers d'analyse de rekordbox ne sont jamais modifiés. Voir le Journal des événements pour la liste.
 repair-fix-flac-seek = Ajouter les données de recherche FLAC manquantes
@@ -874,6 +875,10 @@ repair-strict-parity-flattened-copies = { $count ->
     [one] { $count } copie eDB de premier niveau d'une playlist rangée dans un dossier retirée
    *[other] { $count } copies eDB de premier niveau de playlists rangées dans des dossiers retirées
 } ; { $summary }
+repair-strict-parity-same-name-merged = playlists de même nom d'un dossier fusionnées ({ $count ->
+    [one] { $count } playlist retirée
+   *[other] { $count } playlists retirées
+}) ; { $summary }
 repair-fix-duplicate-entries = Retirer les entrées de playlists PDB en double
 repair-fix-duplicate-entries-description = Retire { $count ->
     [one] { $count } ligne playlist_entries obsolète en double
@@ -1056,9 +1061,9 @@ repair-outcome-detail-duplicate-copies = { $count ->
     [one] { $count } fichier supprimé
    *[other] { $count } fichiers supprimés
 }
-repair-outcome-detail-bpm-key = { $grids ->
-    [one] { $grids } beatgrid reconstruite
-   *[other] { $grids } beatgrids reconstruites
+repair-outcome-detail-bpm-key = { $pdb ->
+    [one] { $pdb } ligne PDB mise à jour
+   *[other] { $pdb } lignes PDB mises à jour
 }, { $rows ->
     [one] { $rows } ligne eDB mise à jour
    *[other] { $rows } lignes eDB mises à jour

@@ -4762,7 +4762,7 @@ fn bpm_key_check_status(backend: &BackendCommands, usb: &Path) -> backend::model
 }
 
 #[test]
-fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
+fn repair_fix_bpm_key_mismatch_aligns_rows_to_the_newest_version_in_one_pass() {
     use backend::service::anlz::{
         build_anlz_dat_file, build_anlz_ext_file, read_beatgrid_tempo_from_anlz,
     };
@@ -4771,55 +4771,49 @@ fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
     // A normal export must never look mismatched.
     assert_fix_not_proposed(&backend, &usb, "fix_bpm_key_mismatch");
 
-    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb");
     let track = parsed
         .tracks
         .iter()
         .find(|t| t.tempo_x100 > 0)
         .expect("a PDB track with a tempo");
-    let pdb_tempo = track.tempo_x100;
-    let wrong_bpm = if pdb_tempo == 9_000 { 91.0 } else { 90.0 };
+    let track_id = track.id;
+    let grid_tempo: u32 = if track.tempo_x100 == 9_000 {
+        9_100
+    } else {
+        9_000
+    };
     let pdb_key = parsed
         .keys
         .get(&track.key_id)
         .cloned()
         .expect("fixture track has a PDB key");
 
-    // Replace the fixture's placeholder bundle with a real one whose beat
-    // grid is at a wrong tempo, and skew the eDB BPM and key.
+    // The newest analysis has a beat grid at another tempo than both rows.
     let dat_path = find_exported_anlz_dat(&usb);
     let waveform = flat_waveform(400, 128);
-    let track_path = track.track_file_path.as_str();
-    fs::write(
-        &dat_path,
-        build_anlz_dat_file(&waveform, track_path, Some(wrong_bpm), 200_000, None, &[]),
-    )
-    .expect("write DAT");
-    fs::write(
-        dat_path.with_extension("EXT"),
-        build_anlz_ext_file(&waveform, track_path, Some(wrong_bpm), 200_000, None, &[]),
-    )
-    .expect("write EXT");
+    let track_path = track.track_file_path.clone();
+    let bpm = Some(f64::from(grid_tempo) / 100.0);
+    let dat = build_anlz_dat_file(&waveform, &track_path, bpm, 200_000, None, &[]);
+    let ext = build_anlz_ext_file(&waveform, &track_path, bpm, 200_000, None, &[]);
+    fs::write(&dat_path, &dat).expect("write DAT");
+    fs::write(dat_path.with_extension("EXT"), &ext).expect("write EXT");
     // The automatic diagnosis is database-only: a beat grid alone never
     // trips it (it doesn't read the analysis files) ...
     assert!(matches!(
         bpm_key_check_status(&backend, &usb),
         backend::models::DiagStatus::Pass
     ));
+    // ... but rows that disagree do. The eDB row is the newest version; it
+    // has no key, so the key is the next newest row's, the PDB's.
     let edb_path = vendor_db_dir(&usb).join("exportLibrary.db");
     open_edb(&edb_path)
         .execute(
-            "UPDATE content SET bpmx100 = ?1 WHERE path = ?2",
-            rusqlite::params![12_345, track.track_file_path],
+            "UPDATE content SET bpmx100 = ?1, key_id = NULL WHERE path = ?2",
+            rusqlite::params![12_345, track_path],
         )
-        .expect("skew eDB bpm");
-    open_edb(&edb_path)
-        .execute(
-            "UPDATE content SET key_id = NULL WHERE path = ?1",
-            [&track.track_file_path],
-        )
-        .expect("skew eDB key");
-    // ... but a PDB/eDB disagreement does.
+        .expect("skew eDB bpm and key");
     assert!(matches!(
         bpm_key_check_status(&backend, &usb),
         backend::models::DiagStatus::Warn
@@ -4838,24 +4832,38 @@ fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
         data.data
             .applied_fixes
             .iter()
-            .any(|m| m.contains("Fix BPM/Key Mismatch") && m.contains("updated 1 eDB row")),
+            .any(|m| m.contains("Fix BPM/Key Mismatch")
+                && m.contains("updated 1 PDB row and 1 eDB row")),
         "expected the mismatch to be fixed: {:#?}",
         data.data.applied_fixes
     );
 
-    for path in [dat_path.clone(), dat_path.with_extension("EXT")] {
-        let tempo = read_beatgrid_tempo_from_anlz(&fs::read(&path).expect("read bundle"));
-        assert_eq!(tempo.map(u32::from), Some(pdb_tempo), "{}", path.display());
-    }
+    // The analysis files are the BPM's source: unchanged.
+    assert_eq!(fs::read(&dat_path).expect("read DAT"), dat);
+    assert_eq!(
+        fs::read(dat_path.with_extension("EXT")).expect("read EXT"),
+        ext
+    );
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb");
+    let row = parsed
+        .tracks
+        .iter()
+        .find(|t| t.id == track_id)
+        .expect("track row");
+    assert_eq!(row.tempo_x100, grid_tempo);
+    assert_eq!(
+        read_beatgrid_tempo_from_anlz(&dat).map(u32::from),
+        Some(grid_tempo)
+    );
     let (edb_bpm, edb_key): (i64, String) = open_edb(&edb_path)
         .query_row(
             r#"SELECT c.bpmx100, k.name FROM content c JOIN "key" k ON k.key_id = c.key_id
                WHERE c.path = ?1"#,
-            [&track.track_file_path],
+            [&track_path],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .expect("eDB bpm/key");
-    assert_eq!(edb_bpm, i64::from(pdb_tempo));
+    assert_eq!(edb_bpm, i64::from(grid_tempo));
     assert!(
         edb_key.eq_ignore_ascii_case(&pdb_key),
         "eDB key {edb_key} != PDB key {pdb_key}"

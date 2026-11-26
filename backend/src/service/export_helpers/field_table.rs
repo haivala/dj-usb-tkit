@@ -402,12 +402,11 @@ pub(crate) fn note_field_differences(
     let text_differs = |e: Option<&str>, p: Option<&str>| present(e) != present(p);
     let num_differs = |e: Option<i64>, p: Option<i64>| known(e) != known(p);
     // Genre, label and artist names are dictionary rows that the PDB writer
-    // matches by `canonicalize_playlist_name` (and the eDB's by case), so a
+    // matches by `dictionary_name_key` (and the eDB's by case), so a
     // name that differs only in case or punctuation is one the writers keep
     // as it is on each side.
     let name_differs = |e: Option<&str>, p: Option<&str>| {
-        present(e).map(super::canonicalize_playlist_name)
-            != present(p).map(super::canonicalize_playlist_name)
+        present(e).map(super::dictionary_name_key) != present(p).map(super::dictionary_name_key)
     };
     let mut out = Vec::new();
     let checks: [(&'static str, bool); 13] = [

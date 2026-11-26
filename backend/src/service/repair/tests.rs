@@ -166,6 +166,7 @@ fn make_strict_repair_detail(name: &str) -> UsbParityPlaylistDetail {
         artwork_mismatch_tracks: 0,
         rating_colour_mismatch_tracks: 0,
         field_note_tracks: 0,
+        same_name_copies: 0,
         sample_only_in_pdb: Vec::new(),
         sample_only_in_edb: Vec::new(),
         sample_metadata_mismatches: Vec::new(),
@@ -2726,6 +2727,75 @@ fn strict_parity_keeps_same_named_playlists_in_other_folders() {
     assert_eq!(
         edb_playlist_tracks(&usb_root, "Style B / Opening / Warmup"),
         ["/Contents/Fixture Artist/Track 2.mp3"]
+    );
+}
+
+#[test]
+fn strict_parity_merges_same_named_playlists_of_one_folder_into_the_first() {
+    let (_td, usb_root, _data_dir, service) = folder_tree_stick_with_rebuilt_edb();
+    // A second "Warm-up" next to Style A's "Warmup" (the same name ignoring
+    // case and punctuation), holding Track 2.
+    {
+        let edb_rows = edb_tree_of(&usb_root);
+        let tree = crate::pdb_reader::PlaylistTree::new(&edb_rows);
+        let warmup = edb_rows
+            .iter()
+            .find(|row| tree.path(row).display() == "Style A / Opening / Warmup")
+            .expect("Style A Warmup")
+            .clone();
+        let conn = staging::UsbDatabases::of(&usb_root)
+            .expect("databases")
+            .open_edb_writable()
+            .expect("open eDB");
+        let new_id: i64 = conn
+            .query_row("SELECT MAX(playlist_id) + 1 FROM playlist", [], |r| {
+                r.get(0)
+            })
+            .expect("free id");
+        conn.execute(
+            "INSERT INTO playlist (playlist_id, sequenceNo, name, attribute, playlist_id_parent) \
+             VALUES (?1, ?2, 'Warm-up', 0, ?3)",
+            rusqlite::params![new_id, i64::from(warmup.sort_order) + 1, warmup.parent_id],
+        )
+        .expect("add the copy");
+        conn.execute(
+            "INSERT INTO playlist_content (playlist_id, content_id, sequenceNo) \
+             SELECT ?1, content_id, 1 FROM content WHERE path LIKE '%Track 2.mp3'",
+            rusqlite::params![new_id],
+        )
+        .expect("fill the copy");
+    }
+
+    apply_strict_parity(&service, &usb_root);
+
+    // The first keeps its name and place, its own track first.
+    assert_eq!(
+        edb_playlist_tracks(&usb_root, "Style A / Opening / Warmup"),
+        [
+            "/Contents/Fixture Artist/Track 1.mp3",
+            "/Contents/Fixture Artist/Track 2.mp3"
+        ]
+    );
+    let edb = tree_paths(&edb_tree_of(&usb_root));
+    assert!(
+        !edb.iter().any(|(path, _)| path.ends_with("Warm-up")),
+        "the copy is merged away: {edb:?}"
+    );
+    assert_eq!(edb, tree_paths(&pdb_tree_of(&usb_root)));
+    let parsed = parse_pdb(&vendor_pdb_path(&usb_root)).expect("parse PDB");
+    let pdb_tree = crate::pdb_reader::PlaylistTree::new(&parsed.playlist_tree);
+    let warmup = parsed
+        .playlist_tree
+        .iter()
+        .find(|row| pdb_tree.path(row).display() == "Style A / Opening / Warmup")
+        .expect("PDB Warmup");
+    assert_eq!(
+        parsed
+            .playlist_entries
+            .iter()
+            .filter(|e| e.playlist_id == warmup.id)
+            .count(),
+        2
     );
 }
 

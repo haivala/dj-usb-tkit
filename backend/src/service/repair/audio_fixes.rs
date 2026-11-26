@@ -210,22 +210,22 @@ pub(super) fn apply_remove_duplicate_audio_copies(
     }
 }
 
-/// Align every track's ANLZ beat grid, eDB `bpmx100` and eDB key to its PDB
-/// row (`fix_bpm_key_mismatch`). Mismatches are re-detected against the
-/// current staged PDB and the given eDB connection, so earlier fixes in the
-/// same apply pass (e.g. strict parity rewriting the databases) are accounted
-/// for and one pass leaves nothing behind. The grid is rebuilt exactly as
-/// export does it -- `apply_analysis_edits_to_anlz` with the tempo only,
-/// reusing the bundle's own first-beat anchor and leaving cues, waveforms and
-/// `PSSI` as they are. Returns (ANLZ bundles rewritten, eDB rows updated).
+/// Give every row of each audio file whose rows disagree, in the PDB and
+/// the eDB, the BPM and key its newest version has (`fix_bpm_key_mismatch`,
+/// see [`BpmKeyMismatch`]). Mismatches are re-detected against the current
+/// staged PDB and the given eDB connection, so earlier fixes in the same
+/// apply pass (e.g. strict parity rewriting the databases) are accounted for
+/// and one pass leaves nothing behind. Analysis files are never changed: the
+/// BPM comes from them. Returns (PDB rows updated, eDB rows updated).
 pub(super) fn apply_bpm_key_mismatch_repair(
     usb_root: &std::path::Path,
     app_master_db_id: Option<u32>,
     edb_conn: Option<&mut rusqlite::Connection>,
-    warnings: &mut Vec<WarningEntry>,
     on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<(usize, usize)> {
-    let parsed = parse_pdb(&staging::required_pdb(usb_root)?)?;
+    let pdb_path = staging::required_pdb(usb_root)?;
+    let bytes = std::fs::read(&pdb_path)?;
+    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
     let mut handle = EdbRw::shared_or_open(edb_conn, usb_root);
     let mismatches: Vec<BpmKeyMismatch> = detect_bpm_key_mismatches(
         usb_root,
@@ -234,81 +234,69 @@ pub(super) fn apply_bpm_key_mismatch_repair(
         true,
         app_master_db_id,
     );
+    let total = mismatches.len() * 2;
 
-    let edb_targets: Vec<&BpmKeyMismatch> = mismatches
-        .iter()
-        .filter(|m| m.edb_bpmx100.is_some() || m.pdb_key_for_edb.is_some())
-        .collect();
-    let total = mismatches.len() + edb_targets.len();
-    let mut anlz_fixed = 0usize;
+    // ── PDB: every differing row, in one patch ────────────────────────
+    let row_by_id: HashMap<u32, &crate::pdb_reader::PdbTrackRow> =
+        parsed.tracks.iter().map(|t| (t.id, t)).collect();
+    let mut patches = Vec::new();
     for (index, m) in mismatches.iter().enumerate() {
-        let Some(dat) = m.anlz_dat_path.as_deref() else {
-            on_item(index + 1, total);
-            continue;
-        };
-        // The grid's beat count comes from the track length: the PDB's, else
-        // the audio file's own. Never a made-up one.
-        let Some(duration_ms) = m.duration_ms.or_else(|| {
-            detect_track_duration_ms(&usb_root.join(m.track_path.trim_start_matches('/')))
-        }) else {
-            warnings.push(logging::log_text(
-                Level::Warn,
-                "usb-repair",
-                "usb.repair.bpm-key.duration-unknown",
-                &tr::repair_warning_beat_grid_length_unknown(&m.track_path),
+        for &(id, tempo, key) in &m.pdb_rows {
+            let Some(row) = row_by_id.get(&id).copied() else {
+                continue;
+            };
+            patches.push((
+                row,
+                m.tempo_x100.filter(|_| tempo).map(|t| f64::from(t) / 100.0),
+                m.key.as_deref().filter(|_| key),
             ));
-            on_item(index + 1, total);
-            continue;
-        };
-        let edits = AnlzAnalysisEdits {
-            bpm: Some(f64::from(m.pdb_tempo_x100) / 100.0),
-            duration_ms: Some(duration_ms),
-            first_beat_ms: None,
-            cues: None,
-        };
-        for path in [dat.to_path_buf(), dat.with_extension("EXT")] {
-            if let Ok(bytes) = std::fs::read(&path) {
-                let rebuilt = apply_analysis_edits_to_anlz(&bytes, &edits);
-                if rebuilt != bytes {
-                    atomic_write_bytes(&path, &rebuilt)?;
-                }
-            }
         }
-        anlz_fixed += 1;
         on_item(index + 1, total);
     }
+    let pdb_fixed = patches.len();
+    if let Some(patched) = crate::service::cues::build_pdb_tracks_patch(bytes, &parsed, &patches)? {
+        std::fs::write(&pdb_path, patched)?;
+    }
 
+    // ── eDB: every differing content row ──────────────────────────────
     let mut edb_fixed = 0usize;
-    if !edb_targets.is_empty() {
+    if mismatches.iter().any(|m| !m.edb_rows.is_empty()) {
         let Some(handle) = handle.as_mut() else {
             return Err(BackendError::Internal(
                 "unable to open eDB to align content BPM/key".to_string(),
             ));
         };
         let tx = handle.conn().transaction()?;
-        for (index, m) in edb_targets.into_iter().enumerate() {
-            let mut changed = false;
-            if m.edb_bpmx100.is_some() {
-                changed |= tx.execute(
-                    "UPDATE content SET bpmx100 = ?1 WHERE path = ?2",
-                    params![i64::from(m.pdb_tempo_x100), m.track_path],
-                )? > 0;
-            }
-            if let Some(key) = m.pdb_key_for_edb.as_deref() {
-                let key_id = find_key_id_by_name(&tx, Some(key))?;
-                changed |= tx.execute(
-                    "UPDATE content SET key_id = ?1 WHERE path = ?2",
-                    params![key_id, m.track_path],
-                )? > 0;
-            }
-            if changed {
-                edb_fixed += 1;
+        for (index, m) in mismatches.iter().enumerate() {
+            let key_id = match m.key.as_deref() {
+                Some(key) if m.edb_rows.iter().any(|(_, _, key)| *key) => {
+                    find_key_id_by_name(&tx, Some(key))?
+                }
+                _ => None,
+            };
+            for &(content_id, tempo, key) in &m.edb_rows {
+                let mut changed = false;
+                if let Some(t) = m.tempo_x100.filter(|_| tempo) {
+                    changed |= tx.execute(
+                        "UPDATE content SET bpmx100 = ?1 WHERE content_id = ?2",
+                        params![i64::from(t), content_id],
+                    )? > 0;
+                }
+                if let Some(key_id) = key_id.filter(|_| key) {
+                    changed |= tx.execute(
+                        "UPDATE content SET key_id = ?1 WHERE content_id = ?2",
+                        params![key_id, content_id],
+                    )? > 0;
+                }
+                if changed {
+                    edb_fixed += 1;
+                }
             }
             on_item(mismatches.len() + index + 1, total);
         }
         tx.commit()?;
     }
-    Ok((anlz_fixed, edb_fixed))
+    Ok((pdb_fixed, edb_fixed))
 }
 
 /// The two seek indexes rekordbox writes: `PVBR` in an MP3's `.DAT`, `PVB2`

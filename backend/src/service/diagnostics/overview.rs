@@ -567,7 +567,7 @@ fn with_preview_fixes_hint(problems: &[Text]) -> String {
 pub(super) fn parity_issue_labels(d: &UsbParityPlaylistDetail) -> Vec<String> {
     /// A badge's count (0: no badge) and its text.
     type Badge = (usize, fn(usize) -> Text);
-    let counts: [Badge; 10] = [
+    let counts: [Badge; 11] = [
         (
             if d.edb_tracks > 0 { d.only_in_pdb } else { 0 },
             tr::parity_issue_only_in_pdb,
@@ -587,6 +587,7 @@ pub(super) fn parity_issue_labels(d: &UsbParityPlaylistDetail) -> Vec<String> {
             tr::parity_issue_rating_colour,
         ),
         (d.field_note_tracks, tr::parity_issue_field_notes),
+        (d.same_name_copies, tr::parity_issue_same_name_copies),
     ];
     let flags: [(bool, fn() -> Text); 3] = [
         (!d.playlist_in_both, tr::parity_issue_in_one_database),

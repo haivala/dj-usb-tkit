@@ -92,6 +92,19 @@ pub fn camelot_position(key: &str) -> Option<(u8, bool)> {
         })
 }
 
+/// Whether two key names are the same key in any notation: classic sharp or
+/// flat spellings and Camelot alike (`B` == `1B`, `Am` == `8A`). A stick
+/// exported from several rekordbox libraries can carry one key in different
+/// notations, and players show their own notation setting whatever the
+/// database says, so such names never disagree. Export's row reuse matches
+/// spellings only (`key_names_match`), so it keeps writing one notation.
+pub(crate) fn same_key_any_notation(a: &str, b: &str) -> bool {
+    match (camelot_position(a), camelot_position(b)) {
+        (Some(a), Some(b)) => a == b,
+        _ => a.trim().eq_ignore_ascii_case(b.trim()),
+    }
+}
+
 /// The label the UI shows for `key`. Classic returns the stored string as-is;
 /// Camelot converts when the key is recognised and otherwise falls back to
 /// the stored string.
@@ -176,6 +189,28 @@ mod tests {
             assert!(seen.insert(pos), "{key} duplicates {pos:?}");
         }
         assert_eq!(seen.len(), 24);
+    }
+
+    #[test]
+    fn same_key_any_notation_matches_spellings_and_camelot() {
+        for (a, b) in [
+            ("B", "1B"),
+            ("Am", "8a"),
+            ("Db", "C#"),
+            ("Ebm", "2A"),
+            ("x", " X "),
+        ] {
+            assert!(same_key_any_notation(a, b), "{a} == {b}");
+        }
+        for (a, b) in [
+            ("B", "1A"),
+            ("Am", "C"),
+            ("1B", "12B"),
+            ("x", "y"),
+            ("B", ""),
+        ] {
+            assert!(!same_key_any_notation(a, b), "{a} != {b}");
+        }
     }
 
     #[test]
