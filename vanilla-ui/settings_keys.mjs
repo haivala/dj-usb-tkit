@@ -9,7 +9,8 @@ export const STORAGE_KEY_EXPORT_BACKUP = "djusbtkit.exportBackup";
 export const STORAGE_KEY_EXPORT_ENGINE_LIBRARY = "djusbtkit.exportEngineLibrary";
 export const STORAGE_KEY_BACKUP_RETENTION_COUNT = "djusbtkit.backupRetentionCount";
 export const STORAGE_KEY_ANALYSIS_BPM_RANGE = "djusbtkit.analysisBpmRange";
-export const STORAGE_KEY_ANALYSIS_ENGINE = "djusbtkit.analysisEngine";
+export const STORAGE_KEY_BPM_ENGINE = "djusbtkit.bpmEngine";
+export const STORAGE_KEY_KEY_ENGINE = "djusbtkit.keyEngine";
 export const STORAGE_KEY_SIDEBAR_COLLAPSED = "djusbtkit.sidebarCollapsed";
 export const STORAGE_KEY_SIDEBAR_WIDTH = "djusbtkit.sidebarWidth";
 export const STORAGE_KEY_HELP_SEEN = "djusbtkit.helpSeen";
@@ -29,7 +30,8 @@ export const FRONTEND_DB_KEY_EXPORT_BACKUP = "ui_export_backup_v1";
 export const FRONTEND_DB_KEY_EXPORT_ENGINE_LIBRARY = "ui_export_engine_library_v1";
 export const FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT = "ui_backup_retention_count_v1";
 export const FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE = "ui_analysis_bpm_range_v1";
-export const FRONTEND_DB_KEY_ANALYSIS_ENGINE = "ui_analysis_engine_v1";
+export const FRONTEND_DB_KEY_BPM_ENGINE = "ui_bpm_engine_v1";
+export const FRONTEND_DB_KEY_KEY_ENGINE = "ui_key_engine_v1";
 export const FRONTEND_DB_KEY_SIDEBAR_COLLAPSED = "ui_sidebar_collapsed_v1";
 export const FRONTEND_DB_KEY_SIDEBAR_WIDTH = "ui_sidebar_width_v1";
 export const FRONTEND_DB_KEY_HELP_SEEN = "ui_help_seen_v1";
@@ -49,7 +51,8 @@ export const FRONTEND_SETTING_BINDINGS = [
   { storageKey: STORAGE_KEY_EXPORT_ENGINE_LIBRARY, dbKey: FRONTEND_DB_KEY_EXPORT_ENGINE_LIBRARY },
   { storageKey: STORAGE_KEY_BACKUP_RETENTION_COUNT, dbKey: FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT },
   { storageKey: STORAGE_KEY_ANALYSIS_BPM_RANGE, dbKey: FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE },
-  { storageKey: STORAGE_KEY_ANALYSIS_ENGINE, dbKey: FRONTEND_DB_KEY_ANALYSIS_ENGINE },
+  { storageKey: STORAGE_KEY_BPM_ENGINE, dbKey: FRONTEND_DB_KEY_BPM_ENGINE },
+  { storageKey: STORAGE_KEY_KEY_ENGINE, dbKey: FRONTEND_DB_KEY_KEY_ENGINE },
   { storageKey: STORAGE_KEY_SIDEBAR_COLLAPSED, dbKey: FRONTEND_DB_KEY_SIDEBAR_COLLAPSED },
   { storageKey: STORAGE_KEY_SIDEBAR_WIDTH, dbKey: FRONTEND_DB_KEY_SIDEBAR_WIDTH },
   { storageKey: STORAGE_KEY_HELP_SEEN, dbKey: FRONTEND_DB_KEY_HELP_SEEN },

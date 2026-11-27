@@ -234,7 +234,8 @@ fn file_name(path: &str) -> String {
 
 // Setting keys the frontend sends.
 const SETTING_UI_THEME: &str = "ui_theme_v1";
-const SETTING_UI_ANALYSIS_ENGINE: &str = "ui_analysis_engine_v1";
+const SETTING_UI_BPM_ENGINE: &str = "ui_bpm_engine_v1";
+const SETTING_UI_KEY_ENGINE: &str = "ui_key_engine_v1";
 
 // --- tests -----------------------------------------------------------------
 
@@ -1486,18 +1487,21 @@ fn remove_essentia_removes_dir_and_clears_setting() {
     let essentia_dir = service.db.data_dir().join("essentia");
     std::fs::create_dir_all(&essentia_dir).expect("create essentia dir");
     std::fs::write(essentia_dir.join("marker.txt"), b"x").expect("write marker");
-    service
-        .set_frontend_setting(SetFrontendSettingRequest {
-            key: SETTING_UI_ANALYSIS_ENGINE.to_string(),
-            value: Some("essentia".to_string()),
-        })
-        .expect("set analysis engine");
+    for key in [SETTING_UI_BPM_ENGINE, SETTING_UI_KEY_ENGINE] {
+        service
+            .set_frontend_setting(SetFrontendSettingRequest {
+                key: key.to_string(),
+                value: Some("essentia".to_string()),
+            })
+            .expect("set analysis engine");
+    }
 
     service.remove_essentia().expect("remove essentia");
 
     assert!(!essentia_dir.exists());
     let settings = service.get_frontend_settings().expect("get settings");
-    assert!(!settings.values.contains_key(SETTING_UI_ANALYSIS_ENGINE));
+    assert!(!settings.values.contains_key(SETTING_UI_BPM_ENGINE));
+    assert!(!settings.values.contains_key(SETTING_UI_KEY_ENGINE));
 }
 
 #[test]

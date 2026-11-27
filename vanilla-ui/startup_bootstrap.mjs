@@ -2,6 +2,7 @@ import { settleUsbOrderEditBeforeLeaving } from "./components/usb/order_edit.mjs
 import { STATIC_TABS } from "./app_state.mjs";
 import { loadUiTexts, t } from "./ui_texts.mjs";
 import { createThemeManager, createAccentManager } from "./components/settings/actions.mjs";
+import { usesEssentia } from "./components/settings/events.mjs";
 import { refreshUpdateCheck, UPDATE_RECHECK_INTERVAL_MS } from "./update_check.mjs";
 import { normalizeAnalysisBpmRange, DEFAULT_ANALYSIS_BPM_RANGE } from "./components/library/actions.mjs";
 import { applySidebarWidth, clampSidebarWidth } from "./components/shell/actions.mjs";
@@ -11,7 +12,8 @@ import {
   STORAGE_KEY_EXPORT_ENGINE_LIBRARY,
   STORAGE_KEY_BACKUP_RETENTION_COUNT,
   STORAGE_KEY_ANALYSIS_BPM_RANGE,
-  STORAGE_KEY_ANALYSIS_ENGINE,
+  STORAGE_KEY_BPM_ENGINE,
+  STORAGE_KEY_KEY_ENGINE,
   STORAGE_KEY_KEY_NOTATION,
   STORAGE_KEY_SIDEBAR_COLLAPSED,
   STORAGE_KEY_SIDEBAR_WIDTH,
@@ -89,13 +91,17 @@ export function restoreStoredUiPrefs(ctx) {
   }
   el.analysisBpmRangeSelect.value = state.analysisBpmRange;
 
-  try {
-    const storedEngine = localStorage.getItem(STORAGE_KEY_ANALYSIS_ENGINE);
-    state.analysisEngine = storedEngine === "essentia" ? "essentia" : "stratum";
-  } catch {
-    state.analysisEngine = "stratum";
+  for (const [stateKey, storageKey, select] of [
+    ["bpmEngine", STORAGE_KEY_BPM_ENGINE, el.bpmEngineSelect],
+    ["keyEngine", STORAGE_KEY_KEY_ENGINE, el.keyEngineSelect]
+  ]) {
+    try {
+      state[stateKey] = localStorage.getItem(storageKey) === "essentia" ? "essentia" : "stratum";
+    } catch {
+      state[stateKey] = "stratum";
+    }
+    select.value = state[stateKey];
   }
-  el.analysisEngineSelect.value = state.analysisEngine;
 
   // Display only: the backend renders key labels in this notation.
   try {
@@ -105,8 +111,7 @@ export function restoreStoredUiPrefs(ctx) {
     state.keyNotation = "classic";
   }
   el.keyNotationSelect.value = state.keyNotation;
-  const show = state.analysisEngine === "essentia";
-  el.essentiaInstallRow.classList.toggle("hidden", !show);
+  el.essentiaInstallRow.classList.toggle("hidden", !usesEssentia(state));
 
   try {
     state.cueStartOnFirstBeat =

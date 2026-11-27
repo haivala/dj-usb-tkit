@@ -30,6 +30,7 @@ fn job_payload(event: &str, job_id: &str, percent: usize, message: String) -> Jo
         bpm: None,
         bpm_source_text: None,
         key: None,
+        key_source_text: None,
         key_display: None,
         key_color: None,
         artwork_path: None,
@@ -65,10 +66,13 @@ fn track_payload(job_id: &str, progress: &AnalyzeTrackProgress) -> JobEventPaylo
         track_title: Some(progress.track_title.clone()),
         file_path: Some(progress.file_path.clone()),
         bpm: progress.bpm,
-        bpm_source_text: crate::service::settings::bpm_source_text(
+        bpm_source_text: crate::service::settings::value_source_text(
             progress.bpm_analyzer.as_deref(),
         ),
         key: progress.key.clone(),
+        key_source_text: crate::service::settings::value_source_text(
+            progress.key_source.as_deref(),
+        ),
         key_display: progress.key_display.clone(),
         key_color: progress.key_color,
         artwork_path: progress.artwork_path.clone(),
@@ -189,6 +193,7 @@ mod tests {
             bpm: Some(128.0),
             bpm_analyzer: None,
             key: None,
+            key_source: None,
             key_display: None,
             key_color: None,
             artwork_path: None,

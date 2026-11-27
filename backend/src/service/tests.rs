@@ -688,6 +688,7 @@ pub(super) fn sample_track(id: &str, file_path: &str) -> Track {
         bpm: None,
         bpm_analyzer: None,
         bpm_source_text: None,
+        key_source_text: None,
         key: None,
         key_display: None,
         key_color: None,
@@ -1047,10 +1048,10 @@ fn unregistered_export_stick_counts_as_usb() {
     assert!(tracks.items[0].is_usb_path);
 }
 
-// The track tables show these as sent: the BPM pill's tooltip, and a title
-// and artist for a file that has none.
+// The track tables show these as sent: the BPM and key pills' tooltips, and a
+// title and artist for a file that has none.
 #[test]
-fn track_rows_carry_the_bpm_source_and_unknown_title_texts() {
+fn track_rows_carry_the_bpm_and_key_source_and_unknown_title_texts() {
     let (_dir, service) = test_service();
     let conn = service.db.connect().expect("connect");
     for (id, title, analyzer) in [
@@ -1070,11 +1071,21 @@ fn track_rows_carry_the_bpm_source_and_unknown_title_texts() {
             None,
             false,
         );
+        // The key from the same place, but "essentia" for an analyzed one:
+        // the key engine can differ from the BPM's.
+        let key_source = analyzer.map(|a| {
+            if a.starts_with("stratum") {
+                "essentia"
+            } else {
+                a
+            }
+        });
         conn.execute(
-            "UPDATE tracks SET bpm_analyzer = ?1 WHERE id = ?2",
-            params![analyzer, id],
+            "UPDATE tracks SET bpm_analyzer = ?1, tonality = 'Am', tonality_source = ?2
+             WHERE id = ?3",
+            params![analyzer, key_source, id],
         )
-        .expect("set bpm analyzer");
+        .expect("set bpm analyzer and key source");
     }
     let ids: Vec<String> = ["user", "mixxx", "rekordbox", "analyzed", "none"]
         .map(String::from)
@@ -1088,6 +1099,20 @@ fn track_rows_carry_the_bpm_source_and_unknown_title_texts() {
         texts,
         [
             ("analyzed", Some("Analyzed with: stratum-v2")),
+            ("mixxx", Some("From Mixxx")),
+            ("none", None),
+            ("rekordbox", Some("From rekordbox")),
+            ("user", Some("Manually set")),
+        ]
+    );
+    let key_texts: Vec<(&str, Option<&str>)> = rows
+        .iter()
+        .map(|track| (track.id.as_str(), track.key_source_text.as_deref()))
+        .collect();
+    assert_eq!(
+        key_texts,
+        [
+            ("analyzed", Some("Analyzed with: essentia")),
             ("mixxx", Some("From Mixxx")),
             ("none", None),
             ("rekordbox", Some("From rekordbox")),

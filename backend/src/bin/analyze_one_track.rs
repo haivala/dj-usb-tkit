@@ -40,7 +40,8 @@ fn main() {
         track_ids: vec![track_id.clone()],
         bpm_min: None,
         bpm_max: None,
-        analysis_engine,
+        bpm_engine: analysis_engine.clone(),
+        key_engine: analysis_engine,
         ..Default::default()
     });
     if !analyzed.ok {

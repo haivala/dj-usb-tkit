@@ -59,7 +59,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
         ids = request.playlistIds.flatMap((id) => backend.store.playlistTracks.get(id))
           .filter((t) => !t.analysisReady).map((t) => String(t.localTrackId || t.id));
       }
-      analyzedRequests.push({ trackIds: ids, playlistIds: request.playlistIds });
+      analyzedRequests.push({ trackIds: ids, playlistIds: request.playlistIds, engines: [request.bpmEngine, request.keyEngine] });
       const ours = ids.filter((id) => id === "local-missing-1");
       const total = Math.max(1, ids.length);
       (async () => {
@@ -136,6 +136,8 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   // a client-collected id list. The mock resolves it to the unanalyzed track.
   expect(analyzedRequests.map((item) => item.playlistIds)).toEqual([["pl-1"]]);
   expect(analyzedRequests.map((item) => item.trackIds)).toEqual([["local-missing-1"]]);
+  // The BPM and key engines from the settings: both stratum by default.
+  expect(analyzedRequests.map((item) => item.engines)).toEqual([["stratum", "stratum"]]);
   await expect(page.locator("#statusText")).toContainText("Analysis finished: analyzed 1, failed 0");
   await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="local-missing-1"]')).not.toHaveClass(/is-analyzing/);
   await expect(ownButton).toBeEnabled();

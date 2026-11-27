@@ -779,7 +779,8 @@ fn analyzer_fixtures_validate_artwork_and_waveform_behavior() {
         bpm_min: None,
         bpm_max: None,
         track_ids: indexed_items.iter().map(|t| t.id.clone()).collect(),
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
@@ -2248,7 +2249,8 @@ fn analyze_new_tracks_emits_per_file_progress() {
                 bpm_min: None,
                 bpm_max: None,
                 track_ids,
-                analysis_engine: None,
+                bpm_engine: None,
+                key_engine: None,
                 ..Default::default()
             },
             move |progress| {
@@ -2430,7 +2432,8 @@ fn analyze_new_tracks_progress_reports_library_duration_total_scoped_to_visible_
             // contribute to the reported library duration total, even
             // though it's part of this same analysis batch.
             track_ids: vec![visible_track.id.clone(), hidden_track.id.clone()],
-            analysis_engine: None,
+            bpm_engine: None,
+            key_engine: None,
             ..Default::default()
         },
         move |progress| {
@@ -2568,7 +2571,8 @@ fn analyze_new_tracks_uses_audio_content_for_bpm_key_not_filename_tokens() {
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track.id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
@@ -2647,7 +2651,8 @@ fn analyze_new_tracks_does_not_guess_bpm_key_from_filename_on_silence() {
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track.id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
@@ -2735,7 +2740,8 @@ fn analyze_new_tracks_with_stratum_default_produces_bpm_and_key() {
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track.id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
@@ -2840,7 +2846,8 @@ fn analyze_new_tracks_respects_requested_bpm_range() {
         bpm_min: Some(200),
         bpm_max: Some(220),
         track_ids: vec![track.id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
@@ -2970,7 +2977,8 @@ fn analyze_new_tracks_commits_periodically_not_only_at_the_end() {
             track_ids,
             bpm_min: None,
             bpm_max: None,
-            analysis_engine: None,
+            bpm_engine: None,
+            key_engine: None,
             ..Default::default()
         },
         |progress| {
@@ -3104,7 +3112,8 @@ fn analyze_new_tracks_commits_periodically_with_real_worker_count_on_moderate_ba
             track_ids,
             bpm_min: None,
             bpm_max: None,
-            analysis_engine: None,
+            bpm_engine: None,
+            key_engine: None,
             ..Default::default()
         },
         |progress| {
@@ -3235,7 +3244,8 @@ fn analyze_new_tracks_pauses_and_resumes_between_tracks() {
             track_ids,
             bpm_min: None,
             bpm_max: None,
-            analysis_engine: None,
+            bpm_engine: None,
+            key_engine: None,
             ..Default::default()
         },
         |progress| {
@@ -3888,7 +3898,8 @@ fn analyze_new_tracks_cancel_stops_early_without_hanging() {
             track_ids,
             bpm_min: None,
             bpm_max: None,
-            analysis_engine: None,
+            bpm_engine: None,
+            key_engine: None,
             ..Default::default()
         },
         |progress| {
@@ -4463,7 +4474,8 @@ fn analyze_new_tracks_extracts_bpm_key_from_aiff() {
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track.id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
@@ -6173,12 +6185,14 @@ fn analyze_new_tracks_essentia_without_node_returns_error_not_panic() {
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-    // Set engine to essentia via frontend setting.
-    let set_resp = backend.set_frontend_setting(SetFrontendSettingRequest {
-        key: "ui_analysis_engine_v1".to_string(),
-        value: Some("essentia".to_string()),
-    });
-    assert!(set_resp.ok, "set_frontend_setting failed: {set_resp:?}");
+    // Set both engines to essentia via frontend settings.
+    for key in ["ui_bpm_engine_v1", "ui_key_engine_v1"] {
+        let set_resp = backend.set_frontend_setting(SetFrontendSettingRequest {
+            key: key.to_string(),
+            value: Some("essentia".to_string()),
+        });
+        assert!(set_resp.ok, "set_frontend_setting failed: {set_resp:?}");
+    }
 
     let scan = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![media.to_string_lossy().to_string()],
@@ -6211,7 +6225,8 @@ fn analyze_new_tracks_essentia_without_node_returns_error_not_panic() {
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track.id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     // We expect either a graceful per-track failure (counted in `failed`, with a
@@ -6242,7 +6257,7 @@ fn analyze_new_tracks_essentia_without_node_returns_error_not_panic() {
 }
 
 #[test]
-fn frontend_setting_analysis_engine_persists_and_reads_back() {
+fn frontend_setting_key_engine_persists_and_reads_back() {
     let root = tempdir().expect("temp root");
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
@@ -6252,13 +6267,13 @@ fn frontend_setting_analysis_engine_persists_and_reads_back() {
     assert!(settings.ok, "get_frontend_settings failed: {settings:?}");
     let values = &settings.data.expect("settings data").values;
     assert!(
-        !values.contains_key("ui_analysis_engine_v1"),
+        !values.contains_key("ui_key_engine_v1"),
         "engine setting should not be present by default"
     );
 
     // Set to essentia.
     let set_resp = backend.set_frontend_setting(SetFrontendSettingRequest {
-        key: "ui_analysis_engine_v1".to_string(),
+        key: "ui_key_engine_v1".to_string(),
         value: Some("essentia".to_string()),
     });
     assert!(set_resp.ok, "set essentia failed: {set_resp:?}");
@@ -6268,14 +6283,14 @@ fn frontend_setting_analysis_engine_persists_and_reads_back() {
     assert!(settings2.ok);
     let values2 = &settings2.data.expect("settings data").values;
     assert_eq!(
-        values2.get("ui_analysis_engine_v1").map(String::as_str),
+        values2.get("ui_key_engine_v1").map(String::as_str),
         Some("essentia"),
         "engine setting should persist as essentia"
     );
 
     // Switch to stratum.
     let set_resp2 = backend.set_frontend_setting(SetFrontendSettingRequest {
-        key: "ui_analysis_engine_v1".to_string(),
+        key: "ui_key_engine_v1".to_string(),
         value: Some("stratum".to_string()),
     });
     assert!(set_resp2.ok, "set stratum failed: {set_resp2:?}");
@@ -6284,14 +6299,14 @@ fn frontend_setting_analysis_engine_persists_and_reads_back() {
     assert!(settings3.ok);
     let values3 = &settings3.data.expect("settings data").values;
     assert_eq!(
-        values3.get("ui_analysis_engine_v1").map(String::as_str),
+        values3.get("ui_key_engine_v1").map(String::as_str),
         Some("stratum"),
         "engine setting should persist as stratum"
     );
 
     // Clear (delete).
     let set_resp3 = backend.set_frontend_setting(SetFrontendSettingRequest {
-        key: "ui_analysis_engine_v1".to_string(),
+        key: "ui_key_engine_v1".to_string(),
         value: None,
     });
     assert!(set_resp3.ok, "clear engine failed: {set_resp3:?}");
@@ -6300,7 +6315,7 @@ fn frontend_setting_analysis_engine_persists_and_reads_back() {
     assert!(settings4.ok);
     let values4 = &settings4.data.expect("settings data").values;
     assert!(
-        !values4.contains_key("ui_analysis_engine_v1"),
+        !values4.contains_key("ui_key_engine_v1"),
         "engine setting should be cleared"
     );
 
@@ -6394,10 +6409,12 @@ fn remove_essentia_deletes_dir_and_resets_engine() {
     let essentia_dir = data_dir.join("essentia/node_modules/essentia.js");
     fs::create_dir_all(&essentia_dir).unwrap();
     fs::write(essentia_dir.join("package.json"), b"{}").unwrap();
-    backend.set_frontend_setting(SetFrontendSettingRequest {
-        key: "ui_analysis_engine_v1".to_string(),
-        value: Some("essentia".to_string()),
-    });
+    for key in ["ui_bpm_engine_v1", "ui_key_engine_v1"] {
+        backend.set_frontend_setting(SetFrontendSettingRequest {
+            key: key.to_string(),
+            value: Some("essentia".to_string()),
+        });
+    }
 
     let resp = backend.remove_essentia();
     assert!(resp.ok, "remove_essentia failed: {resp:?}");
@@ -6409,14 +6426,13 @@ fn remove_essentia_deletes_dir_and_resets_engine() {
     let settings = backend.get_frontend_settings();
     assert!(settings.ok);
     let values = settings.data.expect("settings data").values;
-    let engine = values
-        .get("ui_analysis_engine_v1")
-        .map(String::as_str)
-        .unwrap_or("stratum");
-    assert_eq!(
-        engine, "stratum",
-        "engine should be reset to stratum after remove"
-    );
+    for key in ["ui_bpm_engine_v1", "ui_key_engine_v1"] {
+        let engine = values.get(key).map(String::as_str).unwrap_or("stratum");
+        assert_eq!(
+            engine, "stratum",
+            "{key} should be reset to stratum after remove"
+        );
+    }
 }
 
 #[test]

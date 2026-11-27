@@ -915,8 +915,9 @@ test("startup and settings", async ({ page }) => {
   await expect(page.locator("#analysisBpmRangeSelect")).toHaveValue("70-180");
 });
 
-// Analysis engine: choosing Essentia shows its install row; download, cancel, a missing Node.js and
-// remove each show what they do and choosing is saved.
+// Analysis engines: choosing Essentia for the BPM or the key shows its install row, which stays
+// while either uses it; download, cancel, a missing Node.js and remove each show what they do,
+// and each choice is saved under its own setting.
 test("analysis engine", async ({ page }) => {
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
@@ -937,23 +938,31 @@ test("analysis engine", async ({ page }) => {
     });
   });
   await page.goto("/");
-  const engine = page.locator("#analysisEngineSelect");
+  const bpmEngine = page.locator("#bpmEngineSelect");
+  const keyEngine = page.locator("#keyEngineSelect");
   const row = page.locator("#essentiaInstallRow");
   const status = page.locator("#essentiaNodeStatus");
   const download = page.locator("#essentiaDownloadBtn");
   const cancel = page.locator("#essentiaCancelBtn");
   const remove = page.locator("#essentiaRemoveBtn");
   const savedEngines = () => page.evaluate(() => window.__calls
-    .filter((c) => c.command === "set_frontend_setting" && c.request?.key === "ui_analysis_engine_v1")
-    .map((c) => c.request.value));
+    .filter((c) => c.command === "set_frontend_setting" && /^ui_(bpm|key)_engine_v1$/.test(c.request?.key))
+    .map((c) => `${c.request.key}=${c.request.value}`));
 
   await page.locator("#settingsBtn").click();
-  expect(await engine.locator("option").evaluateAll((options) => options.map((o) => o.value))).toEqual(["stratum", "essentia"]);
+  for (const select of [bpmEngine, keyEngine]) {
+    expect(await select.locator("option").evaluateAll((options) => options.map((o) => o.value))).toEqual(["stratum", "essentia"]);
+  }
   await expect(row).toBeHidden();
-  await engine.selectOption("essentia");
+  await keyEngine.selectOption("essentia");
   await expect(row).toBeVisible();
   await expect(status).toHaveText("Essentia files not installed");
-  expect(await savedEngines()).toEqual(["essentia"]);
+  await expect(page.locator("#statusText")).toHaveText("Key engine: Essentia");
+  await bpmEngine.selectOption("essentia");
+  await keyEngine.selectOption("stratum");
+  await expect(row).toBeVisible();
+  await expect(page.locator("#statusText")).toHaveText("Key engine: Stratum (built-in)");
+  expect(await savedEngines()).toEqual(["ui_key_engine_v1=essentia", "ui_bpm_engine_v1=essentia", "ui_key_engine_v1=stratum"]);
 
   await download.click();
   await expect(status).toHaveText("Downloading...");
@@ -980,8 +989,9 @@ test("analysis engine", async ({ page }) => {
   await expect(status).toHaveClass(/essentia-ready/);
   await expect(download).toBeHidden();
   await remove.click();
-  await expect(engine).toHaveValue("stratum");
+  await expect(bpmEngine).toHaveValue("stratum");
+  await expect(keyEngine).toHaveValue("stratum");
   await expect(row).toBeHidden();
   expect(await page.evaluate(() => window.__calls.some((c) => c.command === "remove_essentia"))).toBe(true);
-  expect(await savedEngines()).toEqual(["stratum"]);
+  expect(await savedEngines()).toEqual(["ui_bpm_engine_v1=stratum", "ui_key_engine_v1=stratum"]);
 });

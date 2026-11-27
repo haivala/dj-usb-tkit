@@ -126,7 +126,8 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         bpm_min: None,
         bpm_max: None,
         track_ids: remaining_ids.clone(),
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert!(analyzed.ok, "analyze failed: {analyzed:?}");
@@ -692,7 +693,8 @@ fn analyze_local_track_waveform_preview_comes_from_anlz_roundtrip() {
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track_id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");
@@ -767,7 +769,8 @@ fn save_track_analysis_edits_bakes_cues_and_first_beat_into_cached_anlz() {
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track_id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert_eq!(analyze.data.expect("analyze").analyzed, 1);
@@ -901,7 +904,8 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track_id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
 
@@ -1292,7 +1296,8 @@ fn export_one_track_with_cues_to(
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track_id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     let save = backend.save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
@@ -3283,7 +3288,8 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
         bpm_min: None,
         bpm_max: None,
         track_ids: vec![track_id.clone()],
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     assert!(analyze.ok, "analyze failed: {analyze:?}");

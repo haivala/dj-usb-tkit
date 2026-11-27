@@ -3,6 +3,8 @@
 //! Routes analysis to either the built-in stratum-dsp engine (pure Rust, no
 //! external runtime) or the legacy essentia.js engine (requires Node.js).
 
+use std::ops::Range;
+
 use crate::error::{BackendError, BackendResult};
 
 /// Which BPM/key detection engine to use.
@@ -36,6 +38,26 @@ impl AnalysisEngine {
     }
 }
 
+/// Which engine detects the BPM (and places the first beat with it) and
+/// which the key; each is chosen in Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnalysisEngines {
+    pub bpm: AnalysisEngine,
+    pub key: AnalysisEngine,
+}
+
+impl AnalysisEngines {
+    #[cfg(test)]
+    pub const STRATUM: Self = Self {
+        bpm: AnalysisEngine::Stratum,
+        key: AnalysisEngine::Stratum,
+    };
+
+    pub fn uses(&self, engine: AnalysisEngine) -> bool {
+        self.bpm == engine || self.key == engine
+    }
+}
+
 /// BPM/key detection result (engine-agnostic).
 #[derive(Default)]
 pub struct BpmKeyResult {
@@ -53,32 +75,68 @@ fn empty_bpm_key_result() -> BpmKeyResult {
     }
 }
 
-/// Run BPM/key detection using the stratum-dsp engine.
+/// What to detect, and from what. stratum detects the BPM from all of
+/// `samples`, the key from the `KEY_WINDOW_SECS` of them whose waveform bins
+/// (`mid_energy`, spread evenly over `samples`) hold the most mid-band
+/// energy.
+#[derive(Debug, Clone, Copy)]
+pub struct DetectRequest<'a> {
+    pub bpm_min: u32,
+    pub bpm_max: u32,
+    pub detect_bpm: bool,
+    pub detect_key: bool,
+    pub mid_energy: &'a [u8],
+}
+
+/// Run BPM/key detection using the stratum-dsp engine; what isn't asked for
+/// is left out (`None`) and costs nothing.
 pub fn detect_bpm_key_stratum(
     samples: &[f32],
     sample_rate: u32,
-    bpm_min: u32,
-    bpm_max: u32,
+    request: &DetectRequest,
 ) -> BackendResult<BpmKeyResult> {
     if samples.is_empty() || sample_rate == 0 {
         return Ok(empty_bpm_key_result());
     }
+    let failed = |e: stratum_dsp::AnalysisError| {
+        BackendError::Internal(format!("stratum-dsp analysis failed: {e}"))
+    };
+    let (bpm_min, bpm_max) = (request.bpm_min, request.bpm_max);
 
-    let result = stratum_dsp::analyze_audio(samples, sample_rate, stratum_config(bpm_min, bpm_max))
-        .map_err(|e| BackendError::Internal(format!("stratum-dsp analysis failed: {e}")))?;
+    let (bpm, first_beat_ms) = if request.detect_bpm {
+        let result =
+            stratum_dsp::analyze_bpm(samples, sample_rate, stratum_config(bpm_min, bpm_max))
+                .map_err(failed)?;
+        let bpm = (result.bpm > 0.0)
+            .then(|| refine_bpm(samples, sample_rate, result.bpm, bpm_min, bpm_max));
+        // stratum places its beats at its own estimate, which `refine_bpm` may
+        // have moved by up to 2 BPM or to a 3:2 / 4:3 relative; its first beat
+        // is also often well off a beat.
+        let first_beat_ms = bpm
+            .and_then(|bpm| first_beat_secs(samples, sample_rate, bpm))
+            .or_else(|| result.beat_grid.beats.first().map(|&t| f64::from(t)))
+            .map(|t| (t * 1000.0).round() as u32);
+        (bpm, first_beat_ms)
+    } else {
+        (None, None)
+    };
 
-    let bpm =
-        (result.bpm > 0.0).then(|| refine_bpm(samples, sample_rate, result.bpm, bpm_min, bpm_max));
-
-    let key = (!result.key.name().is_empty()).then(|| result.key.name());
-
-    // stratum places its beats at its own estimate, which `refine_bpm` may
-    // have moved by up to 2 BPM or to a 3:2 / 4:3 relative; its first beat
-    // is also often well off a beat.
-    let first_beat_ms = bpm
-        .and_then(|bpm| first_beat_secs(samples, sample_rate, bpm))
-        .or_else(|| result.beat_grid.beats.first().map(|&t| f64::from(t)))
-        .map(|t| (t * 1000.0).round() as u32);
+    let key = if request.detect_key {
+        let window = key_window(
+            request.mid_energy,
+            samples.len(),
+            KEY_WINDOW_SECS * sample_rate as usize,
+        );
+        let result = stratum_dsp::analyze_key(
+            &samples[window],
+            sample_rate,
+            stratum_key_config(bpm_min, bpm_max),
+        )
+        .map_err(failed)?;
+        Some(result.key.name()).filter(|name| !name.is_empty())
+    } else {
+        None
+    };
 
     Ok(BpmKeyResult {
         bpm,
@@ -93,6 +151,42 @@ pub(super) fn stratum_config(bpm_min: u32, bpm_max: u32) -> stratum_dsp::Analysi
         max_bpm: bpm_max as f32,
         ..Default::default()
     }
+}
+
+/// How much of the track the key is detected from.
+pub(super) const KEY_WINDOW_SECS: usize = 180;
+
+/// stratum's key settings: without the spectrogram time smoothing and the
+/// harmonic mask. They take about two thirds of its key time, and on
+/// annotated keys the key came out as often right without them.
+pub(super) fn stratum_key_config(bpm_min: u32, bpm_max: u32) -> stratum_dsp::AnalysisConfig {
+    stratum_dsp::AnalysisConfig {
+        enable_key_spectrogram_time_smoothing: false,
+        enable_key_harmonic_mask: false,
+        ..stratum_config(bpm_min, bpm_max)
+    }
+}
+
+/// The `window` samples (of `total`) whose waveform bins hold the most
+/// mid-band energy, where a track's harmony sits; the earliest such window
+/// on a tie, all of it when it is no longer than `window`. The bins spread
+/// evenly over the `total` samples.
+pub(super) fn key_window(mid_energy: &[u8], total: usize, window: usize) -> Range<usize> {
+    let bins = mid_energy.len();
+    if total <= window || bins == 0 {
+        return 0..total.min(window);
+    }
+    let width = (window * bins).div_ceil(total).clamp(1, bins);
+    let mut sum: u64 = mid_energy[..width].iter().map(|&v| u64::from(v)).sum();
+    let (mut best, mut best_start) = (sum, 0);
+    for start in 1..=bins - width {
+        sum = sum + u64::from(mid_energy[start + width - 1]) - u64::from(mid_energy[start - 1]);
+        if sum > best {
+            (best, best_start) = (sum, start);
+        }
+    }
+    let start = (best_start * total / bins).min(total - window);
+    start..start + window
 }
 
 /// Hop between onset-envelope frames, in samples.
@@ -501,9 +595,62 @@ mod tests {
         );
     }
 
+    fn both(mid_energy: &[u8]) -> DetectRequest<'_> {
+        DetectRequest {
+            bpm_min: 70,
+            bpm_max: 180,
+            detect_bpm: true,
+            detect_key: true,
+            mid_energy,
+        }
+    }
+
+    #[test]
+    fn key_window_takes_the_most_mid_energy() {
+        // 10 bins over 1000 samples; a 300-sample window spans 3 bins.
+        let mid = [1, 1, 1, 1, 9, 9, 9, 1, 1, 1];
+        assert_eq!(key_window(&mid, 1000, 300), 400..700);
+        // A tie keeps the earliest; the window never runs past the end.
+        assert_eq!(key_window(&[5; 10], 1000, 300), 0..300);
+        assert_eq!(
+            key_window(&[0, 0, 0, 0, 0, 0, 0, 0, 9, 9], 1000, 300),
+            700..1000
+        );
+        // A short track, or no waveform: from the start.
+        assert_eq!(key_window(&mid, 200, 300), 0..200);
+        assert_eq!(key_window(&[], 1000, 300), 0..300);
+    }
+
+    #[test]
+    fn stratum_detects_only_what_is_asked() {
+        let samples = click_track_secs(124.0, 44100, 30);
+        let bpm_only = detect_bpm_key_stratum(
+            &samples,
+            44100,
+            &DetectRequest {
+                detect_key: false,
+                ..both(&[])
+            },
+        )
+        .unwrap();
+        assert!(bpm_only.bpm.is_some() && bpm_only.first_beat_ms.is_some());
+        assert!(bpm_only.key.is_none());
+        let key_only = detect_bpm_key_stratum(
+            &samples,
+            44100,
+            &DetectRequest {
+                detect_bpm: false,
+                ..both(&[])
+            },
+        )
+        .unwrap();
+        assert!(key_only.bpm.is_none() && key_only.first_beat_ms.is_none());
+        assert!(key_only.key.is_some());
+    }
+
     #[test]
     fn stratum_empty_samples_returns_none() {
-        let result = detect_bpm_key_stratum(&[], 44100, 70, 180).unwrap();
+        let result = detect_bpm_key_stratum(&[], 44100, &both(&[])).unwrap();
         assert!(result.bpm.is_none());
         assert!(result.key.is_none());
         assert!(result.first_beat_ms.is_none());
@@ -511,7 +658,7 @@ mod tests {
 
     #[test]
     fn stratum_zero_sample_rate_returns_none() {
-        let result = detect_bpm_key_stratum(&[0.1, 0.2, 0.3], 0, 70, 180).unwrap();
+        let result = detect_bpm_key_stratum(&[0.1, 0.2, 0.3], 0, &both(&[])).unwrap();
         assert!(result.bpm.is_none());
         assert!(result.key.is_none());
         assert!(result.first_beat_ms.is_none());
@@ -530,7 +677,7 @@ mod tests {
             })
             .collect();
 
-        let result = detect_bpm_key_stratum(&samples, sample_rate, 70, 180).unwrap();
+        let result = detect_bpm_key_stratum(&samples, sample_rate, &both(&[])).unwrap();
         // A pure sine won't have clear BPM, but key detection should produce something
         assert!(result.key.is_some(), "expected key detection on sine wave");
     }

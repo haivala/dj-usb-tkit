@@ -44,8 +44,8 @@ impl BackendService {
         }
         let conn = self.db.connect()?;
         conn.execute(
-            "DELETE FROM app_settings WHERE key = ?1",
-            params![SETTING_UI_ANALYSIS_ENGINE],
+            "DELETE FROM app_settings WHERE key IN (?1, ?2)",
+            params![SETTING_UI_BPM_ENGINE, SETTING_UI_KEY_ENGINE],
         )?;
         Ok(())
     }
@@ -252,7 +252,8 @@ pub(super) fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_EXPORT_ENGINE_LIBRARY,
         SETTING_UI_BACKUP_RETENTION_COUNT,
         SETTING_UI_ANALYSIS_BPM_RANGE,
-        SETTING_UI_ANALYSIS_ENGINE,
+        SETTING_UI_BPM_ENGINE,
+        SETTING_UI_KEY_ENGINE,
         SETTING_UI_SIDEBAR_COLLAPSED,
         SETTING_UI_SIDEBAR_WIDTH,
         SETTING_UI_HELP_SEEN,
@@ -365,7 +366,8 @@ impl UsbPathCheck {
 ///   exactly: [`UsbPathCheck`] on `file_path` only.
 /// - `key_display` / `key_color` follow the user's key notation setting
 ///   (display only; `key` itself is what gets edited and exported).
-/// - `bpm_source_text`: the BPM pill's tooltip, from `bpm_analyzer`.
+/// - `bpm_source_text` / `key_source_text`: the BPM and key pills' tooltips,
+///   from `bpm_analyzer` / `key_source`.
 /// - An empty title or artist reads "Unknown Title" / "Unknown Artist".
 pub(crate) fn apply_frontend_track_fields(
     conn: &rusqlite::Connection,
@@ -375,7 +377,8 @@ pub(crate) fn apply_frontend_track_fields(
     let notation = key_notation::key_notation_setting(conn)?;
     for track in tracks.iter_mut() {
         track.is_usb_path = usb_paths.is_usb_path(&track.file_path);
-        track.bpm_source_text = bpm_source_text(track.bpm_analyzer.as_deref());
+        track.bpm_source_text = value_source_text(track.bpm_analyzer.as_deref());
+        track.key_source_text = value_source_text(track.key_source.as_deref());
         if track.title.trim().is_empty() {
             track.title = tr::track_row_unknown_title().render();
         }
@@ -389,17 +392,18 @@ pub(crate) fn apply_frontend_track_fields(
     Ok(())
 }
 
-/// The BPM pill's tooltip for a BPM set by `analyzer` (`Track::bpm_analyzer`):
-/// "Manually set", "From Mixxx", "From rekordbox", or which of this app's
-/// analyzers found it. `None` without one.
-pub(crate) fn bpm_source_text(analyzer: Option<&str>) -> Option<String> {
-    let analyzer = analyzer.map(str::trim).filter(|value| !value.is_empty())?;
+/// The BPM or key pill's tooltip for a value from `source`
+/// (`Track::bpm_analyzer`, `Track::key_source`): "Manually set", "From
+/// Mixxx", "From rekordbox", or which of this app's analyzers found it.
+/// `None` without one.
+pub(crate) fn value_source_text(source: Option<&str>) -> Option<String> {
+    let source = source.map(str::trim).filter(|value| !value.is_empty())?;
     Some(
-        match analyzer {
-            "user" => tr::track_table_bpm_source_user(),
-            "mixxx" => tr::track_table_bpm_source_mixxx(),
-            "rekordbox" => tr::track_table_bpm_source_rekordbox(),
-            other => tr::track_table_bpm_source_analyzer(other),
+        match source {
+            "user" => tr::track_table_source_user(),
+            "mixxx" => tr::track_table_source_mixxx(),
+            "rekordbox" => tr::track_table_source_rekordbox(),
+            other => tr::track_table_source_analyzer(other),
         }
         .render(),
     )

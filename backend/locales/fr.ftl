@@ -1164,6 +1164,7 @@ migration-mp3-seek = Ajout des données de recherche MP3
 migration-long-track-waveforms = Nouveau tracé des formes d’onde des longs morceaux
 migration-stratum-v1-analysis = Marquage pour analyse des morceaux dont l’analyse du BPM est ancienne
 migration-forget-removed-usb-drives = Oubli des morceaux des clés USB retirées de la liste
+migration-split-analysis-engine = Séparation du réglage du moteur d’analyse en BPM et tonalité
 
 migration-warning-failed = Échec de { $migration } ({ $error }) ; nouvelle tentative au prochain lancement
 migration-warning-startup-failed = Échec des mises à niveau de données au démarrage ({ $error }) ; nouvelle tentative au prochain lancement
@@ -1771,10 +1772,10 @@ playback-playing = Lecture depuis { $source } : { $track }
 
 ## track-table
 
-track-table-bpm-source-user = Défini manuellement
-track-table-bpm-source-mixxx = Depuis Mixxx
-track-table-bpm-source-rekordbox = Depuis rekordbox
-track-table-bpm-source-analyzer = Analysé avec : { $analyzer }
+track-table-source-user = Défini manuellement
+track-table-source-mixxx = Depuis Mixxx
+track-table-source-rekordbox = Depuis rekordbox
+track-table-source-analyzer = Analysé avec : { $analyzer }
 
 track-table-format-unknown = Inconnu
 track-table-format-sample-rate = { NUMBER($khz) } kHz
@@ -2177,12 +2178,12 @@ ui-selection-bar-remove-tooltip = Retirer les morceaux sélectionnés de cette p
 
 ui-settings-accent-reset = Réinitialiser
 ui-settings-analysis = Analyse
-ui-settings-analysis-engine = Moteur BPM/tonalité
 ui-settings-analysis-engine-stratum = Stratum (intégré)
 ui-settings-backup-before-export = Sauvegarder la PDB et l'eDB avant l'export
 ui-settings-backup-before-export-hint = Avant chaque export, copie la PDB et l'eDB dans un dossier de sauvegardes horodaté, à côté des originaux.
 ui-settings-backups-to-keep = Sauvegardes à conserver par fichier
 ui-settings-backups-to-keep-hint = La sauvegarde la plus récente reste toujours sur la clé USB ; les plus anciennes sont archivées sur cet ordinateur jusqu'à ce nombre, puis supprimées.
+ui-settings-bpm-engine = Moteur BPM
 ui-settings-bpm-range = Plage de BPM
 ui-settings-close-aria-label = Fermer les paramètres
 ui-settings-engine-library = Écrire la bibliothèque Engine DJ
@@ -2203,12 +2204,15 @@ ui-settings-backup-retention-saved = Sauvegardes à conserver par fichier : { $
 ui-settings-bpm-range-saved = Plage de BPM de l'analyse : { $range }
 ui-settings-key-notation-saved = Notation des tonalités : { $notation }
 ui-settings-key-notation-failed = Impossible d'enregistrer la notation des tonalités
-ui-settings-analysis-engine-saved = Moteur d'analyse : { $engine }
-ui-settings-analysis-engine-changed = Moteur d'analyse changé pour { $engine }
+ui-settings-bpm-engine-saved = Moteur BPM : { $engine }
+ui-settings-bpm-engine-changed = Moteur BPM changé pour { $engine }
+ui-settings-key-engine-saved = Moteur de tonalité : { $engine }
+ui-settings-key-engine-changed = Moteur de tonalité changé pour { $engine }
 ui-settings-version = Version { $version }
 ui-settings-version-not-set = Non définie
 ui-settings-export = Export
 ui-settings-get-node-js = Obtenir Node.js
+ui-settings-key-engine = Moteur de tonalité
 ui-settings-key-notation = Notation des tonalités
 ui-settings-key-notation-camelot = Camelot (8A)
 ui-settings-key-notation-classic = Classique (Am)

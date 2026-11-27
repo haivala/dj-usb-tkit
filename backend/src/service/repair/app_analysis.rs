@@ -51,14 +51,14 @@ pub(super) struct StickAnalysis {
 impl BackendService {
     /// Analyses USB files in the one analysis queue
     /// (`analyze_audio_files`): after whatever is waiting, with library
-    /// analysis's engine and BPM range, paused and cancelled with it.
+    /// analysis's engines and BPM range, paused and cancelled with it.
     /// Results in the files' order.
     pub(super) fn analyze_stick_files(
         &self,
         files: Vec<StickAudio>,
     ) -> BackendResult<Vec<Result<StickAnalysis, DrawError>>> {
         let conn = self.db.connect()?;
-        let (engine, bpm_min, bpm_max) = analysis_settings(&conn);
+        let (engines, bpm_min, bpm_max) = analysis_settings(&conn);
         drop(conn);
         let requests = files
             .into_iter()
@@ -73,7 +73,7 @@ impl BackendService {
                     detection_required: false,
                     bpm_min,
                     bpm_max,
-                    engine,
+                    engines,
                 };
                 (file.audio, request)
             })

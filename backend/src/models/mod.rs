@@ -100,6 +100,9 @@ pub struct JobEventPayload {
     pub bpm_source_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    /// The key pill's tooltip for `key` (see `Track::key_source_text`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_source_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

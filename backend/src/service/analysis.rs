@@ -5,13 +5,16 @@ use super::anlz::{
     write_generated_anlz_bundle_with_first_beat,
 };
 use super::anlz_read::row_waveform_from_pwv4;
-use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum, first_beat_secs};
+use super::bpm_key::{
+    AnalysisEngine, AnalysisEngines, BpmKeyResult, DetectRequest, detect_bpm_key_stratum,
+    first_beat_secs,
+};
 use super::export_helpers::{
     KeptAnalysis, LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash,
 };
 use super::{
-    BackendService, LibrarySources, SETTING_UI_ANALYSIS_ENGINE, has_core_analysis_fields,
-    track_has_core_analysis_for_source_status,
+    BackendService, LibrarySources, SETTING_UI_BPM_ENGINE, SETTING_UI_KEY_ENGINE,
+    has_core_analysis_fields, track_has_core_analysis_for_source_status,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
@@ -105,36 +108,68 @@ pub(crate) const MISSING_CORE_ANALYSIS_SQL: &str = "(COALESCE(TRIM(waveform_peak
      OR bpm IS NULL OR bpm <= 0 \
      OR duration_ms IS NULL OR duration_ms <= 0)";
 
-/// Read the configured analysis engine from app_settings. Defaults to Stratum.
-fn resolve_analysis_engine(conn: &rusqlite::Connection, requested: Option<&str>) -> AnalysisEngine {
-    if let Some(raw) = requested {
-        return AnalysisEngine::from_setting(raw);
-    }
-    let raw: Option<String> = conn
-        .query_row(
-            "SELECT value FROM app_settings WHERE key = ?1",
-            params![SETTING_UI_ANALYSIS_ENGINE],
-            |row| row.get(0),
-        )
-        .ok();
-    match raw {
-        Some(s) => AnalysisEngine::from_setting(&s),
-        None => AnalysisEngine::Stratum,
+/// The BPM and key engines: the requested ones, else the settings, else
+/// stratum.
+fn resolve_analysis_engines(
+    conn: &rusqlite::Connection,
+    requested_bpm: Option<&str>,
+    requested_key: Option<&str>,
+) -> AnalysisEngines {
+    let resolve = |requested: Option<&str>, setting: &str| {
+        let raw = requested.map(str::to_string).or_else(|| {
+            conn.query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![setting],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+        });
+        raw.map_or(AnalysisEngine::Stratum, |raw| {
+            AnalysisEngine::from_setting(&raw)
+        })
+    };
+    AnalysisEngines {
+        bpm: resolve(requested_bpm, SETTING_UI_BPM_ENGINE),
+        key: resolve(requested_key, SETTING_UI_KEY_ENGINE),
     }
 }
 
-/// Dispatch BPM/key detection to the selected engine.
+/// Dispatch BPM/key detection: each engine detects what `engines` gives it
+/// and `request` asks for. Essentia detects from all of `samples`.
 fn detect_bpm_key(
+    engines: AnalysisEngines,
+    samples: &[f32],
+    sample_rate: u32,
+    request: &DetectRequest,
+) -> BackendResult<BpmKeyResult> {
+    let mut detected = BpmKeyResult::default();
+    for engine in [AnalysisEngine::Stratum, AnalysisEngine::Essentia] {
+        let part = DetectRequest {
+            detect_bpm: request.detect_bpm && engines.bpm == engine,
+            detect_key: request.detect_key && engines.key == engine,
+            ..*request
+        };
+        if !part.detect_bpm && !part.detect_key {
+            continue;
+        }
+        let found = detect_bpm_key_with(engine, samples, sample_rate, &part)?;
+        detected.bpm = detected.bpm.or(found.bpm);
+        detected.first_beat_ms = detected.first_beat_ms.or(found.first_beat_ms);
+        detected.key = detected.key.or(found.key);
+    }
+    Ok(detected)
+}
+
+fn detect_bpm_key_with(
     engine: AnalysisEngine,
     samples: &[f32],
     sample_rate: u32,
-    bpm_min: u32,
-    bpm_max: u32,
+    request: &DetectRequest,
 ) -> BackendResult<BpmKeyResult> {
     match engine {
-        AnalysisEngine::Stratum => detect_bpm_key_stratum(samples, sample_rate, bpm_min, bpm_max),
+        AnalysisEngine::Stratum => detect_bpm_key_stratum(samples, sample_rate, request),
         AnalysisEngine::Essentia => {
-            let result = detect_bpm_key_with_essentia_js(samples, sample_rate, bpm_min, bpm_max)?;
+            let result = detect_bpm_key_with_essentia_js(samples, sample_rate, request)?;
             let Some(result) = result else {
                 return Err(BackendError::Internal(
                     "Essentia analysis returned no result; no fallback engine applied".to_string(),
@@ -177,6 +212,8 @@ pub struct AnalyzeTrackProgress {
     pub bpm: Option<f64>,
     pub bpm_analyzer: Option<String>,
     pub key: Option<String>,
+    /// Where `key` came from (`Track::key_source`); none for a kept key.
+    pub key_source: Option<String>,
     /// `key` in the user's display notation + colour group; filled once per
     /// event by the coordinator (see `key_notation`).
     pub key_display: Option<String>,
@@ -211,6 +248,7 @@ struct TrackPartialUpdate {
     bpm: Option<f64>,
     bpm_analyzer: Option<String>,
     key: Option<String>,
+    key_source: Option<String>,
     artwork_path: Option<String>,
     waveform_preview: Option<Vec<u8>>,
     duration_ms: Option<u64>,
@@ -233,6 +271,7 @@ fn build_partial_progress(
         bpm: update.bpm,
         bpm_analyzer: update.bpm_analyzer,
         key: update.key,
+        key_source: update.key_source,
         key_display: None,
         key_color: None,
         artwork_path: update.artwork_path,
@@ -285,6 +324,7 @@ fn build_done_progress_success(
         bpm: local.bpm,
         bpm_analyzer: local.bpm_analyzer.clone(),
         key: local.key.clone(),
+        key_source: local.key_source.clone(),
         key_display: None,
         key_color: None,
         artwork_path: local.artwork_path.clone(),
@@ -322,6 +362,7 @@ fn build_done_progress_error(
         bpm: None,
         bpm_analyzer: None,
         key: None,
+        key_source: None,
         key_display: None,
         key_color: None,
         artwork_path: None,
@@ -851,7 +892,7 @@ fn analysis_cancelled_warning(analyzed: usize, total: usize) -> WarningEntry {
 }
 
 /// How many tracks may be analyzed at once.
-fn analysis_capacity(engine: AnalysisEngine) -> usize {
+fn analysis_capacity(engine: AnalysisEngines) -> usize {
     let cpu_workers = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
@@ -893,11 +934,13 @@ pub(crate) fn resolve_memory_worker_cap(available_bytes: u64, bytes_per_worker: 
     (resolve_usable_analysis_bytes(available_bytes) / bytes_per_worker).max(1) as usize
 }
 
-/// The per-worker memory budget for a given analysis engine, in bytes.
-fn analysis_bytes_per_worker(engine: AnalysisEngine) -> u64 {
-    match engine {
-        AnalysisEngine::Essentia => ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES,
-        AnalysisEngine::Stratum => ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES,
+/// The per-worker memory budget for the given engines, in bytes: stratum's
+/// whenever it detects either one, since it holds the most.
+fn analysis_bytes_per_worker(engines: AnalysisEngines) -> u64 {
+    if engines.uses(AnalysisEngine::Stratum) {
+        ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES
+    } else {
+        ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES
     }
 }
 
@@ -906,7 +949,7 @@ fn analysis_bytes_per_worker(engine: AnalysisEngine) -> u64 {
 /// (which always allows at least one worker so a batch never stalls), this
 /// has no floor -- the coordinator uses it to hold the next track back while
 /// others run, and starts it anyway when none do.
-pub(crate) fn has_memory_headroom_for_engine(engine: AnalysisEngine) -> bool {
+pub(crate) fn has_memory_headroom_for_engine(engine: AnalysisEngines) -> bool {
     match available_system_memory_bytes() {
         Some(available) => {
             resolve_usable_analysis_bytes(available) >= analysis_bytes_per_worker(engine)
@@ -960,7 +1003,7 @@ struct WorkerCapBreakdown {
     combined: Option<usize>,
 }
 
-fn resolve_worker_cap_for_engine(engine: AnalysisEngine) -> WorkerCapBreakdown {
+fn resolve_worker_cap_for_engine(engine: AnalysisEngines) -> WorkerCapBreakdown {
     let bytes_per_worker = analysis_bytes_per_worker(engine);
     let memory_cap = memory_worker_cap(bytes_per_worker);
     let env_cap = analysis_worker_cap_from_env();
@@ -975,7 +1018,7 @@ fn resolve_worker_cap_for_engine(engine: AnalysisEngine) -> WorkerCapBreakdown {
 struct BpmDetectionParams {
     bpm_min: u32,
     bpm_max: u32,
-    engine: AnalysisEngine,
+    engines: AnalysisEngines,
 }
 
 fn analyze_local_track_with_updates(
@@ -996,7 +1039,7 @@ fn analyze_local_track_with_updates(
     let BpmDetectionParams {
         bpm_min,
         bpm_max,
-        engine,
+        engines,
     } = bpm_params;
     let mut timing = AnalysisStageTimer::new(track_id);
     let path = PathBuf::from(file_path);
@@ -1021,7 +1064,7 @@ fn analyze_local_track_with_updates(
             detection_required: true,
             bpm_min,
             bpm_max,
-            engine,
+            engines,
         },
         &mut |waveform, duration_ms| {
             timing.finish_stage("decode");
@@ -1062,12 +1105,12 @@ fn analyze_local_track_with_updates(
     // the old source, or a later import would take the key for its own.
     let bpm_analyzer = bpm
         .filter(|_| kept.bpm.is_none())
-        .map(|_| engine.bpm_analyzer().to_string());
+        .map(|_| engines.bpm.bpm_analyzer().to_string());
     let key = kept.key.clone().or(detected_key);
     let key_source = key
         .as_ref()
         .filter(|_| kept.key.is_none())
-        .map(|_| engine.bpm_analyzer().to_string());
+        .map(|_| engines.key.bpm_analyzer().to_string());
     let bundle_paths = local_analysis_bundle_paths(waveform_dir, track_id, file_path);
     let waveform_peaks_path =
         if let Some(duration_ms) = duration_ms.filter(|_| !waveform.peaks.is_empty()) {
@@ -1098,6 +1141,7 @@ fn analyze_local_track_with_updates(
             bpm,
             bpm_analyzer: bpm_analyzer.clone(),
             key: key.clone(),
+            key_source: key_source.clone(),
             ..TrackPartialUpdate::default()
         });
     }
@@ -1170,12 +1214,30 @@ fn first_beat_for_saved_bpm(
     }
 }
 
+/// The waveform's mid-band energy over the decoded `samples`: the waveform
+/// spans the whole track, the samples only its first `BPM_KEY_MAX_SAMPLES`.
+fn mid_energy_of_samples(
+    waveform: &WaveformData,
+    duration_ms: Option<u64>,
+    samples: usize,
+    sample_rate: u32,
+) -> &[u8] {
+    let mid = &waveform.mid_energy;
+    let total = duration_ms.map_or(0, |ms| ms.saturating_mul(u64::from(sample_rate)) / 1000);
+    if total == 0 {
+        return mid;
+    }
+    let covered = (mid.len() as u128 * samples as u128 / u128::from(total)).min(mid.len() as u128);
+    &mid[..covered as usize]
+}
+
 /// What [`analyze_audio_core`] keeps instead of detecting, and how it detects
 /// the rest.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CoreRequest {
-    /// A BPM that wins over the detection. With it and no key wanted, nothing
-    /// is detected: the audio is only decoded, and the first beat placed.
+    /// A BPM that wins over the detection. With it, only the key is
+    /// detected; with it and no key wanted, nothing is detected: the audio is only
+    /// decoded, and the first beat placed.
     pub(crate) kept_bpm: Option<f64>,
     /// A first beat that wins over placing one.
     pub(crate) kept_first_beat_ms: Option<u32>,
@@ -1188,7 +1250,7 @@ pub(crate) struct CoreRequest {
     pub(crate) detection_required: bool,
     pub(crate) bpm_min: u32,
     pub(crate) bpm_max: u32,
-    pub(crate) engine: AnalysisEngine,
+    pub(crate) engines: AnalysisEngines,
 }
 
 /// One audio file's analysis, whatever it is for: a library track, or a file
@@ -1233,13 +1295,14 @@ pub(crate) fn analyze_audio_core(
     let detected = if request.kept_bpm.is_some() && !request.detect_key {
         BpmKeyResult::default()
     } else {
-        match detect_bpm_key(
-            request.engine,
-            &samples,
-            sample_rate,
-            request.bpm_min,
-            request.bpm_max,
-        ) {
+        let detect_request = DetectRequest {
+            bpm_min: request.bpm_min,
+            bpm_max: request.bpm_max,
+            detect_bpm: request.kept_bpm.is_none(),
+            detect_key: request.detect_key,
+            mid_energy: mid_energy_of_samples(&waveform, duration_ms, samples.len(), sample_rate),
+        };
+        match detect_bpm_key(request.engines, &samples, sample_rate, &detect_request) {
             Ok(detected) => detected,
             Err(err) if request.detection_required => return Err(err),
             Err(_) => BpmKeyResult::default(),
@@ -1297,10 +1360,10 @@ pub(crate) fn write_track_bundle(
     Ok(())
 }
 
-/// The engine and BPM range library analysis uses, from the settings: what
+/// The engines and BPM range library analysis uses, from the settings: what
 /// analysis outside a library job (the USB repairs) detects with.
-pub(crate) fn analysis_settings(conn: &rusqlite::Connection) -> (AnalysisEngine, u32, u32) {
-    let engine = resolve_analysis_engine(conn, None);
+pub(crate) fn analysis_settings(conn: &rusqlite::Connection) -> (AnalysisEngines, u32, u32) {
+    let engine = resolve_analysis_engines(conn, None, None);
     let range: Option<String> = conn
         .query_row(
             "SELECT value FROM app_settings WHERE key = ?1",
@@ -1451,8 +1514,7 @@ pub(crate) fn extract_embedded_cover_art_bytes(path: &Path) -> Option<Vec<u8>> {
 fn detect_bpm_key_with_essentia_js(
     samples: &[f32],
     sample_rate: u32,
-    bpm_min: u32,
-    bpm_max: u32,
+    request: &DetectRequest,
 ) -> BackendResult<Option<EssentiaResult>> {
     if samples.is_empty() || sample_rate == 0 {
         return Ok(None);
@@ -1469,8 +1531,10 @@ fn detect_bpm_key_with_essentia_js(
     let args = serde_json::json!({
         "pcmPath": tmp_path.to_string_lossy().to_string(),
         "sampleRate": sample_rate,
-        "bpmMin": bpm_min,
-        "bpmMax": bpm_max
+        "bpmMin": request.bpm_min,
+        "bpmMax": request.bpm_max,
+        "detectBpm": request.detect_bpm,
+        "detectKey": request.detect_key
     });
 
     let debug = std::env::var("DJTKIT_ESSENTIA_DEBUG")
@@ -2331,17 +2395,19 @@ fn biquad_highpass_coeffs(sample_rate: f64, cutoff: f64) -> (f64, f64, f64, f64,
 #[cfg(test)]
 mod tests {
     use super::{
-        AnalysisEngine, EssentiaResult, TRACK_ANALYSIS_UPDATE_SQL,
-        build_waveform_preview_from_audio, build_waveform_preview_from_samples,
-        collect_tracks_for_analysis, combine_worker_caps, decode_audio_mono_samples,
-        discover_cover_art_in_dir, discover_cover_art_in_parent, discover_cover_art_path,
-        duration_ms_from_decoded, essentia_result_has_detected_values, first_beat_for_saved_bpm,
-        has_memory_headroom_for_engine, kept_analysis_values, local_analysis_bundle_paths,
-        normalize_essentia_result, persist_library_artwork_thumbnail_from_image,
-        resolve_analysis_bpm_range, resolve_analysis_engine,
-        resolve_analysis_parallelism_budget_with_cap, resolve_memory_worker_cap,
-        resolve_worker_cap_for_engine, strip_appimage_lib_path, waveform_detail_bins_for_duration,
-        waveform_detail_entries_for_duration, waveform_preview_if_persisted,
+        ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES, ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES,
+        AnalysisEngine, AnalysisEngines, EssentiaResult, TRACK_ANALYSIS_UPDATE_SQL,
+        analysis_bytes_per_worker, build_waveform_preview_from_audio,
+        build_waveform_preview_from_samples, collect_tracks_for_analysis, combine_worker_caps,
+        decode_audio_mono_samples, discover_cover_art_in_dir, discover_cover_art_in_parent,
+        discover_cover_art_path, duration_ms_from_decoded, essentia_result_has_detected_values,
+        first_beat_for_saved_bpm, has_memory_headroom_for_engine, kept_analysis_values,
+        local_analysis_bundle_paths, normalize_essentia_result,
+        persist_library_artwork_thumbnail_from_image, resolve_analysis_bpm_range,
+        resolve_analysis_engines, resolve_analysis_parallelism_budget_with_cap,
+        resolve_memory_worker_cap, resolve_worker_cap_for_engine, strip_appimage_lib_path,
+        waveform_detail_bins_for_duration, waveform_detail_entries_for_duration,
+        waveform_preview_if_persisted,
     };
     use crate::error::BackendError;
     use crate::service::anlz::WaveformData;
@@ -2792,7 +2858,7 @@ mod tests {
         let _guard = env_var_lock().lock().unwrap();
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") };
         unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "4294967296") };
-        let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
+        let cap = resolve_worker_cap_for_engine(AnalysisEngines::STRATUM);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         // 4 GiB available, 2.5 GiB/worker budget: after 1 GiB headroom = 3
         // GiB; * 0.75 = 2.25 GiB; / 2.5 GiB = 0, floored to 1.
@@ -2806,8 +2872,8 @@ mod tests {
         let _guard = env_var_lock().lock().unwrap();
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") };
         unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "17179869184") };
-        let stratum_cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
-        let essentia_cap = resolve_worker_cap_for_engine(AnalysisEngine::Essentia);
+        let stratum_cap = resolve_worker_cap_for_engine(AnalysisEngines::STRATUM);
+        let essentia_cap = resolve_worker_cap_for_engine(ESSENTIA_ONLY);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         // Same available memory, different per-worker budgets (2.5 GiB vs
         // 1.25 GiB) must produce different caps -- proves the right per-engine
@@ -2823,7 +2889,7 @@ mod tests {
         // there's zero usable budget left for even one stratum worker (2.5
         // GiB/worker) -- this must refuse, not silently proceed.
         unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "1073741824") };
-        let allowed = has_memory_headroom_for_engine(AnalysisEngine::Stratum);
+        let allowed = has_memory_headroom_for_engine(AnalysisEngines::STRATUM);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         assert!(!allowed);
     }
@@ -2832,7 +2898,7 @@ mod tests {
     fn has_memory_headroom_for_engine_true_when_ample() {
         let _guard = env_var_lock().lock().unwrap();
         unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "17179869184") };
-        let allowed = has_memory_headroom_for_engine(AnalysisEngine::Stratum);
+        let allowed = has_memory_headroom_for_engine(AnalysisEngines::STRATUM);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         assert!(allowed);
     }
@@ -2844,7 +2910,7 @@ mod tests {
         // Simulate the reported 16GB/12-thread crash machine: ~13 GiB
         // available, far more CPU threads than the memory budget should allow.
         unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "13958643712") };
-        let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
+        let cap = resolve_worker_cap_for_engine(AnalysisEngines::STRATUM);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         let cpu_workers = 12;
         let worker_count = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
@@ -2864,7 +2930,7 @@ mod tests {
         // isolates the headroom-reservation behavior on its own. Mirrors
         // `analysis_capacity`: resolve the engine cap, reserve ~2 cores.
         unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "137438953472") };
-        let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
+        let cap = resolve_worker_cap_for_engine(AnalysisEngines::STRATUM);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         let cpu_workers = 24;
         let worker_count = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
@@ -3184,44 +3250,71 @@ mod tests {
         assert_eq!(ids, vec!["bpm0", "dur0", "nowave", "t1"]);
     }
 
-    // --- resolve_analysis_engine ---
+    // --- resolve_analysis_engines ---
+
+    const ESSENTIA_ONLY: AnalysisEngines = AnalysisEngines {
+        bpm: AnalysisEngine::Essentia,
+        key: AnalysisEngine::Essentia,
+    };
 
     #[test]
-    fn resolve_analysis_engine_prefers_explicit_override() {
+    fn resolve_analysis_engines_prefers_explicit_override() {
         let dir = tempdir().expect("tempdir");
         let db = crate::db::Db::new(dir.path()).expect("db init");
         let conn = db.connect().expect("connect");
         assert_eq!(
-            resolve_analysis_engine(&conn, Some("essentia")),
-            AnalysisEngine::Essentia
+            resolve_analysis_engines(&conn, Some("essentia"), None),
+            AnalysisEngines {
+                bpm: AnalysisEngine::Essentia,
+                key: AnalysisEngine::Stratum,
+            }
         );
     }
 
     #[test]
-    fn resolve_analysis_engine_reads_setting_when_no_override() {
+    fn resolve_analysis_engines_reads_each_setting_when_no_override() {
         let dir = tempdir().expect("tempdir");
         let db = crate::db::Db::new(dir.path()).expect("db init");
         let conn = db.connect().expect("connect");
         conn.execute(
             "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, 'essentia', datetime('now'))",
-            rusqlite::params![crate::service::SETTING_UI_ANALYSIS_ENGINE],
+            rusqlite::params![crate::service::SETTING_UI_KEY_ENGINE],
         )
         .expect("seed setting");
 
         assert_eq!(
-            resolve_analysis_engine(&conn, None),
-            AnalysisEngine::Essentia
+            resolve_analysis_engines(&conn, None, None),
+            AnalysisEngines {
+                bpm: AnalysisEngine::Stratum,
+                key: AnalysisEngine::Essentia,
+            }
         );
     }
 
     #[test]
-    fn resolve_analysis_engine_defaults_to_stratum_without_setting() {
+    fn resolve_analysis_engines_defaults_to_stratum_without_setting() {
         let dir = tempdir().expect("tempdir");
         let db = crate::db::Db::new(dir.path()).expect("db init");
         let conn = db.connect().expect("connect");
         assert_eq!(
-            resolve_analysis_engine(&conn, None),
-            AnalysisEngine::Stratum
+            resolve_analysis_engines(&conn, None, None),
+            AnalysisEngines::STRATUM
+        );
+    }
+
+    #[test]
+    fn mixed_engines_take_the_stratum_memory_budget() {
+        let mixed = AnalysisEngines {
+            bpm: AnalysisEngine::Stratum,
+            key: AnalysisEngine::Essentia,
+        };
+        assert_eq!(
+            analysis_bytes_per_worker(mixed),
+            ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES
+        );
+        assert_eq!(
+            analysis_bytes_per_worker(ESSENTIA_ONLY),
+            ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES
         );
     }
 

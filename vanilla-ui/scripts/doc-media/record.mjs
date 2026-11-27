@@ -1052,10 +1052,16 @@ function shots(fixture) {
     },
     {
       // README / docs/USB_EXPORT.md: the Settings drawer, over the Library as
-      // the README hero shows it.
+      // the README hero shows it. The key from Essentia, the BPM from Stratum:
+      // the two engines are chosen apart.
       name: "settings",
-      caption: "Settings: theme, analysis, export sync mode and backups",
-      opts: { tauriRuntime: true, externalLibraries: { mixxx: [] } },
+      caption: "Settings: theme, analysis engines, export sync mode and backups",
+      opts: {
+        tauriRuntime: true,
+        externalLibraries: { mixxx: [] },
+        settings: { ui_key_engine_v1: "essentia" },
+        essentiaInstalled: true,
+      },
       async run(page) {
         await page.locator("#settingsBtn").click();
         await page.mouse.move(VIEWPORT.width / 3, VIEWPORT.height - 2);

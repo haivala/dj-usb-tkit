@@ -9,8 +9,10 @@
 //!   harmonic mask).
 //! - `chunks_cheap`: `CHUNK_SECS` chunks of the whole track, voted by stratum's
 //!   key clarity.
-//! - `window_default` / `window_cheap`: the `CHUNK_SECS` window with the most
-//!   mid-band energy in the waveform the same decode drew.
+//! - `window_default` / `window_cheap`: the `KEY_WINDOW_SECS` window with the
+//!   most mid-band energy in the waveform the same decode drew (`key_window`).
+//! - `app`: the app's own analysis (`analyze_audio_core`): capped decode, BPM
+//!   from all of it, key from the window within the decoded part.
 //!
 //! The BPM is detected twice, today's way (whole capped input, then
 //! `refine_bpm`) and chunked (`analyze_bpm` per chunk, confidence vote seeding
@@ -36,32 +38,32 @@ use std::time::Instant;
 use stratum_dsp::{AnalysisConfig, Key};
 
 use super::analysis::{
-    BPM_KEY_MAX_SAMPLES, decode_audio_with_waveform, waveform_detail_bins_for_duration,
+    BPM_KEY_MAX_SAMPLES, CoreRequest, analyze_audio_core, decode_audio_with_waveform,
+    waveform_detail_bins_for_duration,
 };
-use super::bpm_key::{refine_bpm, stratum_config};
+use super::bpm_key::{
+    AnalysisEngines, KEY_WINDOW_SECS, key_window, refine_bpm, stratum_config, stratum_key_config,
+};
 
 const BPM_MIN: u32 = 70;
 const BPM_MAX: u32 = 180;
-/// Length of one analysis chunk and of the key window.
+/// Length of one analysis chunk.
 const CHUNK_SECS: usize = 180;
 /// Decode cap for the chunked setups: the whole of any track short of a long
 /// mix (about 60 minutes at 44.1 kHz).
 const WHOLE_TRACK_MAX_SAMPLES: usize = 160_000_000;
 
-const VARIANTS: [&str; 5] = [
+const VARIANTS: [&str; 6] = [
     "whole_default",
     "whole_cheap",
     "chunks_cheap",
     "window_default",
     "window_cheap",
+    "app",
 ];
 
 fn cheap_config() -> AnalysisConfig {
-    AnalysisConfig {
-        enable_key_spectrogram_time_smoothing: false,
-        enable_key_harmonic_mask: false,
-        ..stratum_config(BPM_MIN, BPM_MAX)
-    }
+    stratum_key_config(BPM_MIN, BPM_MAX)
 }
 
 /// `CHUNK_SECS` pieces of `len` samples. A last piece shorter than half a
@@ -78,27 +80,6 @@ fn chunk_ranges(len: usize, sample_rate: u32) -> Vec<Range<usize>> {
         start = end;
     }
     ranges
-}
-
-/// The `window` samples (of `total`) whose waveform bins hold the most
-/// mid-band energy; the earliest such window on a tie. The bins spread
-/// evenly over the track.
-fn key_window(mid_energy: &[u8], total: usize, window: usize) -> Range<usize> {
-    let bins = mid_energy.len();
-    if total <= window || bins == 0 {
-        return 0..total.min(window);
-    }
-    let width = (window * bins).div_ceil(total).clamp(1, bins);
-    let mut sum: u64 = mid_energy[..width].iter().map(|&v| u64::from(v)).sum();
-    let (mut best, mut best_start) = (sum, 0);
-    for start in 1..=bins - width {
-        sum = sum + u64::from(mid_energy[start + width - 1]) - u64::from(mid_energy[start - 1]);
-        if sum > best {
-            (best, best_start) = (sum, start);
-        }
-    }
-    let start = (best_start * total / bins).min(total - window);
-    start..start + window
 }
 
 /// Today's BPM: stratum over the capped input, refined.
@@ -247,6 +228,7 @@ struct Outcome {
     window_start_s: f64,
     bpm_whole: Option<f64>,
     bpm_chunked: Option<f64>,
+    bpm_app: Option<f64>,
 }
 
 fn analyze(path: &Path, reference: (u8, bool)) -> Option<Outcome> {
@@ -259,7 +241,7 @@ fn analyze(path: &Path, reference: (u8, bool)) -> Option<Outcome> {
     let rate = decoded.sample_rate;
     let all = &decoded.samples;
     let capped = &all[..all.len().min(BPM_KEY_MAX_SAMPLES)];
-    let window_len = CHUNK_SECS * rate as usize;
+    let window_len = KEY_WINDOW_SECS * rate as usize;
     let mid = decoded
         .waveform
         .as_ref()
@@ -281,6 +263,29 @@ fn analyze(path: &Path, reference: (u8, bool)) -> Option<Outcome> {
         key_of(&all[window.clone()], rate, stratum_config(BPM_MIN, BPM_MAX)).map(|k| k.0)
     });
     timed(&mut || key_of(&all[window.clone()], rate, cheap_config()).map(|k| k.0));
+    let mut bpm_app = None;
+    let t = Instant::now();
+    let app = analyze_audio_core(
+        path,
+        &CoreRequest {
+            kept_bpm: None,
+            kept_first_beat_ms: None,
+            existing_first_beat_ms: None,
+            detect_key: true,
+            detection_required: false,
+            bpm_min: BPM_MIN,
+            bpm_max: BPM_MAX,
+            engines: AnalysisEngines::STRATUM,
+        },
+        &mut |_, _| {},
+    );
+    if let Ok(app) = app {
+        bpm_app = app.bpm;
+        keys.push(app.key.as_deref().and_then(parse_key));
+    } else {
+        keys.push(None);
+    }
+    secs.push(t.elapsed().as_secs_f64());
 
     Some(Outcome {
         path: path.to_path_buf(),
@@ -291,6 +296,7 @@ fn analyze(path: &Path, reference: (u8, bool)) -> Option<Outcome> {
         window_start_s: window.start as f64 / f64::from(rate),
         bpm_whole: whole_bpm(capped, rate),
         bpm_chunked: chunked_bpm(all, rate),
+        bpm_app,
     })
 }
 
@@ -354,7 +360,7 @@ fn key_reference() {
                 .join(format!("{stamp}_{}.csv", name.unwrap_or_default()))
         });
     let mut csv = format!(
-        "reference,duration_s,window_start_s,{},bpm_whole,bpm_chunked,path\n",
+        "reference,duration_s,window_start_s,{},bpm_whole,bpm_chunked,bpm_app,path\n",
         VARIANTS.join(",")
     );
     for o in &outcomes {
@@ -364,13 +370,14 @@ fn key_reference() {
             .map(|k| k.map(key_name).unwrap_or_default())
             .collect();
         csv.push_str(&format!(
-            "{},{:.1},{:.1},{},{},{},\"{}\"\n",
+            "{},{:.1},{:.1},{},{},{},{},\"{}\"\n",
             key_name(o.reference),
             o.duration_s,
             o.window_start_s,
             keys.join(","),
             o.bpm_whole.map(|v| format!("{v:.2}")).unwrap_or_default(),
             o.bpm_chunked.map(|v| format!("{v:.2}")).unwrap_or_default(),
+            o.bpm_app.map(|v| format!("{v:.2}")).unwrap_or_default(),
             o.path.display()
         ));
     }
@@ -419,6 +426,8 @@ fn key_reference() {
             _ => false,
         })
         .count();
+    let app_same = outcomes.iter().filter(|o| o.bpm_app == o.bpm_whole).count();
+    println!("\napp BPM same as whole (capped) BPM: {app_same}/{n}");
     println!("\nchunked BPM same as whole: {bpm_same}/{n}");
     for o in outcomes
         .iter()
@@ -483,7 +492,7 @@ fn key_memory() {
             .duration_ms
             .map(|ms| (ms * u64::from(rate) / 1000) as usize)
             .unwrap_or(samples.len());
-        let w = key_window(mid, total, CHUNK_SECS * rate as usize);
+        let w = key_window(mid, total, KEY_WINDOW_SECS * rate as usize);
         // The window lies in the decoded part (today's cap); past it, take the last part decoded.
         let end = w.end.min(samples.len());
         end.saturating_sub(w.len())..end
@@ -556,19 +565,5 @@ mod tests {
             vec![0..chunk, chunk..chunk * 2, chunk * 2..chunk * 2 + chunk / 2]
         );
         assert_eq!(chunk_ranges(chunk / 4, rate), vec![0..chunk / 4]);
-    }
-
-    #[test]
-    fn key_window_takes_the_most_mid_energy() {
-        // 10 bins over 1000 samples; a 300-sample window spans 3 bins.
-        let mid = [1, 1, 1, 1, 9, 9, 9, 1, 1, 1];
-        assert_eq!(key_window(&mid, 1000, 300), 400..700);
-        // A tie keeps the earliest; the window never runs past the end.
-        assert_eq!(key_window(&[5; 10], 1000, 300), 0..300);
-        assert_eq!(
-            key_window(&[0, 0, 0, 0, 0, 0, 0, 0, 9, 9], 1000, 300),
-            700..1000
-        );
-        assert_eq!(key_window(&mid, 200, 300), 0..200);
     }
 }

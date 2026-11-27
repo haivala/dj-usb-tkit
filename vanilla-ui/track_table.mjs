@@ -37,8 +37,9 @@ export function setCueButtonState(button, { ready = button.dataset.cueReady === 
 }
 
 // The key cell. The backend sends the label in the user's key notation
-// (`keyDisplay`, Classic or Camelot) and the wheel colour group (`keyColor`,
-// 0..11); this only renders them. `key` itself is the classic value the
+// (`keyDisplay`, Classic or Camelot), the wheel colour group (`keyColor`,
+// 0..11) and where the key came from (`keySourceText`, the pill's tooltip);
+// this only renders them. `key` itself is the classic value the
 // backend stores and exports.
 export function fillKeyCell(cell, track) {
   const label = track?.keyDisplay || track?.key;
@@ -50,6 +51,7 @@ export function fillKeyCell(cell, track) {
   pill.textContent = label;
   const color = Number(track?.keyColor);
   if (Number.isInteger(color) && color >= 0 && color < 12) pill.classList.add(`key-pill--h${color}`);
+  if (track.keySourceText) pill.dataset.tooltip = track.keySourceText;
   cell.replaceChildren(pill);
 }
 

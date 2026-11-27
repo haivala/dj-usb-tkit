@@ -18,7 +18,9 @@
 // playlists show as not exported until then. `opts.tauriRuntime` makes the
 // page pass for the Tauri runtime (as tests/e2e/smoke.spec.mjs does), which
 // the app needs to follow job events. The Settings drawer's version label is
-// hidden, so the media doesn't go stale with every release.
+// hidden, so the media doesn't go stale with every release. `opts.settings` are
+// the saved settings the backend returns (key -> value), and
+// `opts.essentiaInstalled` has Node.js and Essentia's files there.
 //
 // The USB's Audio formats are as the backend returned them: every one ticked,
 // or with `opts.audioFormats` only the ones the transcode shot leaves ticked;
@@ -532,7 +534,10 @@
           case "get_ui_texts":
             return uiTexts;
           case "get_frontend_settings":
-            return ok({ values: {}, trackColumns: columnLayout, nodeAvailable: false, essentiaInstalled: false });
+            return ok({
+              values: opts.settings || {}, trackColumns: columnLayout,
+              nodeAvailable: !!opts.essentiaInstalled, essentiaInstalled: !!opts.essentiaInstalled,
+            });
           case "get_track_columns":
             return ok({ columns: trackColumns.data.columns, layout: columnLayout });
           case "set_track_columns":

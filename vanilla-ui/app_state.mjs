@@ -38,7 +38,8 @@ export function createInitialState() {
     // Cue editor: metronome music/click balance (0 music only, 50 both full, 100 clicks only).
     cueMetronomeMix: 50,
     analysisBpmRange: DEFAULT_ANALYSIS_BPM_RANGE,
-    analysisEngine: "stratum",
+    bpmEngine: "stratum",
+    keyEngine: "stratum",
     analysisEnginePersistPromise: null,
     nodeAvailable: false,
     essentiaInstalled: false,

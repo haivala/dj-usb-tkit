@@ -14,8 +14,10 @@ import {
   FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT,
   STORAGE_KEY_ANALYSIS_BPM_RANGE,
   FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE,
-  STORAGE_KEY_ANALYSIS_ENGINE,
-  FRONTEND_DB_KEY_ANALYSIS_ENGINE,
+  STORAGE_KEY_BPM_ENGINE,
+  FRONTEND_DB_KEY_BPM_ENGINE,
+  STORAGE_KEY_KEY_ENGINE,
+  FRONTEND_DB_KEY_KEY_ENGINE,
   STORAGE_KEY_KEY_NOTATION,
   FRONTEND_DB_KEY_KEY_NOTATION
 } from "../../settings_keys.mjs";
@@ -24,10 +26,22 @@ const NODE_JS_URL = "https://nodejs.org/";
 const WEBSITE_URL = "https://chiph.art/en/projects/dj-usb-tkit?utm_source=djtkit&utm_medium=app&utm_campaign=sidebar";
 const SUPPORT_URL = "https://chiph.art/en/dj-usb-tkit/support?utm_source=djtkit&utm_medium=app&utm_campaign=support";
 
+// The BPM and key engine selects: which state key each sets, where it's saved
+// and what it says when changed.
+const ENGINE_SETTINGS = [
+  { select: "bpmEngineSelect", stateKey: "bpmEngine", storageKey: STORAGE_KEY_BPM_ENGINE, dbKey: FRONTEND_DB_KEY_BPM_ENGINE, saved: "ui-settings-bpm-engine-saved", changed: "ui-settings-bpm-engine-changed" },
+  { select: "keyEngineSelect", stateKey: "keyEngine", storageKey: STORAGE_KEY_KEY_ENGINE, dbKey: FRONTEND_DB_KEY_KEY_ENGINE, saved: "ui-settings-key-engine-saved", changed: "ui-settings-key-engine-changed" }
+];
+
+/// Whether either the BPM or the key is detected with Essentia.
+export function usesEssentia(state) {
+  return state.bpmEngine === "essentia" || state.keyEngine === "essentia";
+}
+
 export function renderEssentiaInstallRow(ctx) {
   const { state, el } = ctx;
 
-  const show = state.analysisEngine === "essentia";
+  const show = usesEssentia(state);
   el.essentiaInstallRow.classList.toggle("hidden", !show);
   if (!show) return;
 
@@ -268,34 +282,37 @@ export function bindSettingsEvents(ctx) {
     emitStatus(t("ui-settings-key-notation-saved", { notation: t(notation === "camelot" ? "ui-settings-key-notation-camelot" : "ui-settings-key-notation-classic") }));
   });
 
-  el.analysisEngineSelect.addEventListener("change", (event) => {
-    const selected = String(event?.target?.value || "stratum").toLowerCase();
-    const engine = selected === "essentia" ? "essentia" : "stratum";
-    if (engine !== "essentia" && state.essentiaDownloading) {
-      command("cancel_essentia_download").catch(() => {});
-      state.essentiaDownloading = false;
-      setProgress(false, 0, t("ui-common-idle"));
-    }
-    state.analysisEngine = engine;
-    if (el.analysisEngineSelect.value !== engine) {
-      el.analysisEngineSelect.value = engine;
-    }
-    const persistPromise = Promise.resolve(
-      persistSetting(STORAGE_KEY_ANALYSIS_ENGINE, FRONTEND_DB_KEY_ANALYSIS_ENGINE, engine)
-    ).catch(() => {});
-    state.analysisEnginePersistPromise = persistPromise;
-    persistPromise.finally(() => {
-      if (state.analysisEnginePersistPromise === persistPromise) {
-        state.analysisEnginePersistPromise = null;
+  for (const setting of ENGINE_SETTINGS) {
+    const select = el[setting.select];
+    select.addEventListener("change", (event) => {
+      const selected = String(event?.target?.value || "stratum").toLowerCase();
+      const engine = selected === "essentia" ? "essentia" : "stratum";
+      state[setting.stateKey] = engine;
+      if (select.value !== engine) {
+        select.value = engine;
+      }
+      if (!usesEssentia(state) && state.essentiaDownloading) {
+        command("cancel_essentia_download").catch(() => {});
+        state.essentiaDownloading = false;
+        setProgress(false, 0, t("ui-common-idle"));
+      }
+      const persistPromise = Promise.resolve(
+        persistSetting(setting.storageKey, setting.dbKey, engine)
+      ).catch(() => {});
+      state.analysisEnginePersistPromise = persistPromise;
+      persistPromise.finally(() => {
+        if (state.analysisEnginePersistPromise === persistPromise) {
+          state.analysisEnginePersistPromise = null;
+        }
+      });
+      renderEssentiaInstallRow(ctx);
+      const engineLabel = engine === "stratum" ? t("ui-settings-analysis-engine-stratum") : "Essentia";
+      emitStatus(t(setting.saved, { engine: engineLabel }));
+      if (pushEventLog) {
+        pushEventLog({ level: "info", source: "settings", message: t(setting.changed, { engine: engineLabel }) });
       }
     });
-    renderEssentiaInstallRow(ctx);
-    const engineLabel = engine === "stratum" ? t("ui-settings-analysis-engine-stratum") : "Essentia";
-    emitStatus(t("ui-settings-analysis-engine-saved", { engine: engineLabel }));
-    if (pushEventLog) {
-      pushEventLog({ level: "info", source: "settings", message: t("ui-settings-analysis-engine-changed", { engine: engineLabel }) });
-    }
-  });
+  }
 
   el.essentiaDownloadBtn.addEventListener("click", async () => {
     if (state.essentiaDownloading) return;
@@ -321,9 +338,11 @@ export function bindSettingsEvents(ctx) {
     try {
       await command("remove_essentia");
       state.essentiaInstalled = false;
-      state.analysisEngine = "stratum";
-      el.analysisEngineSelect.value = "stratum";
-      persistSetting(STORAGE_KEY_ANALYSIS_ENGINE, FRONTEND_DB_KEY_ANALYSIS_ENGINE, "stratum");
+      for (const setting of ENGINE_SETTINGS) {
+        state[setting.stateKey] = "stratum";
+        el[setting.select].value = "stratum";
+        persistSetting(setting.storageKey, setting.dbKey, "stratum");
+      }
       renderEssentiaInstallRow(ctx);
       emitStatus(t("ui-settings-essentia-removed"));
     } catch (err) {

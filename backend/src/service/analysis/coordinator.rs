@@ -23,7 +23,7 @@ use super::{
     analyze_track_with_usb_fallback_with_updates, build_done_progress_error,
     build_done_progress_success, build_partial_progress, build_started_progress,
     collect_tracks_for_analysis, elapsed_ms_since, has_memory_headroom_for_engine,
-    incomplete_analysis_reason, resolve_analysis_bpm_range, resolve_analysis_engine,
+    incomplete_analysis_reason, resolve_analysis_bpm_range, resolve_analysis_engines,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
@@ -32,7 +32,7 @@ use crate::models::{
     AnalysisSubmittedData, AnalyzeNewTracksData, AnalyzeNewTracksRequest, SetAnalysisPausedData,
     WarningEntry,
 };
-use crate::service::bpm_key::AnalysisEngine;
+use crate::service::bpm_key::AnalysisEngines;
 use crate::service::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis};
 use crate::service::key_notation::{self, KeyNotation};
 use crate::service::{BackendService, has_core_analysis_fields, now};
@@ -150,7 +150,7 @@ struct Submitted {
 /// What a request's tracks share. Dropped with the last of them, which is what
 /// closes the listener's channel.
 struct RequestContext {
-    engine: AnalysisEngine,
+    engines: AnalysisEngines,
     bpm_min: u32,
     bpm_max: u32,
     notation: KeyNotation,
@@ -213,10 +213,10 @@ enum Queued {
 }
 
 impl Queued {
-    fn engine(&self) -> AnalysisEngine {
+    fn engines(&self) -> AnalysisEngines {
         match self {
-            Queued::Track(item) => item.request.engine,
-            Queued::File(item) => item.request.engine,
+            Queued::Track(item) => item.request.engines,
+            Queued::File(item) => item.request.engines,
         }
     }
 }
@@ -317,7 +317,7 @@ fn run_worker_task(context: &WorkerContext, task: WorkerTask) {
             BpmDetectionParams {
                 bpm_min: item.request.bpm_min,
                 bpm_max: item.request.bpm_max,
-                engine: item.request.engine,
+                engines: item.request.engines,
             },
             |update| {
                 // Straight to the user: only the result goes through the
@@ -361,9 +361,9 @@ struct Coordinator {
     /// Waiting or in flight, by id: a track is analyzed by one thing at a time.
     active: HashSet<String>,
     in_flight: usize,
-    /// Read once per engine: memory the running workers hold would otherwise
-    /// count against it and wrongly shrink it.
-    budgets: Vec<(AnalysisEngine, usize)>,
+    /// Read once per engine pair: memory the running workers hold would
+    /// otherwise count against it and wrongly shrink it.
+    budgets: Vec<(AnalysisEngines, usize)>,
     /// The job's worker threads. They live as long as the job, so each keeps
     /// reusing the memory its own allocator arena holds on to (see
     /// `process_memory`). A thread per track would mostly start before the
@@ -487,14 +487,18 @@ impl Coordinator {
         request: AnalyzeNewTracksRequest,
         listener: Option<mpsc::Sender<ListenerEvent>>,
     ) -> BackendResult<Submitted> {
-        let engine = resolve_analysis_engine(&self.conn, request.analysis_engine.as_deref());
+        let engines = resolve_analysis_engines(
+            &self.conn,
+            request.bpm_engine.as_deref(),
+            request.key_engine.as_deref(),
+        );
         let (bpm_min, bpm_max) = resolve_analysis_bpm_range(
             request.bpm_range.as_deref(),
             request.bpm_min,
             request.bpm_max,
         );
         let context = Arc::new(RequestContext {
-            engine,
+            engines,
             bpm_min,
             bpm_max,
             notation: key_notation::key_notation_setting(&self.conn)?,
@@ -622,7 +626,7 @@ impl Coordinator {
         })
     }
 
-    fn budget(&mut self, engine: AnalysisEngine) -> usize {
+    fn budget(&mut self, engine: AnalysisEngines) -> usize {
         if let Some((_, budget)) = self.budgets.iter().find(|(e, _)| *e == engine) {
             return *budget;
         }
@@ -635,7 +639,7 @@ impl Coordinator {
     /// a resume or a cancel is exactly when this can change.
     fn dispatch(&mut self) {
         while !self.paused {
-            let Some(engine) = self.queue.front().map(Queued::engine) else {
+            let Some(engine) = self.queue.front().map(Queued::engines) else {
                 return;
             };
             let budget = self.budget(engine);
@@ -1333,7 +1337,7 @@ mod tests {
             detection_required: false,
             bpm_min: 70,
             bpm_max: 180,
-            engine: AnalysisEngine::Stratum,
+            engines: AnalysisEngines::STRATUM,
         };
         let results = service
             .analyze_audio_files(vec![
@@ -1384,7 +1388,7 @@ mod tests {
                 detection_required: false,
                 bpm_min: 70,
                 bpm_max: 180,
-                engine: AnalysisEngine::Stratum,
+                engines: AnalysisEngines::STRATUM,
             },
             reply,
         }]));

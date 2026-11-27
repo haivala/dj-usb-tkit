@@ -28,8 +28,12 @@ pub struct AnalyzeNewTracksRequest {
     pub bpm_min: Option<u32>,
     #[serde(default)]
     pub bpm_max: Option<u32>,
+    /// The engines that detect the BPM and the key (`stratum`, `essentia`);
+    /// the settings when not given.
     #[serde(default)]
-    pub analysis_engine: Option<String>,
+    pub bpm_engine: Option<String>,
+    #[serde(default)]
+    pub key_engine: Option<String>,
     /// The library search, for `scope_to_library_filter` and the live
     /// library total time.
     #[serde(default)]

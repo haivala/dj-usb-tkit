@@ -130,7 +130,13 @@ pub(crate) const SETTING_UI_EXPORT_ENGINE_LIBRARY: &str = "ui_export_engine_libr
 pub(crate) const SETTING_UI_BACKUP_RETENTION_COUNT: &str = "ui_backup_retention_count_v1";
 pub(crate) const DEFAULT_BACKUP_RETENTION_COUNT: u32 = 10;
 pub(crate) const SETTING_UI_ANALYSIS_BPM_RANGE: &str = "ui_analysis_bpm_range_v1";
+/// The one engine setting up to 0.6.6, split into the two below by the
+/// `0.6.7-split-analysis-engine` migration.
 pub(crate) const SETTING_UI_ANALYSIS_ENGINE: &str = "ui_analysis_engine_v1";
+/// The engine that detects the BPM (`AnalysisEngine::from_setting`).
+pub(crate) const SETTING_UI_BPM_ENGINE: &str = "ui_bpm_engine_v1";
+/// The engine that detects the key.
+pub(crate) const SETTING_UI_KEY_ENGINE: &str = "ui_key_engine_v1";
 pub(crate) const SETTING_UI_SIDEBAR_COLLAPSED: &str = "ui_sidebar_collapsed_v1";
 pub(crate) const SETTING_UI_SIDEBAR_WIDTH: &str = "ui_sidebar_width_v1";
 pub(crate) const SETTING_UI_HELP_SEEN: &str = "ui_help_seen_v1";

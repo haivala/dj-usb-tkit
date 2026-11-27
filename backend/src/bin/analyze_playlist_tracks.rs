@@ -54,7 +54,8 @@ fn main() {
         track_ids,
         bpm_min: None,
         bpm_max: None,
-        analysis_engine: None,
+        bpm_engine: None,
+        key_engine: None,
         ..Default::default()
     });
     if !analyze_resp.ok {

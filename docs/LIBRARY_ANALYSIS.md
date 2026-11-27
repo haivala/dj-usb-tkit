@@ -12,7 +12,7 @@ If analysis encounters unsupported files or decode failures, the app reports com
 
 Scanning also flags a WAV-specific hardware compatibility issue: some Pioneer CDJs reject WAV files whose `fmt ` chunk uses the `WAVE_FORMAT_EXTENSIBLE` tag, even when the wrapped audio (sample rate/bit depth) is otherwise within spec. `scan_library` detects this per-file (cheap header parse, no decode) and the UI shows it as a format-badge tooltip on the track row. When the extensible header wraps plain PCM/IEEE-float data, export automatically rewrites it to a standard header — see `docs/USB_EXPORT.md`. When it wraps some other subformat, it's shown as a hard warning instead, since there's nothing safe to rewrite.
 
-Analysis engine selection is user-controlled from Settings. The default engine is `stratum`. The optional `essentia` engine can be enabled after runtime assets are installed, and analysis requests then use the selected engine for BPM/key detection.
+The BPM engine and the key engine are chosen apart in Settings, so either can be `essentia` while the other stays `stratum`. Both default to `stratum`. The optional `essentia` engine can be chosen after its runtime assets are installed; its install row shows while either engine is `essentia`.
 
 ### The analysis pipeline
 
@@ -26,8 +26,9 @@ analysis keeps (step 1).
    waveform yet) keeps a BPM or key you set, or one imported from rekordbox
    or Mixxx (sources `user`, `rekordbox`, `mixxx`), and an edited or imported
    first beat (see "Analyze and Reanalyze" below). A reanalysis keeps
-   nothing. With a BPM kept and no key wanted, nothing is detected: the audio
-   is only decoded and the first beat placed.
+   nothing. With a BPM kept, stratum detects only the key; with a BPM kept
+   and no key wanted, nothing is detected: the audio is only decoded and the
+   first beat placed.
 2. **Decode, once.** `decode_audio_with_waveform` reads the file one time,
    mixed down to mono (rodio first, Symphonia when rodio can't read it). A
    file with no decodable audio fails here; it's never drawn from its raw
@@ -49,9 +50,15 @@ analysis keeps (step 1).
    `BPM_KEY_MAX_SAMPLES`) are kept for detection, to bound memory. The
    selected engine detects from them (`detect_bpm_key`): `stratum` in Rust,
    or `essentia` in its own runner, which fails the track rather than falling
-   back to stratum. stratum's raw BPM is then refined and its first beat
-   placed again, as "Stratum BPM and first beat" below describes, within the
-   BPM range set in Settings.
+   back to stratum. Each engine detects only what it's chosen for and what's
+   wanted (`detect_bpm_key`); with both chosen the same, it runs once. stratum
+   detects the BPM from all the kept samples, then refines it and places its
+   first beat again, as "Stratum BPM and first beat" below describes, within
+   the BPM range set in Settings, and the key from part of them, as "Stratum
+   key" describes. essentia detects from all the kept samples: the BPM with
+   `PercivalBpmEstimator` and its first beat with `RhythmExtractor2013`, not
+   refined, and the key with `KeyExtractor` (`desktop/scripts/essentia_runner.cjs`,
+   asked with `detectBpm` / `detectKey`).
 6. **First beat.** A kept first beat stays. With a kept BPM, the first beat is
    placed from the audio at that BPM (`first_beat_secs`); otherwise the
    engine's first beat is used. When the audio gives none (silence), the old
@@ -103,7 +110,8 @@ falls half a beat off (drum & bass analyzed at 87 instead of 174).
    4/3, 5/4 and 4/5 relatives inside the analysis BPM range (5/4: 156 for a
    125 BPM track); a relative replaces it only when it scores clearly higher
    (`TEMPO_FAMILY`: 8× for 3/2 and 3/4, whose subdivisions also line up with
-   stratum's own beats, 2.5× for the others). Halving and doubling are never
+   stratum's own beats, 1.6× for 4/5, where stratum heard the tempo too
+   fast, 2.5× for the others). Halving and doubling are never
    done: at those, every onset still lands on the grid and the score can't
    tell which is right.
 2. **Precise tempo.** Every tempo within ±2 BPM is tried in 0.01 steps. The
@@ -120,6 +128,17 @@ falls half a beat off (drum & bass analyzed at 87 instead of 174).
    place it more precisely. stratum's first beat is used only when that
    isn't possible (silence).
 
+### Stratum key
+
+The key is detected from the 3 minutes of the kept samples whose waveform
+bins hold the most mid-band energy (`key_window`, `KEY_WINDOW_SECS`), where
+the harmony sits, rather than from intros, breakdowns or drum-only parts; a
+shorter track is used whole. stratum's spectrogram time smoothing and
+harmonic mask are off for it (`stratum_key_config`): they took most of its key
+time without making the key more often right. The vendored stratum's
+`analyze_key` skips its onset, tempo and beat-tracking steps, and
+`analyze_bpm` its key step (`backend/vendor/stratum-dsp/VENDORED.md`).
+
 #### stratum versions
 
 A detected BPM is stored with the engine and the version of these steps in
@@ -131,7 +150,7 @@ analysis change leaves behind:
 | --- | --- | --- |
 | `stratum` | up to 0.3.3 | stratum's raw whole-BPM estimate, no refinement. On the first start of 0.7.0 these tracks lose their analysis and show as needing it (`0.6.7-stratum-v1-analysis`, `docs/APP_DATA_MODEL.md`) |
 | `stratum-v2` | 0.3.4 to 0.6.6 | the refinement above with the 3/2, 3/4, 2/3 and 4/3 tempo family, the precise tempo search and the first beat placed from the onsets |
-| `stratum-v3` | 0.7.0 on | `stratum-v2` plus the 5/4 and 4/5 relatives in the tempo family, which change the BPM of tracks stratum answered 5:4 off. A `stratum-v2` track keeps its BPM until it's reanalyzed |
+| `stratum-v3` | 0.7.0 on | `stratum-v2` plus the 5/4 and 4/5 relatives in the tempo family, which change the BPM of tracks stratum answered 5:4 off, and the key from the strongest 3 minutes ("Stratum key"). A `stratum-v2` track keeps its BPM and key until it's reanalyzed |
 
 `essentia` has no versions yet. Bump the version in
 `AnalysisEngine::bpm_analyzer` whenever a change here would give
@@ -143,8 +162,9 @@ or a list of tracks, for checking changes to these steps.
 
 ### How to use engines
 
-1. Open Settings and choose analysis engine (`stratum` or `essentia`).
-2. If selecting `essentia`, install/download runtime assets from Settings first.
+1. Open Settings and choose the BPM engine and the key engine (`stratum` or
+   `essentia` each).
+2. If either is `essentia`, install/download runtime assets from Settings first.
 3. Run library analysis (`analyze_new_tracks` / track-level analysis actions).
 4. Verify resulting BPM/key fields in track rows.
 
@@ -258,15 +278,20 @@ Error handling is non-fatal by design. Unsupported files, decode failures, or pa
 
 Engine resolution model:
 
-- request-level override can select engine for a specific analysis request
-- otherwise backend uses persisted setting key `ui_analysis_engine_v1`
-- default is `stratum` when no explicit setting/override is present
+- request-level `bpmEngine` / `keyEngine` can select either engine for a specific analysis request
+- otherwise backend uses persisted setting keys `ui_bpm_engine_v1` and `ui_key_engine_v1`
+  (`resolve_analysis_engines`); up to 0.6.6 one key, `ui_analysis_engine_v1`, chose both, and
+  the `0.6.7-split-analysis-engine` migration copies it into the two
+- default is `stratum` for each when no explicit setting/override is present
+- a BPM's `bpm_analyzer` names the BPM engine and a key's `key_source` the key engine; the
+  BPM and key pills' tooltips show them (`value_source_text`)
+- the per-worker memory budget is stratum's whenever either engine is `stratum`
 
 Runtime behavior differences:
 
 - `stratum` runs fully in backend Rust and is available by default
 - `essentia` requires runtime assets and runner availability
-- when `essentia` is selected and runtime setup fails, the request returns an explicit error instead of silently switching to `stratum`
+- when `essentia` is selected for either and runtime setup fails, the request returns an explicit error instead of silently switching to `stratum`
 
 Batch concurrency model:
 

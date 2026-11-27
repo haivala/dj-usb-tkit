@@ -1512,6 +1512,7 @@ migration-mp3-seek = Adding MP3 seek data
 migration-long-track-waveforms = Redrawing the waveforms of long tracks
 migration-stratum-v1-analysis = Marking tracks with an outdated BPM analysis for analysis
 migration-forget-removed-usb-drives = Forgetting the tracks of USB devices removed from the list
+migration-split-analysis-engine = Splitting the analysis engine setting into BPM and key
 
 # Event Log warnings when a data upgrade fails. $migration: the upgrade (migration-*). $error: the reason.
 migration-warning-failed = { $migration } failed ({ $error }); it runs again next launch
@@ -2362,12 +2363,12 @@ playback-playing = Playing from { $source }: { $track }
 
 ## track-table
 
-# The BPM pill's tooltip: where the track's BPM came from, when not from this app's analysis.
-track-table-bpm-source-user = Manually set
-track-table-bpm-source-mixxx = From Mixxx
-track-table-bpm-source-rekordbox = From rekordbox
-# The same, for a BPM this app's analysis found. $analyzer: the analyzer's id, such as stratum-v3 or essentia.
-track-table-bpm-source-analyzer = Analyzed with: { $analyzer }
+# The BPM and key pills' tooltips: where the track's BPM or key came from, when not from this app's analysis.
+track-table-source-user = Manually set
+track-table-source-mixxx = From Mixxx
+track-table-source-rekordbox = From rekordbox
+# The same, for a BPM or key this app's analysis found. $analyzer: the analyzer's id, such as stratum-v3 or essentia.
+track-table-source-analyzer = Analyzed with: { $analyzer }
 
 # The FMT badge for a file with no extension.
 track-table-format-unknown = Unknown
@@ -2878,12 +2879,12 @@ ui-selection-bar-remove-tooltip = Remove the selected tracks from this playlist 
 
 ui-settings-accent-reset = Reset
 ui-settings-analysis = Analysis
-ui-settings-analysis-engine = BPM/Key engine
 ui-settings-analysis-engine-stratum = Stratum (built-in)
 ui-settings-backup-before-export = Back up PDB and eDB before export
 ui-settings-backup-before-export-hint = Before each export, copies the PDB and eDB into a timestamped backups folder alongside the originals.
 ui-settings-backups-to-keep = Backups to keep per file
 ui-settings-backups-to-keep-hint = The newest backup always stays on the USB; older ones are archived on this computer up to this count, then pruned.
+ui-settings-bpm-engine = BPM engine
 ui-settings-bpm-range = BPM range
 ui-settings-close-aria-label = Close settings
 ui-settings-engine-library = Write Engine DJ library
@@ -2911,15 +2912,18 @@ ui-settings-bpm-range-saved = Analysis BPM range: { $range }
 # $notation: ui-settings-key-notation-camelot or -classic.
 ui-settings-key-notation-saved = Key notation: { $notation }
 ui-settings-key-notation-failed = Could not save key notation
-# $engine: ui-settings-analysis-engine-stratum, or Essentia. The second is the Event Log entry.
-ui-settings-analysis-engine-saved = Analysis engine: { $engine }
-ui-settings-analysis-engine-changed = Analysis engine changed to { $engine }
+# $engine: ui-settings-analysis-engine-stratum, or Essentia. The -changed ones are the Event Log entries.
+ui-settings-bpm-engine-saved = BPM engine: { $engine }
+ui-settings-bpm-engine-changed = BPM engine changed to { $engine }
+ui-settings-key-engine-saved = Key engine: { $engine }
+ui-settings-key-engine-changed = Key engine changed to { $engine }
 # The app's version in the settings header. $version: the version.
 ui-settings-version = Version { $version }
 # Stands in for $version above outside the desktop app.
 ui-settings-version-not-set = Not set
 ui-settings-export = Export
 ui-settings-get-node-js = Get Node.js
+ui-settings-key-engine = Key engine
 ui-settings-key-notation = Key notation
 ui-settings-key-notation-camelot = Camelot (8A)
 ui-settings-key-notation-classic = Classic (Am)

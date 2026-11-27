@@ -174,6 +174,12 @@ stay in `db.rs` `migrate()` and are versioned by `schema_version`.
   on a known drive's path) that nothing keeps; a library track is never looked at. The
   removed drives' HDD caches stay: removing them didn't say they would go. They come back
   into the recent list (`sync_recent_usbs`), to forget there.
+  `0.6.7-split-analysis-engine`: up to 0.6.6 one setting (`ui_analysis_engine_v1`) chose
+  the engine for both BPM and key; its value becomes `ui_bpm_engine_v1` and
+  `ui_key_engine_v1`, unless one is already set, and the old key goes. A key with an empty
+  `tonality_source` on a track whose `bpm_analyzer` is this app's (`stratum…`, `essentia`) takes
+  that analyzer: up to 0.6.6 one run and engine found both, and only the BPM's source was
+  recorded. A key from a file tag or an import keeps its own source, or none.
 - **Background** migrations run through the `run_data_migrations` command. The frontend
   calls it once after the initial load, and it shows in the footer progress bar as a
   `migration` job. With nothing pending it returns at once and emits no job events. While

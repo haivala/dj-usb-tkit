@@ -509,7 +509,8 @@ export async function analyzeTrackIds(ctx, trackIds, options = {}) {
     scopeToLibraryFilter: !!options.scopeToLibraryFilter,
     // Backend parses + validates the range string (service::analysis).
     bpmRange: String(state.analysisBpmRange || ""),
-    analysisEngine: state.analysisEngine,
+    bpmEngine: state.bpmEngine,
+    keyEngine: state.keyEngine,
     query: String(state.libraryQuery || "").trim(),
     reanalyze: !!options.reanalyze
   });
@@ -649,6 +650,7 @@ export function patchTrackAnalysisFields(ctx, track, payload) {
     put("key", null);
     put("keyDisplay", "");
     put("keyColor", null);
+    put("keySourceText", null);
   }
   setIfChanged("bpm", payload.bpm);
   setIfChanged("bpmSourceText", payload.bpmSourceText);
@@ -656,6 +658,7 @@ export function patchTrackAnalysisFields(ctx, track, payload) {
     put("key", payload.key);
     put("keyDisplay", payload.keyDisplay ?? "");
     put("keyColor", payload.keyColor ?? null);
+    setIfChanged("keySourceText", payload.keySourceText);
   }
   setIfChanged("filePath", payload.filePath);
   if (payload.artworkPath) {

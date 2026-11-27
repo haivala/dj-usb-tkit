@@ -154,7 +154,9 @@ function installScanAnalysisMock(page, opts = {}) {
         track.key = `${(number % 12) + 1}A`;
         track.updatedAt = "2026-03-04T00:00:00Z";
         pieceEventsByPiece.bpm_key += 1;
-        emitPartial({ bpm: track.bpm, bpmSourceText: "Analyzed with: mock-analyzer", key: track.key });
+        track.bpmSourceText = "Analyzed with: mock-analyzer";
+        track.keySourceText = "Analyzed with: mock-key-analyzer";
+        emitPartial({ bpm: track.bpm, bpmSourceText: track.bpmSourceText, key: track.key, keySourceText: track.keySourceText });
 
         analyzed += 1;
         if (isCountable(track)) {
@@ -437,6 +439,9 @@ test("reanalyze clears the row's BPM and key until the fresh values arrive", asy
   await expect(row).not.toHaveClass(/is-analyzing/);
   await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("121.00");
   await expect(row.locator(".td-key .key-pill")).toHaveText("2A");
+  // Each pill says where its value came from; the engines can differ.
+  await expect(row.locator(".td-bpm .bpm-pill")).toHaveAttribute("data-tooltip", "Analyzed with: mock-analyzer");
+  await expect(row.locator(".td-key .key-pill")).toHaveAttribute("data-tooltip", "Analyzed with: mock-key-analyzer");
 });
 
 test("analyze buttons during a job", async ({ page }) => {

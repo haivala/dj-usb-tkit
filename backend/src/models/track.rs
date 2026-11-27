@@ -32,6 +32,10 @@ pub struct Track {
     /// `"essentia"`; none for a key analyzed before the source was written),
     /// `"user"` after a manual edit, `"rekordbox"` / `"mixxx"` from an import.
     pub key_source: Option<String>,
+    /// The key pill's tooltip: where `key` came from, like `bpm_source_text`.
+    /// Display only; set by `service::apply_frontend_track_fields`.
+    #[serde(default)]
+    pub key_source_text: Option<String>,
     /// `key` in the user's display notation (Classic/Camelot). Display only;
     /// set by `service::apply_frontend_track_fields`.
     #[serde(default)]

@@ -52,6 +52,10 @@ async function analyzeRequest(arg, essentia) {
   const bpmMin = Number.isFinite(bpmMinRaw) && bpmMinRaw > 0 ? bpmMinRaw : 70;
   const bpmMaxCandidate = Number.isFinite(bpmMaxRaw) && bpmMaxRaw > 0 ? bpmMaxRaw : 180;
   const bpmMax = bpmMaxCandidate > bpmMin ? bpmMaxCandidate : (bpmMin + 1);
+  // What to detect: the BPM (with the first beat) and/or the key; both when
+  // not said.
+  const detectBpm = arg.detectBpm !== false;
+  const detectKey = arg.detectKey !== false;
   if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
     return { ok: false, error: "invalid sampleRate" };
   }
@@ -76,14 +80,14 @@ async function analyzeRequest(arg, essentia) {
     let bpmError = null;
     let keyError = null;
 
-    try {
+    if (detectBpm) try {
       const bpmValue = essentia.PercivalBpmEstimator(vector, 1024, 2048, 128, 128, bpmMax, bpmMin, sampleRate);
       bpm = bpmValue && typeof bpmValue.bpm === "number" ? bpmValue.bpm : null;
     } catch (err) {
       bpmError = String(err && err.message ? err.message : err);
     }
 
-    try {
+    if (detectKey) try {
       const keyValue = essentia.KeyExtractor(
         vector,
         true,
@@ -107,7 +111,7 @@ async function analyzeRequest(arg, essentia) {
       keyError = String(err && err.message ? err.message : err);
     }
 
-    try {
+    if (detectBpm) try {
       const rhythm = essentia.RhythmExtractor2013(vector, bpmMax, "multifeature", bpmMin);
       const ticks = rhythm && rhythm.ticks ? rhythm.ticks : null;
       let tickArray = [];

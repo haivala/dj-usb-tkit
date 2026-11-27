@@ -155,6 +155,7 @@ pub(super) fn emit_job_event<R: tauri::Runtime>(
         bpm: None,
         bpm_source_text: None,
         key: None,
+        key_source_text: None,
         key_display: None,
         key_color: None,
         artwork_path: None,

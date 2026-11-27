@@ -101,6 +101,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         label: tr::migration_forget_removed_usb_drives,
         run: forget_removed_usb_drives,
     },
+    Migration {
+        id: "0.6.7-split-analysis-engine",
+        phase: Phase::Startup,
+        label: tr::migration_split_analysis_engine,
+        run: split_analysis_engine_setting,
+    },
 ];
 
 impl BackendService {
@@ -531,6 +537,43 @@ fn drop_stratum_v1_analysis(
     Ok(Outcome::Done)
 }
 
+/// `0.6.7-split-analysis-engine`: up to 0.6.6 one setting chose the engine
+/// for both BPM and key. Its choice becomes both new settings, unless one is
+/// already set, and the old setting goes. Analysis up to 0.6.6 also didn't
+/// record where a key it found came from, now shown in the key pill's
+/// tooltip: a key with an empty source, on a track whose BPM this app's
+/// analysis found, came from the same run and engine, so it takes the BPM's
+/// analyzer. A key from anywhere else (a file tag, an import) has a BPM
+/// source of its own, or none, and stays as it is.
+fn split_analysis_engine_setting(
+    svc: &BackendService,
+    _: &mut dyn crate::progress::ProgressFn,
+) -> BackendResult<Outcome> {
+    use super::{SETTING_UI_ANALYSIS_ENGINE, SETTING_UI_BPM_ENGINE, SETTING_UI_KEY_ENGINE};
+    let mut conn = svc.db.connect()?;
+    let tx = conn.transaction()?;
+    for key in [SETTING_UI_BPM_ENGINE, SETTING_UI_KEY_ENGINE] {
+        tx.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value, updated_at)
+             SELECT ?1, value, datetime('now') FROM app_settings WHERE key = ?2",
+            params![key, SETTING_UI_ANALYSIS_ENGINE],
+        )?;
+    }
+    tx.execute(
+        "DELETE FROM app_settings WHERE key = ?1",
+        params![SETTING_UI_ANALYSIS_ENGINE],
+    )?;
+    tx.execute(
+        "UPDATE tracks SET tonality_source = bpm_analyzer
+         WHERE TRIM(COALESCE(tonality_source, '')) = ''
+           AND TRIM(COALESCE(tonality, '')) <> ''
+           AND (bpm_analyzer LIKE 'stratum%' OR bpm_analyzer = 'essentia')",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(Outcome::Done)
+}
+
 /// `0.6.7-forget-removed-usb-drives`: up to 0.6.6, removing a drive from the
 /// list only hid it, keeping its USB links and the track rows made for the
 /// stick's tracks, which piled up behind every library listing. Those links
@@ -910,6 +953,90 @@ mod tests {
                 assert_eq!(!dat.with_extension(ext).exists(), *dropped, "{id} {ext}");
             }
         }
+    }
+
+    #[test]
+    fn splits_the_analysis_engine_setting_into_bpm_and_key() {
+        use crate::service::{
+            SETTING_UI_ANALYSIS_ENGINE, SETTING_UI_BPM_ENGINE, SETTING_UI_KEY_ENGINE,
+        };
+        let (_dir, svc) = service();
+        let conn = svc.db.connect().unwrap();
+        let setting = |key: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .ok()
+        };
+        let set = |key: &str, value: &str| {
+            conn.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value, updated_at)
+                 VALUES (?1, ?2, 'now')",
+                params![key, value],
+            )
+            .unwrap();
+        };
+        // Already split for the key: that choice stays.
+        set(SETTING_UI_ANALYSIS_ENGINE, "essentia");
+        set(SETTING_UI_KEY_ENGINE, "stratum");
+
+        assert_eq!(
+            split_analysis_engine_setting(&svc, &mut |_, _, _| {}).unwrap(),
+            Outcome::Done
+        );
+        assert_eq!(setting(SETTING_UI_BPM_ENGINE).as_deref(), Some("essentia"));
+        assert_eq!(setting(SETTING_UI_KEY_ENGINE).as_deref(), Some("stratum"));
+        assert_eq!(setting(SETTING_UI_ANALYSIS_ENGINE), None);
+
+        // Re-run, and a fresh install with no setting at all: nothing changes.
+        split_analysis_engine_setting(&svc, &mut |_, _, _| {}).unwrap();
+        assert_eq!(setting(SETTING_UI_BPM_ENGINE).as_deref(), Some("essentia"));
+        assert_eq!(setting(SETTING_UI_KEY_ENGINE).as_deref(), Some("stratum"));
+    }
+
+    #[test]
+    fn split_analysis_engine_gives_analyzed_keys_their_bpm_analyzer() {
+        let (_dir, svc) = service();
+        let conn = svc.db.connect().unwrap();
+        // (id, key, key source, BPM analyzer)
+        let rows = [
+            ("analyzed", Some("Am"), None, Some("stratum-v2")),
+            ("blank-source", Some("C"), Some(" "), Some("essentia")),
+            ("own-source", Some("F"), Some("mixxx"), Some("stratum-v2")),
+            ("no-key", None, None, Some("stratum-v2")),
+            ("edited-bpm", Some("G"), None, Some("user")),
+            ("imported-bpm", Some("D"), None, Some("rekordbox")),
+            ("not-analyzed", Some("E"), None, None),
+        ];
+        for (id, key, key_source, analyzer) in rows {
+            conn.execute(
+                "INSERT INTO tracks (id, title, artist, file_path, tonality, tonality_source,
+                                     bpm_analyzer, created_at, updated_at)
+                 VALUES (?1, 'T', 'A', ?1, ?2, ?3, ?4, 'now', 'now')",
+                params![id, key, key_source, analyzer],
+            )
+            .unwrap();
+        }
+
+        split_analysis_engine_setting(&svc, &mut |_, _, _| {}).unwrap();
+
+        let source = |id: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT tonality_source FROM tracks WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(source("analyzed").as_deref(), Some("stratum-v2"));
+        assert_eq!(source("blank-source").as_deref(), Some("essentia"));
+        assert_eq!(source("own-source").as_deref(), Some("mixxx"));
+        assert_eq!(source("no-key"), None);
+        assert_eq!(source("edited-bpm"), None);
+        assert_eq!(source("imported-bpm"), None);
+        assert_eq!(source("not-analyzed"), None);
     }
 
     #[test]
