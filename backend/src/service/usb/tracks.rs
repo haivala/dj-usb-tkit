@@ -21,6 +21,7 @@ use crate::service::{
     BackendService, browse_path_matches_root, build_track_match_fingerprint,
     find_confident_fingerprint_match, now, untainted_usb_root_paths,
 };
+use crate::utils::LeftOut;
 use crate::utils::{counted, track_list_summary};
 use rusqlite::{OptionalExtension, params};
 use std::collections::{HashMap, HashSet};
@@ -236,6 +237,7 @@ pub(super) fn paginate_usb_tracks(
         duration_text: crate::utils::track_list_total_time(
             total_duration_ms,
             duration_unknown_count,
+            crate::utils::LeftOut::NoLength,
         ),
         warnings,
     })
@@ -1052,7 +1054,12 @@ impl BackendService {
                 .iter()
                 .find(|history| history.id == id)
                 .ok_or_else(|| BackendError::NotFound(tr::error_usb_history_not_found(id)))?;
-            Ok(selection_duration(&history.tracks, track_ids, |_| true))
+            Ok(selection_duration(
+                &history.tracks,
+                track_ids,
+                |_| true,
+                LeftOut::NoLength,
+            ))
         } else {
             let resolved = self.usb_playlists_resolved(&usb_root)?;
             let playlist = resolved
@@ -1060,7 +1067,12 @@ impl BackendService {
                 .iter()
                 .find(|playlist| playlist.id == id)
                 .ok_or_else(|| BackendError::NotFound(tr::error_usb_playlist_not_found(id)))?;
-            Ok(selection_duration(&playlist.tracks, track_ids, |_| true))
+            Ok(selection_duration(
+                &playlist.tracks,
+                track_ids,
+                |_| true,
+                LeftOut::NoLength,
+            ))
         }
     }
 }

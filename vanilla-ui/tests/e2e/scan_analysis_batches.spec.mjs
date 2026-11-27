@@ -180,7 +180,8 @@ function installScanAnalysisMock(page, opts = {}) {
           waveformPreview: track.waveformPreview,
           libraryDurationText: backend.totalTimeText(
             libraryTotalDurationMs,
-            Math.max(0, tracks.length - libraryDurationKnownCount)
+            Math.max(0, tracks.length - libraryDurationKnownCount),
+            "not analyzed"
           ),
           // The track's row as saved, whole, as the backend sends it.
           track: asRow(track),
@@ -203,7 +204,7 @@ function installScanAnalysisMock(page, opts = {}) {
           for (const warning of scanWarnings) window.__emitBackendLog(warning);
           return backend.ok({ jobId: "job-scan-mock", indexed: tracks.length, updated: 0, removed: 0, warnings: scanWarnings });
         case "browse_source_files":
-          return backend.ok(backend.listPage(tracks, r, { pageSize: opts.pageSize, countable: isCountable, map: asRow }));
+          return backend.ok(backend.listPage(tracks, r, { pageSize: opts.pageSize, countable: isCountable, leftOut: "not analyzed", map: asRow }));
         case "resolve_track_identity": {
           if (opts.materializeFails) return backend.fail("materialize failed", "INTERNAL_ERROR");
           const row = tracks.find((t) => (r.filePath && t.filePath === r.filePath) || (r.trackId && findRow(String(r.trackId)) === t));
@@ -280,7 +281,7 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
     return (text || "").includes("Analyzing")
       || (text || "").includes("Analysis finished: analyzed 1, failed 0");
   }).toBeTruthy();
-  await expect(page.locator("#libraryTotalDuration")).toContainText("1 without length");
+  await expect(page.locator("#libraryTotalDuration")).toContainText("1 not analyzed");
 
   // The mock is holding just before the bpm_key piece / trackReady event
   // (see pauseBeforeBpmKey) specifically so the assertion above -- which
@@ -660,12 +661,12 @@ test("library total duration advances only when each track is fully ready", asyn
     const total = document.querySelector("#libraryTotalDuration")?.textContent || "";
     return !!row
       && (row.textContent || "").includes("3:00")
-      && total.includes("2 without length");
+      && total.includes("2 not analyzed");
   });
 
   await page.waitForFunction(() => {
     const total = document.querySelector("#libraryTotalDuration")?.textContent || "";
-    return total.includes("Total time: 3:00 (1 without length)");
+    return total.includes("Total time: 3:00 (1 not analyzed)");
   });
 
   await expect(page.locator("#libraryTotalDuration")).toHaveText("Total time: 6:00");

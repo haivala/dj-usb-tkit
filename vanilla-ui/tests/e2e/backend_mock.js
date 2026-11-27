@@ -41,10 +41,13 @@
   window.__hasJobListener = () => (listeners.get("job:event") || []).length > 0;
 
   // The footer's "Total time" line, as the backend words it.
-  const totalTimeText = (totalMs, unknown) => {
+  // The footer's "Total time". `leftOut` says why the tracks it leaves out
+  // are: a playlist or USB list has no length for them, while the library
+  // counts only analyzed tracks.
+  const totalTimeText = (totalMs, unknown, leftOut = "without length") => {
     const seconds = Math.floor(totalMs / 1000);
     const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-    return `Total time: ${time}${unknown ? ` (${unknown} without length)` : ""}`;
+    return `Total time: ${time}${unknown ? ` (${unknown} ${leftOut})` : ""}`;
   };
   const hasLength = (track) => track.durationMs > 0;
 
@@ -72,8 +75,9 @@
   // One page of a track list (browse_source_files, get_playlist_tracks,
   // fetch_usb_*_tracks): searched, sorted and paged by the request, with the
   // footer's totals. `countable` decides which tracks count toward the total
-  // time; `map` shapes each row on the page.
-  function listPage(all, request = {}, { pageSize, countable = hasLength, map = (t) => t } = {}) {
+  // time and `leftOut` says why the others don't (see totalTimeText); `map`
+  // shapes each row on the page.
+  function listPage(all, request = {}, { pageSize, countable = hasLength, leftOut, map = (t) => t } = {}) {
     const rows = sortRows(searchRows(all || [], request.query), request.sortBy, request.sortDir);
     const offset = Number(request.offset || 0) || 0;
     const limit = pageSize || Number(request.limit || 0) || rows.length;
@@ -88,7 +92,7 @@
       hasMore: next < rows.length,
       totalDurationMs,
       durationUnknownCount: rows.length - counted.length,
-      durationText: totalTimeText(totalDurationMs, rows.length - counted.length)
+      durationText: totalTimeText(totalDurationMs, rows.length - counted.length, leftOut)
     };
   }
 
@@ -207,7 +211,7 @@
   // The default answers that read the store (undefined: not one of them).
   function storeAnswer(command, r = {}) {
     switch (command) {
-      case "browse_source_files": return ok(listPage(store.tracks, r));
+      case "browse_source_files": return ok(listPage(store.tracks, r, { leftOut: "not analyzed" }));
       case "list_matching_track_ids": {
         const trackIds = searchRows(store.tracks, r.query).map((t) => t.id);
         return ok({ trackIds, total: trackIds.length });

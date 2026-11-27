@@ -63,13 +63,13 @@ const ANALYSIS_MEMORY_USABLE_FRACTION: f64 = 0.75;
 // buffers) dwarfs the ~96MB decode buffer. Each worker thread keeps the freed
 // memory of its allocator arena for the whole job (see process_memory.rs), so
 // what counts is its high point, not its average. Measured on a release build
-// over a 2,400-track library batch with 14 workers: ~2.4GB/worker once every
-// worker had met its larger tracks, flat from there. Fewer workers than CPU
-// threads cost no throughput there: analysis was disk/memory-bound. A worker parked
-// on an unusually long single track (near the BPM_KEY_MAX_SAMPLES cap)
-// can still peak closer to ~2.7GB; accepted residual risk for libraries
-// dominated by very long recorded sets/mixes.
-const ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES: u64 = 2560 * 1024 * 1024;
+// with the opt-in `analysis_memory_batch` test (service/key_reference_eval.rs):
+// 3,783 library tracks, among them hour-long mixes, with 14 workers peaked at
+// 18.8GB, ~1.34GB/worker, and held 16-17.7GB once every worker had met its
+// larger tracks. That is with the BPM and key detected apart and the key from
+// a 3-minute window; detecting both from all of the input took ~2.4GB/worker.
+// The budget leaves ~15% over the peak.
+const ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES: u64 = 1536 * 1024 * 1024;
 // Decode and waveform in this process (stratum-dsp doesn't run), plus a
 // Node.js/WASM child process per worker. Measured on a release build with 12
 // workers: ~0.2GB/worker in this process and up to ~0.8GB per Node worker.

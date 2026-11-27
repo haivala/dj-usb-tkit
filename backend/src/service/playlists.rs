@@ -4,6 +4,7 @@ use super::import_conflicts::merge_import_conflicts;
 use super::*;
 use crate::audio_format::never_goes_on_usb;
 use crate::i18n::{Text, tr};
+use crate::utils::LeftOut;
 use std::collections::{HashMap, HashSet};
 
 /// A playlist row's source icon: USB or local (`is_usb` is the track's
@@ -709,6 +710,7 @@ impl BackendService {
             duration_text: crate::utils::track_list_total_time(
                 total_duration_ms,
                 duration_unknown_count,
+                crate::utils::LeftOut::NoLength,
             ),
         })
     }
@@ -829,13 +831,23 @@ impl BackendService {
             GetSelectionDurationRequest::Library { track_ids } => {
                 let conn = self.db.connect()?;
                 let items = self.compute_visible_library_tracks(&conn, "")?;
-                Ok(selection_duration(&items, &track_ids, library_length_known))
+                Ok(selection_duration(
+                    &items,
+                    &track_ids,
+                    library_length_known,
+                    LeftOut::NotAnalyzed,
+                ))
             }
             GetSelectionDurationRequest::Playlist { id, track_ids } => {
                 ensure_playlist_exists(&self.db, &id)?;
                 let conn = self.db.connect()?;
                 let items = self.load_playlist_tracks_ordered(&conn, &id)?;
-                Ok(selection_duration(&items, &track_ids, |_| true))
+                Ok(selection_duration(
+                    &items,
+                    &track_ids,
+                    |_| true,
+                    LeftOut::NoLength,
+                ))
             }
             GetSelectionDurationRequest::UsbPlaylist {
                 usb_root,

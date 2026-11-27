@@ -239,15 +239,24 @@ pub fn duration_text(ms: u64) -> String {
     }
 }
 
-/// A track list's footer: "Total time: 1:02:03", with "(2 without length)" when some
-/// tracks have none.
-pub fn track_list_total_time(total_ms: u64, unknown_count: usize) -> String {
+/// Why a list's "Total time" leaves a track out: a playlist or USB list has
+/// no length for it, while the library counts only analyzed tracks
+/// (`library_length_known`), whatever lengths the others' tags give.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeftOut {
+    NoLength,
+    NotAnalyzed,
+}
+
+/// A track list's footer: "Total time: 1:02:03", with "(2 without length)" or,
+/// in the library, "(2 not analyzed)" for the tracks it leaves out.
+pub fn track_list_total_time(total_ms: u64, left_out_count: usize, left_out: LeftOut) -> String {
     use crate::i18n::tr;
     let duration = duration_text(total_ms);
-    if unknown_count == 0 {
-        tr::track_list_total_time(duration)
-    } else {
-        tr::track_list_total_time_unknown(duration, unknown_count)
+    match (left_out_count, left_out) {
+        (0, _) => tr::track_list_total_time(duration),
+        (count, LeftOut::NoLength) => tr::track_list_total_time_unknown(duration, count),
+        (count, LeftOut::NotAnalyzed) => tr::track_list_total_time_unanalyzed(duration, count),
     }
     .render()
 }
@@ -292,7 +301,7 @@ pub fn suppress_console_window(cmd: &mut std::process::Command) {
 #[cfg(test)]
 mod list_text_tests {
     use super::{
-        byte_size, byte_size_precise, duration_text, local_date_time, track_list_summary,
+        LeftOut, byte_size, byte_size_precise, duration_text, local_date_time, track_list_summary,
         track_list_total_time, warning_text,
     };
 
@@ -329,10 +338,17 @@ mod list_text_tests {
         assert_eq!(duration_text(0), "0:00");
         assert_eq!(duration_text(65_999), "1:05");
         assert_eq!(duration_text(3_661_000), "1:01:01");
-        assert_eq!(track_list_total_time(180_000, 0), "Total time: 3:00");
         assert_eq!(
-            track_list_total_time(180_000, 2),
+            track_list_total_time(180_000, 0, LeftOut::NotAnalyzed),
+            "Total time: 3:00"
+        );
+        assert_eq!(
+            track_list_total_time(180_000, 2, LeftOut::NoLength),
             "Total time: 3:00 (2 without length)"
+        );
+        assert_eq!(
+            track_list_total_time(180_000, 2, LeftOut::NotAnalyzed),
+            "Total time: 3:00 (2 not analyzed)"
         );
     }
 

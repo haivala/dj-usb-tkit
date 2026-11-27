@@ -528,6 +528,86 @@ fn key_memory() {
     );
 }
 
+/// The analysis job's memory per worker, for `ANALYSIS_MEMORY_PER_WORKER_*`:
+/// a fresh data folder, `MEM_BATCH_ROOT` added as a source folder (indexed as
+/// the app does), then every track in it analyzed in one job with
+/// `MEM_BATCH_WORKERS` workers (default 14). A thread samples the process's
+/// resident memory every second. Linux only; build with `--release`.
+///
+/// ```text
+/// MEM_BATCH_ROOT=/path/to/music MEM_BATCH_WORKERS=14 \
+///   cargo test --release -p backend --lib analysis_memory_batch -- --ignored --nocapture
+/// ```
+///
+/// Prints the samples (`RSS|seconds|MB`), then the peak and peak per worker.
+#[test]
+#[ignore]
+fn analysis_memory_batch() {
+    use crate::commands::BackendCommands;
+    use crate::models::{AddSourceFoldersRequest, AnalyzeNewTracksRequest};
+    use std::sync::atomic::AtomicBool;
+
+    fn status_mb(field: &str) -> i64 {
+        std::fs::read_to_string("/proc/self/status")
+            .unwrap_or_default()
+            .lines()
+            .find(|l| l.starts_with(field))
+            .and_then(|l| l.split_whitespace().nth(1)?.parse::<i64>().ok())
+            .unwrap_or(0)
+            / 1024
+    }
+    let Some(root) = std::env::var_os("MEM_BATCH_ROOT").map(PathBuf::from) else {
+        println!("MEM_BATCH_ROOT not set; skipping");
+        return;
+    };
+    let workers = std::env::var("MEM_BATCH_WORKERS").unwrap_or_else(|_| "14".to_string());
+    // SAFETY: this ignored test runs alone (`--exact` / a filter that picks
+    // only it); nothing else reads the environment meanwhile.
+    unsafe { std::env::set_var("DJTKIT_ANALYSIS_MAX_WORKERS", &workers) };
+    let workers: f64 = workers.parse().expect("MEM_BATCH_WORKERS is a number");
+
+    let data = tempfile::tempdir().expect("temp data folder");
+    let backend = BackendCommands::new(data.path()).expect("backend");
+    let added = backend.add_source_folders(AddSourceFoldersRequest {
+        paths: vec![root.to_string_lossy().into_owned()],
+    });
+    assert!(added.ok, "add source folder: {:?}", added.error);
+    let baseline = status_mb("VmRSS");
+
+    let done = AtomicBool::new(false);
+    let start = Instant::now();
+    let samples = Mutex::new(Vec::new());
+    let (analyzed, failed) = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !done.load(Ordering::Relaxed) {
+                let mb = status_mb("VmRSS");
+                samples
+                    .lock()
+                    .unwrap()
+                    .push((start.elapsed().as_secs(), mb));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        });
+        let resp = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
+            scope_to_library_filter: true,
+            ..Default::default()
+        });
+        done.store(true, Ordering::Relaxed);
+        let data = resp.data.expect("analysis result");
+        (data.analyzed, data.failed)
+    });
+    let secs = start.elapsed().as_secs_f64();
+    for (t, mb) in samples.into_inner().unwrap() {
+        println!("RSS|{t}|{mb}");
+    }
+    let peak = status_mb("VmHWM");
+    println!(
+        "\n{analyzed} analyzed, {failed} failed in {secs:.0} s with {workers} workers; \
+         baseline {baseline} MB, peak {peak} MB, peak per worker {:.0} MB",
+        (peak - baseline) as f64 / workers
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1868,6 +1868,11 @@ track-list-total-time-unknown = Total time: { $duration } ({ $count ->
     [one] { $count } without length
    *[other] { $count } without length
 })
+# The library's, which counts only analyzed tracks. $count: the tracks not analyzed yet.
+track-list-total-time-unanalyzed = Total time: { $duration } ({ $count ->
+    [one] { $count } not analyzed
+   *[other] { $count } not analyzed
+})
 
 ## format
 
@@ -2280,10 +2285,15 @@ selection-bar-duration-unknown = { $count ->
     [one] { $count } of the selected tracks has no length yet
    *[other] { $count } of the selected tracks have no length yet
 }
+# The same in the library, whose time counts only analyzed tracks. $count: the selected tracks not analyzed yet.
+selection-bar-duration-unanalyzed = { $count ->
+    [one] { $count } of the selected tracks is not analyzed yet
+   *[other] { $count } of the selected tracks are not analyzed yet
+}
 # The selection bar's total length of the selected tracks.
 # $duration: the length, as 1:02:03 or 3:45.
 selection-bar-duration = · { $duration }
-# The same, when some of them have no length yet, so the total is at least this.
+# The same, when some of them have no length yet (or aren't analyzed, in the library), so the total is at least this.
 selection-bar-duration-at-least = · { $duration }+
 
 ## group-edit

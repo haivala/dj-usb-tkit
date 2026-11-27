@@ -90,6 +90,7 @@ fn track_payload(job_id: &str, progress: &AnalyzeTrackProgress) -> JobEventPaylo
             crate::utils::track_list_total_time(
                 total_ms,
                 progress.library_duration_unknown_count.unwrap_or(0),
+                crate::utils::LeftOut::NotAnalyzed,
             )
         }),
         track: progress.track.clone().map(Box::new),

@@ -1412,6 +1412,10 @@ track-list-total-time-unknown = Durée totale : { $duration } ({ $count ->
     [one] { $count } sans durée
    *[other] { $count } sans durée
 })
+track-list-total-time-unanalyzed = Durée totale : { $duration } ({ $count ->
+    [one] { $count } non analysé
+   *[other] { $count } non analysés
+})
 
 ## format
 
@@ -1711,6 +1715,10 @@ playlist-import-many-failed = Échec de l'importation des playlists : { $error 
 selection-bar-duration-unknown = { $count ->
     [one] { $count } des morceaux sélectionnés n'a pas encore de durée
    *[other] { $count } des morceaux sélectionnés n'ont pas encore de durée
+}
+selection-bar-duration-unanalyzed = { $count ->
+    [one] { $count } des morceaux sélectionnés n'est pas encore analysé
+   *[other] { $count } des morceaux sélectionnés ne sont pas encore analysés
 }
 selection-bar-duration = · { $duration }
 selection-bar-duration-at-least = · { $duration }+

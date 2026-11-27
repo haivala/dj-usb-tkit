@@ -10,6 +10,7 @@ use std::collections::HashSet;
 
 use crate::i18n::tr;
 use crate::models::{GetSelectionDurationData, Track, UsbTrack};
+use crate::utils::LeftOut;
 
 use super::key_notation;
 
@@ -114,6 +115,7 @@ pub(crate) fn selection_duration<T: ListTrack>(
     tracks: &[T],
     ids: &[String],
     counts: impl Fn(&T) -> bool,
+    left_out: LeftOut,
 ) -> GetSelectionDurationData {
     let mut wanted: HashSet<&str> = ids.iter().map(String::as_str).collect();
     let selected: Vec<&T> = tracks
@@ -129,7 +131,13 @@ pub(crate) fn selection_duration<T: ListTrack>(
         duration_unknown_text: if duration_unknown_count == 0 {
             String::new()
         } else {
-            tr::selection_bar_duration_unknown(duration_unknown_count).render()
+            match left_out {
+                LeftOut::NoLength => tr::selection_bar_duration_unknown(duration_unknown_count),
+                LeftOut::NotAnalyzed => {
+                    tr::selection_bar_duration_unanalyzed(duration_unknown_count)
+                }
+            }
+            .render()
         },
         duration_text: if total_duration_ms == 0 {
             String::new()
@@ -340,7 +348,7 @@ mod tests {
             timed("3", Some(100_000)),
         ];
         let ids = ["1", "2", "gone"].map(String::from);
-        let data = selection_duration(&tracks, &ids, |_| true);
+        let data = selection_duration(&tracks, &ids, |_| true, LeftOut::NoLength);
         assert_eq!(data.total_duration_ms, 200_000);
         assert_eq!(data.duration_unknown_count, 1);
         assert_eq!(data.track_count, 2);
@@ -348,9 +356,14 @@ mod tests {
             data.duration_unknown_text,
             "1 of the selected tracks has no length yet"
         );
-        // `counts` leaves a track's length out without unticking it.
-        let data = selection_duration(&tracks, &ids, |track| track.id != "1");
+        // `counts` leaves a track's length out without unticking it; the
+        // library's rule says why.
+        let data = selection_duration(&tracks, &ids, |track| track.id != "1", LeftOut::NotAnalyzed);
         assert_eq!((data.total_duration_ms, data.track_count), (0, 2));
+        assert_eq!(
+            data.duration_unknown_text,
+            "2 of the selected tracks are not analyzed yet"
+        );
     }
 
     #[test]

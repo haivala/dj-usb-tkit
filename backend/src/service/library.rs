@@ -1046,7 +1046,11 @@ impl BackendService {
                 list_track_count: 0,
                 list_size_bytes: 0,
                 list_summary_text: track_list_summary(0, 0),
-                duration_text: crate::utils::track_list_total_time(0, 0),
+                duration_text: crate::utils::track_list_total_time(
+                    0,
+                    0,
+                    crate::utils::LeftOut::NotAnalyzed,
+                ),
             });
         }
 
@@ -1124,6 +1128,7 @@ impl BackendService {
             duration_text: crate::utils::track_list_total_time(
                 total_duration_ms,
                 duration_unknown_count,
+                crate::utils::LeftOut::NotAnalyzed,
             ),
         })
     }
