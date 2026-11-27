@@ -48,6 +48,10 @@ Included notice files:
 
 The graph is primarily permissive licenses, with some weak-copyleft MPL-2.0 components in the ecosystem. MPL-2.0 dependencies are compatible with this AGPL project when combined as unmodified dependency files in a larger work; keep their notices and source-license terms intact, and keep dependency audits current for every release.
 
+### stratum-dsp (vendored)
+
+The BPM and key analysis engine, stratum-dsp 1.0.0 (`MIT OR Apache-2.0`, https://github.com/HLLMR/stratum-dsp), is vendored with the app's patches in `backend/vendor/stratum-dsp/` and used in place of the crates.io release through `[patch.crates-io]`. Its `LICENSE-MIT` and `LICENSE-APACHE` stay in that folder; `VENDORED.md` there lists what was changed.
+
 ### LAME MP3 encoder
 
 MP3 transcodes use LAME (`libmp3lame`, LGPL-2.0-or-later), compiled from source and linked into the app through the `mp3lame-sys` / `mp3lame-encoder` crates (LGPL-3.0). The app's own source is published under the AGPL, which lets users rebuild it against a modified LAME, as the LGPL requires of static linking. Keep LAME's notice with release artifacts.

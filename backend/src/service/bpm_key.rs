@@ -502,6 +502,38 @@ mod tests {
         assert!(result.key.is_some(), "expected key detection on sine wave");
     }
 
+    /// The vendored stratum's BPM-only and key-only entry points give exactly
+    /// what `analyze_audio` gives for its half.
+    #[test]
+    fn stratum_split_entry_points_match_full_analysis() {
+        let sample_rate = 44100u32;
+        let mut samples = click_track_secs(124.0, sample_rate, 30);
+        // An A minor triad under the clicks, for the key.
+        for (i, s) in samples.iter_mut().enumerate() {
+            let t = i as f32 / sample_rate as f32;
+            *s += [220.0f32, 261.63, 329.63]
+                .iter()
+                .map(|f| (std::f32::consts::TAU * f * t).sin() * 0.15)
+                .sum::<f32>();
+        }
+        let config = || stratum_config(70, 180);
+        let full = stratum_dsp::analyze_audio(&samples, sample_rate, config()).unwrap();
+        let bpm = stratum_dsp::analyze_bpm(&samples, sample_rate, config()).unwrap();
+        let key = stratum_dsp::analyze_key(&samples, sample_rate, config()).unwrap();
+
+        assert!(full.bpm > 0.0, "the full analysis should find a tempo");
+        assert_eq!(bpm.bpm.to_bits(), full.bpm.to_bits());
+        assert_eq!(bpm.bpm_confidence.to_bits(), full.bpm_confidence.to_bits());
+        assert_eq!(bpm.beat_grid.beats, full.beat_grid.beats);
+        assert_eq!(bpm.grid_stability.to_bits(), full.grid_stability.to_bits());
+
+        assert_eq!(key.key, full.key);
+        assert_eq!(key.key_confidence.to_bits(), full.key_confidence.to_bits());
+        assert_eq!(key.key_clarity.to_bits(), full.key_clarity.to_bits());
+        assert_eq!(key.bpm, 0.0);
+        assert!(key.beat_grid.beats.is_empty());
+    }
+
     /// Two minutes of kick-like clicks at `bpm`.
     fn click_track(bpm: f64, sample_rate: u32) -> Vec<f32> {
         click_track_secs(bpm, sample_rate, 120)

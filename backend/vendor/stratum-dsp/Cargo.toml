@@ -1,0 +1,30 @@
+# Vendored stratum-dsp 1.0.0 (https://github.com/HLLMR/stratum-dsp, MIT OR
+# Apache-2.0) with the app's patches; see VENDORED.md. Wired in through
+# `[patch.crates-io]` in the workspace Cargo.toml. Upstream's tests, benches,
+# examples, docs and validation data are left out.
+[package]
+name = "stratum-dsp"
+version = "1.0.0"
+edition = "2021"
+authors = ["HLLMR"]
+description = "Professional-grade audio analysis engine for DJ applications: BPM detection, key detection, and beat tracking"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/HLLMR/stratum-dsp"
+publish = false
+
+[dependencies]
+symphonia = { version = "0.5", features = ["all"] }
+rustfft = "6.2"
+ort = { version = "2.0.0-rc.10", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+rayon = "1.8"
+
+[features]
+default = []
+ml = ["ort"]
+
+[lib]
+name = "stratum_dsp"
+path = "src/lib.rs"

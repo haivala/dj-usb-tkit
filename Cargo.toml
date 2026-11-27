@@ -1,6 +1,11 @@
 [workspace]
 members = ["backend", "desktop/src-tauri"]
+# Vendored with the app's patches; built as a dependency, not linted as ours.
+exclude = ["backend/vendor/stratum-dsp"]
 resolver = "2"
+
+[patch.crates-io]
+stratum-dsp = { path = "backend/vendor/stratum-dsp" }
 
 [workspace.package]
 version = "0.6.6"
