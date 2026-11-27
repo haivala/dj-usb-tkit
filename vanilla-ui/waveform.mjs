@@ -13,6 +13,11 @@ export const WAVEFORM_COLORS = {
 // The backend's row waveform: entries of four values, 0-127 -- the height,
 // then the low, mid and high band -- read from the track's analysis file.
 const ENTRY_VALUES = 4;
+// The smallest span of heights a row stretches to its full height. A loudly
+// mastered track's preview sits almost all at the top of the scale (127), so
+// its 5th and 95th percentiles meet; stretching that to the full row would
+// draw every bar at nothing. With this span it draws full bars with its dips.
+const MIN_STRETCH = 32;
 
 const waveformPeakCache = new WeakMap();
 
@@ -122,10 +127,11 @@ function paintMeasuredWaveform({ element, canvas, width, height }) {
   const sorted = peaks.slice().sort((a, b) => a - b);
   const p05 = sorted[Math.floor((sorted.length - 1) * 0.05)] ?? 0;
   const p95 = sorted[Math.floor((sorted.length - 1) * 0.95)] ?? 100;
-  const range = Math.max(1, p95 - p05);
+  const low = Math.max(0, Math.min(p05, p95 - MIN_STRETCH));
+  const range = Math.max(1, p95 - low);
 
   const normalize = (value) => {
-    const n = Math.max(0, Math.min(1, (value - p05) / range));
+    const n = Math.max(0, Math.min(1, (value - low) / range));
     return Math.pow(n, 0.85);
   };
 

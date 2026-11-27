@@ -6,10 +6,10 @@ function installWaveformStartupMock(page) {
     window.__e2eSourceFolders = ["/music"];
     const track = (n, extra) => ({
       id: `t-${n}`,
-      title: `Track ${n === 1 ? "One" : "Two"}`,
+      title: `Track ${["One", "Two", "Three"][n - 1]}`,
       artist: "Artist",
       album: "Album",
-      filePath: `/music/Track ${n === 1 ? "One" : "Two"}.mp3`,
+      filePath: `/music/Track ${["One", "Two", "Three"][n - 1]}.mp3`,
       fileSizeBytes: 999 + n,
       waveformPeaksPath: `/tmp/t-${n}.DAT`,
       // The page carries its rows' waveforms.
@@ -19,9 +19,13 @@ function installWaveformStartupMock(page) {
     // Entries of height, low, mid, high: the same shape, but track one is
     // all bass and track two all treble.
     const shape = [8, 20, 42, 65, 30, 55];
+    // Track three is a loud master: over 95% of its entries at the top of
+    // the scale, one dip.
+    const loud = Array.from({ length: 60 }, (_, i) => (i === 30 ? 110 : 127));
     const tracks = [
       track(1, { analysisReady: true, waveformPreview: shape.flatMap((h) => [h, 100, 0, 0]) }),
-      track(2, { waveformPreview: shape.flatMap((h) => [h, 0, 0, 100]) })
+      track(2, { waveformPreview: shape.flatMap((h) => [h, 0, 0, 100]) }),
+      track(3, { waveformPreview: loud.flatMap((h) => [h, 50, 50, 50]) })
     ];
     backend.seed({ tracks });
     backend.install((command, r) => {
@@ -79,28 +83,57 @@ function canvasesDrawn(page, selector) {
   );
 }
 
+// For every canvas matching `selector`, the share of its columns whose drawn
+// bar reaches above half its height.
+function tallColumnShare(page, selector) {
+  return page.evaluate(
+    (sel) =>
+      [...document.querySelectorAll(sel)].map((canvas) => {
+        const { width, height } = canvas;
+        const pixels = canvas.getContext("2d").getImageData(0, 0, width, height).data;
+        let tall = 0;
+        for (let x = 0; x < width; x += 1) {
+          let top = height;
+          for (let y = 0; y < height; y += 1) {
+            if (pixels[(y * width + x) * 4 + 3] > 0) {
+              top = y;
+              break;
+            }
+          }
+          if (top < height / 2) tall += 1;
+        }
+        return Math.round((100 * tall) / Math.max(1, width));
+      }),
+    selector
+  );
+}
+
 test("waveforms at startup and in the cue editor", async ({ page }) => {
   await installWaveformStartupMock(page);
   await page.goto("/");
   // Startup draws the waveforms the library page carries.
   {
-    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(2);
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
 
     await expect.poll(async () => {
       return page.locator("#libraryTableBody .waveform.waveform-canvas").count();
-    }).toBe(2);
+    }).toBe(3);
 
-    // The waveforms are actually drawn, not just laid out: both row canvases
-    // have visible pixels.
+    // The waveforms are actually drawn, not just laid out: every row canvas
+    // has visible pixels.
     await expect
       .poll(() => canvasesDrawn(page, "#libraryTableBody .waveform-canvas-el"))
-      .toEqual([true, true]);
+      .toEqual([true, true, true]);
 
     // Drawn in the theme's colours, shaded by the sound: the bass track and
     // the treble track come out in different shades.
     const [bass, treble] = await canvasColors(page, "#libraryTableBody .waveform-canvas-el");
     const difference = bass.reduce((sum, value, i) => sum + Math.abs(value - treble[i]), 0);
     expect(difference, `bass ${bass}, treble ${treble}`).toBeGreaterThan(30);
+
+    // The loud master draws as tall bars, not as a flat line along the bottom.
+    const [, , loudTall] = await tallColumnShare(page, "#libraryTableBody .waveform-canvas-el");
+    expect(loudTall).toBeGreaterThan(80);
   }
 
   await page.reload();
