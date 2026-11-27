@@ -65,7 +65,9 @@ analysis keeps (step 1).
    or `essentia` in its own runner, which fails the track rather than falling
    back to stratum. Each engine detects only what it's chosen for and what's
    wanted (`detect_bpm_key`); with both chosen the same, it runs once. stratum
-   compares BPM estimates from both windows, then refines the selected one on the beat pieces and
+   refines BPM estimates from both windows on the beat pieces. It keeps the
+   beat-window estimate only when its beat-grid coherence is at least 20%
+   higher; otherwise it keeps the harmonic-window estimate. It then
    places its first beat, as "Stratum BPM and first beat" below describes,
    within the BPM range set in Settings, and detects the key from the window,
    as "Stratum key" describes. essentia detects from the window too: the BPM
