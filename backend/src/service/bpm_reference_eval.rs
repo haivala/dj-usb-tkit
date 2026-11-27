@@ -26,11 +26,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::analysis::{BPM_KEY_MAX_SAMPLES, decode_audio_mono_samples};
+use super::analysis::{
+    BPM_KEY_MAX_SAMPLES, CoreRequest, analyze_audio_core, decode_audio_mono_samples, first_pass,
+    waveform_detail_bins_for_duration,
+};
 use super::anlz::{read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz};
 use super::bpm_key::{
-    TEMPO_FAMILY, broad_tempo_candidate, find_tempo_peak, first_beat_secs, refine_bpm,
-    refine_near_estimate, stratum_config, tempo_family_alternative, tempo_family_leads,
+    AnalysisEngines, TEMPO_FAMILY, broad_tempo_candidate, find_tempo_peak, first_beat_secs,
+    refine_bpm, refine_near_estimate, stratum_config, tempo_family_alternative, tempo_family_leads,
 };
 use crate::pdb_reader::parse_pdb;
 
@@ -268,14 +271,24 @@ fn default_csv_path(list: Option<&Path>, playlist: &str) -> PathBuf {
         .join(format!("{time}_{set}.csv"))
 }
 
-#[test]
-#[ignore = "needs reference BPMs; set BPM_REFERENCE_PDB or BPM_REFERENCE_LIST"]
-fn bpm_reference_accuracy() {
+/// What every run of a harness here reads from the environment.
+struct Setup {
+    list: Option<PathBuf>,
+    playlist: String,
+    range: String,
+    bpm_min: u32,
+    bpm_max: u32,
+    jobs: usize,
+    references: Vec<Reference>,
+}
+
+/// The run's setup; `None` (skip) when no reference is set.
+fn setup() -> Option<Setup> {
     let pdb = std::env::var_os("BPM_REFERENCE_PDB").map(PathBuf::from);
     let list = std::env::var_os("BPM_REFERENCE_LIST").map(PathBuf::from);
     if pdb.is_none() && list.is_none() {
         eprintln!("BPM_REFERENCE_PDB / BPM_REFERENCE_LIST not set; skipping");
-        return;
+        return None;
     }
     let playlist = std::env::var("BPM_REFERENCE_PLAYLIST").unwrap_or_default();
     let range = std::env::var("BPM_REFERENCE_RANGE").unwrap_or_else(|_| "70-180".into());
@@ -287,9 +300,6 @@ fn bpm_reference_accuracy() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(6usize);
-    let cache_path = std::env::var_os("BPM_REFERENCE_CACHE").map(PathBuf::from);
-    let cache = load_cache(cache_path.as_deref());
-
     let mut references = match (&list, &pdb) {
         (Some(list), _) => load_reference_list(list),
         (None, Some(pdb)) => {
@@ -323,6 +333,34 @@ fn bpm_reference_accuracy() {
             .collect();
     }
     eprintln!("{} tracks, range {range}, {jobs} jobs", references.len());
+    Some(Setup {
+        list,
+        playlist,
+        range,
+        bpm_min,
+        bpm_max,
+        jobs,
+        references,
+    })
+}
+
+#[test]
+#[ignore = "needs reference BPMs; set BPM_REFERENCE_PDB or BPM_REFERENCE_LIST"]
+fn bpm_reference_accuracy() {
+    let Some(Setup {
+        list,
+        playlist,
+        range,
+        bpm_min,
+        bpm_max,
+        jobs,
+        references,
+    }) = setup()
+    else {
+        return;
+    };
+    let cache_path = std::env::var_os("BPM_REFERENCE_CACHE").map(PathBuf::from);
+    let cache = load_cache(cache_path.as_deref());
 
     let next = AtomicUsize::new(0);
     let outcomes = Mutex::new(Vec::with_capacity(references.len()));
@@ -478,5 +516,147 @@ fn bpm_reference_accuracy() {
                 within(&own_errors)
             );
         }
+    }
+}
+
+/// The BPM setups `bpm_span` compares.
+const SPAN_SETUPS: [&str; 2] = ["today", "app"];
+
+struct SpanOutcome {
+    reference: f64,
+    grid: Option<(f64, f64)>,
+    duration_s: f64,
+    /// Per `SPAN_SETUPS`: final BPM and first beat (seconds).
+    results: Vec<(Option<f64>, Option<f64>)>,
+}
+
+fn analyze_span(reference: &Reference, bpm_min: u32, bpm_max: u32) -> Option<SpanOutcome> {
+    let decoded = first_pass(
+        &reference.path,
+        &|_| BPM_KEY_MAX_SAMPLES,
+        waveform_detail_bins_for_duration,
+    )
+    .ok()?;
+    let (capped, rate) = (&decoded.head, decoded.sample_rate);
+    let today = stratum_dsp::analyze_bpm(capped, rate, stratum_config(bpm_min, bpm_max))
+        .ok()
+        .filter(|r| r.bpm > 0.0)
+        .map(|r| refine_bpm(capped, rate, r.bpm, bpm_min, bpm_max));
+    let today_first = today.and_then(|bpm| first_beat_secs(capped, rate, bpm));
+    let app = analyze_audio_core(
+        &reference.path,
+        &CoreRequest {
+            kept_bpm: None,
+            kept_first_beat_ms: None,
+            existing_first_beat_ms: None,
+            detect_key: false,
+            detection_required: false,
+            bpm_min,
+            bpm_max,
+            engines: AnalysisEngines::STRATUM,
+        },
+        &mut |_, _| {},
+    )
+    .ok()?;
+    Some(SpanOutcome {
+        reference: reference.bpm,
+        grid: reference.grid,
+        duration_s: decoded.total as f64 / f64::from(rate),
+        results: vec![
+            (today, today_first),
+            (app.bpm, app.first_beat_ms.map(|ms| f64::from(ms) / 1000.0)),
+        ],
+    })
+}
+
+/// The app's BPM and first beat (`analyze_audio_core`: stratum's estimate
+/// from the key window, `refine_bpm` on the beat pieces) against the first
+/// `BPM_KEY_MAX_SAMPLES` analyzed whole, as before (opt-in, `#[ignore]`d).
+/// Same environment as `bpm_reference_accuracy`.
+#[test]
+#[ignore = "needs reference BPMs; set BPM_REFERENCE_PDB or BPM_REFERENCE_LIST"]
+fn bpm_span() {
+    let Some(Setup {
+        range,
+        bpm_min,
+        bpm_max,
+        jobs,
+        references,
+        ..
+    }) = setup()
+    else {
+        return;
+    };
+    let next = AtomicUsize::new(0);
+    let outcomes = Mutex::new(Vec::with_capacity(references.len()));
+    std::thread::scope(|scope| {
+        for _ in 0..jobs {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(reference) = references.get(i) else {
+                        break;
+                    };
+                    match analyze_span(reference, bpm_min, bpm_max) {
+                        Some(o) => {
+                            eprintln!("[{}/{}] {}", i + 1, references.len(), reference.title);
+                            outcomes.lock().unwrap().push(o);
+                        }
+                        None => eprintln!("FAILED to decode {}", reference.path.display()),
+                    }
+                }
+            });
+        }
+    });
+    let outcomes = outcomes.into_inner().unwrap();
+    let n = outcomes.len();
+    let long = outcomes.iter().filter(|o| o.duration_s > 540.0).count();
+    println!(
+        "\nrange {range}, {n} tracks ({long} longer than 9 minutes); within N BPM of the \
+         reference, any octave; first beat vs rekordbox's grid where the BPM matches it"
+    );
+    println!(
+        "setup              <=0.02  <=0.05  <=0.1  <=1.0  same_as_today  beat<=10ms  <=20ms  <=50ms  beats"
+    );
+    for (s, name) in SPAN_SETUPS.iter().enumerate() {
+        let within = |limit: f64| {
+            outcomes
+                .iter()
+                .filter(|o| {
+                    octave_error(o.results[s].0, o.reference).is_some_and(|e| e <= limit + 1e-9)
+                })
+                .count()
+        };
+        let same = outcomes
+            .iter()
+            .filter(|o| o.results[s].0 == o.results[0].0)
+            .count();
+        let beat_errors = outcomes
+            .iter()
+            .filter_map(|o| {
+                let (rb_first_ms, rb_bpm) = o.grid?;
+                let (bpm, first) = o.results[s];
+                let bpm = bpm?;
+                [0.5, 1.0, 2.0]
+                    .iter()
+                    .any(|k| (bpm * k - rb_bpm).abs() <= 0.05 * k + 0.02)
+                    .then_some(())?;
+                let period_ms = 60_000.0 / rb_bpm;
+                let off = (first? * 1000.0 - rb_first_ms).rem_euclid(period_ms);
+                Some(off.min(period_ms - off))
+            })
+            .collect::<Vec<_>>();
+        let beats = |limit: f64| beat_errors.iter().filter(|&&e| e <= limit).count();
+        println!(
+            "SPAN|{name:<16} {:>5}  {:>6}  {:>5}  {:>5}  {same:>13}  {:>10}  {:>6}  {:>6}  {:>5}",
+            within(0.02),
+            within(0.05),
+            within(0.1),
+            within(1.0),
+            beats(10.0),
+            beats(20.0),
+            beats(50.0),
+            beat_errors.len()
+        );
     }
 }

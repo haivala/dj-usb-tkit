@@ -11,8 +11,9 @@
 //!   key clarity.
 //! - `window_default` / `window_cheap`: the `KEY_WINDOW_SECS` window with the
 //!   most mid-band energy in the waveform the same decode drew (`key_window`).
-//! - `app`: the app's own analysis (`analyze_audio_core`): capped decode, BPM
-//!   from all of it, key from the window within the decoded part.
+//! - `app`: the app's own analysis (`analyze_audio_core`): key and BPM
+//!   estimate from the key window over the whole track, the BPM refined on
+//!   the beat pieces (`decode_for_detection`).
 //!
 //! The BPM is detected twice, today's way (whole capped input, then
 //! `refine_bpm`) and chunked (`analyze_bpm` per chunk, confidence vote seeding
@@ -38,7 +39,7 @@ use std::time::Instant;
 use stratum_dsp::{AnalysisConfig, Key};
 
 use super::analysis::{
-    BPM_KEY_MAX_SAMPLES, CoreRequest, analyze_audio_core, decode_audio_with_waveform,
+    BPM_KEY_MAX_SAMPLES, CoreRequest, analyze_audio_core, first_pass,
     waveform_detail_bins_for_duration,
 };
 use super::bpm_key::{
@@ -232,14 +233,14 @@ struct Outcome {
 }
 
 fn analyze(path: &Path, reference: (u8, bool)) -> Option<Outcome> {
-    let decoded = decode_audio_with_waveform(
+    let decoded = first_pass(
         path,
-        WHOLE_TRACK_MAX_SAMPLES,
+        &|_| WHOLE_TRACK_MAX_SAMPLES,
         waveform_detail_bins_for_duration,
     )
     .ok()?;
     let rate = decoded.sample_rate;
-    let all = &decoded.samples;
+    let all = &decoded.head;
     let capped = &all[..all.len().min(BPM_KEY_MAX_SAMPLES)];
     let window_len = KEY_WINDOW_SECS * rate as usize;
     let mid = decoded
@@ -474,14 +475,14 @@ fn key_memory() {
         return;
     };
     let path = PathBuf::from(file);
-    let decoded = decode_audio_with_waveform(
+    let decoded = first_pass(
         &path,
-        BPM_KEY_MAX_SAMPLES,
+        &|_| BPM_KEY_MAX_SAMPLES,
         waveform_detail_bins_for_duration,
     )
     .expect("decode");
     let after_decode = hwm_mb();
-    let (samples, rate) = (&decoded.samples, decoded.sample_rate);
+    let (samples, rate) = (&decoded.head, decoded.sample_rate);
     let mid = decoded
         .waveform
         .as_ref()
@@ -530,12 +531,15 @@ fn key_memory() {
 
 /// The analysis job's memory per worker, for `ANALYSIS_MEMORY_PER_WORKER_*`:
 /// a fresh data folder, `MEM_BATCH_ROOT` added as a source folder (indexed as
-/// the app does), then every track in it analyzed in one job with
-/// `MEM_BATCH_WORKERS` workers (default 14). A thread samples the process's
-/// resident memory every second. Linux only; build with `--release`.
+/// the app does), then its tracks analyzed in one job with
+/// `MEM_BATCH_WORKERS` workers (default 14): all of them, or with
+/// `MEM_BATCH_LIMIT`, that many: the 20 largest files (the longest tracks,
+/// which need the most) and the rest spread evenly over the others by size. A thread
+/// samples the process's resident memory every second. Linux only; build
+/// with `--release`.
 ///
 /// ```text
-/// MEM_BATCH_ROOT=/path/to/music MEM_BATCH_WORKERS=14 \
+/// MEM_BATCH_ROOT=/path/to/music MEM_BATCH_WORKERS=14 [MEM_BATCH_LIMIT=200] \
 ///   cargo test --release -p backend --lib analysis_memory_batch -- --ignored --nocapture
 /// ```
 ///
@@ -544,7 +548,9 @@ fn key_memory() {
 #[ignore]
 fn analysis_memory_batch() {
     use crate::commands::BackendCommands;
-    use crate::models::{AddSourceFoldersRequest, AnalyzeNewTracksRequest};
+    use crate::models::{
+        AddSourceFoldersRequest, AnalyzeNewTracksRequest, BrowseSourceFilesRequest,
+    };
     use std::sync::atomic::AtomicBool;
 
     fn status_mb(field: &str) -> i64 {
@@ -572,6 +578,26 @@ fn analysis_memory_batch() {
         paths: vec![root.to_string_lossy().into_owned()],
     });
     assert!(added.ok, "add source folder: {:?}", added.error);
+    let limit = std::env::var("MEM_BATCH_LIMIT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok());
+    let track_ids = limit.map(|limit| {
+        let listed = backend.browse_source_files(BrowseSourceFilesRequest {
+            limit: usize::MAX / 2,
+            ..Default::default()
+        });
+        let mut tracks = listed.data.expect("library tracks").items;
+        tracks.sort_by_key(|t| std::cmp::Reverse(t.file_size_bytes.unwrap_or(0)));
+        let largest = tracks.len().min(20).min(limit);
+        let rest = tracks.split_off(largest);
+        let wanted = limit - largest;
+        let stride = (rest.len() as f64 / wanted.max(1) as f64).max(1.0);
+        tracks
+            .into_iter()
+            .chain((0..wanted.min(rest.len())).map(|i| rest[(i as f64 * stride) as usize].clone()))
+            .map(|t| t.id)
+            .collect::<Vec<_>>()
+    });
     let baseline = status_mb("VmRSS");
 
     let done = AtomicBool::new(false);
@@ -588,9 +614,15 @@ fn analysis_memory_batch() {
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
         });
-        let resp = backend.analyze_new_tracks(AnalyzeNewTracksRequest {
-            scope_to_library_filter: true,
-            ..Default::default()
+        let resp = backend.analyze_new_tracks(match &track_ids {
+            Some(ids) => AnalyzeNewTracksRequest {
+                track_ids: ids.clone(),
+                ..Default::default()
+            },
+            None => AnalyzeNewTracksRequest {
+                scope_to_library_filter: true,
+                ..Default::default()
+            },
         });
         done.store(true, Ordering::Relaxed);
         let data = resp.data.expect("analysis result");
@@ -606,6 +638,218 @@ fn analysis_memory_batch() {
          baseline {baseline} MB, peak {peak} MB, peak per worker {:.0} MB",
         (peak - baseline) as f64 / workers
     );
+}
+
+/// A key-settings variant: a name and the change it makes to the app's key
+/// settings (`stratum_key_config`).
+type Change = fn(&mut AnalysisConfig);
+type Variant = (&'static str, Change);
+
+/// The key settings `key_sweep` tries, each one change from the app's
+/// (`stratum_key_config`); some only undo or redo what the app's already set.
+fn sweep_variants() -> Vec<Variant> {
+    use stratum_dsp::features::key::templates::TemplateSet;
+    vec![
+        ("app", |_| {}),
+        ("smooth+mask", |c| {
+            c.enable_key_spectrogram_time_smoothing = true;
+            c.enable_key_harmonic_mask = true;
+        }),
+        ("smooth", |c| c.enable_key_spectrogram_time_smoothing = true),
+        ("mask", |c| c.enable_key_harmonic_mask = true),
+        ("hpss", |c| c.enable_key_hpss_harmonic = true),
+        ("mode_heur", |c| c.enable_key_mode_heuristic = true),
+        ("mode_heur_strict", |c| {
+            c.enable_key_mode_heuristic = true;
+            c.key_mode_third_ratio_margin = 0.05;
+            c.key_mode_flip_min_score_ratio = 0.92;
+        }),
+        ("minor_bonus_0.2", |c| {
+            c.enable_key_minor_harmonic_bonus = true
+        }),
+        ("minor_bonus_0.5", |c| {
+            c.enable_key_minor_harmonic_bonus = true;
+            c.key_minor_leading_tone_bonus_weight = 0.5;
+        }),
+        ("minor_bonus_0.8", |c| {
+            c.enable_key_minor_harmonic_bonus = true;
+            c.key_minor_leading_tone_bonus_weight = 0.8;
+        }),
+        ("temperley", |c| c.key_template_set = TemplateSet::Temperley),
+        ("ensemble", |c| c.enable_key_ensemble = true),
+        ("tuning", |c| c.enable_key_tuning_compensation = true),
+        ("edge_trim", |c| c.enable_key_edge_trim = true),
+        ("whitening", |c| c.enable_key_hpcp_whitening = true),
+        ("bass_blend", |c| c.enable_key_hpcp_bass_blend = true),
+        ("no_hpcp", |c| c.enable_key_hpcp = false),
+        ("no_seg_vote", |c| c.enable_key_segment_voting = false),
+        ("median", |c| c.enable_key_median = true),
+        ("multi_scale", |c| c.enable_key_multi_scale = true),
+        ("log_freq", |c| c.enable_key_log_frequency = true),
+        ("no_frame_weight", |c| c.enable_key_frame_weighting = false),
+        ("tonal_pow_1", |c| c.key_tonalness_power = 1.0),
+        ("tonal_pow_3", |c| c.key_tonalness_power = 3.0),
+        ("energy_pow_0", |c| c.key_energy_power = 0.0),
+        ("energy_pow_1", |c| c.key_energy_power = 1.0),
+        ("stft_4096", |c| c.key_stft_frame_size = 4096),
+        ("stft_16384", |c| c.key_stft_frame_size = 16384),
+        ("hpcp_peaks_12", |c| c.key_hpcp_peaks_per_frame = 12),
+        ("hpcp_peaks_48", |c| c.key_hpcp_peaks_per_frame = 48),
+        ("hpcp_harm_1", |c| c.key_hpcp_num_harmonics = 1),
+        ("hpcp_harm_8", |c| c.key_hpcp_num_harmonics = 8),
+        ("hpcp_decay_0.8", |c| c.key_hpcp_harmonic_decay = 0.8),
+        ("hpcp_mag_1", |c| c.key_hpcp_mag_power = 1.0),
+        ("hpcp_mag_0.25", |c| c.key_hpcp_mag_power = 0.25),
+        ("seg_len_512", |c| c.key_segment_len_frames = 512),
+        ("seg_len_2048", |c| {
+            c.key_segment_len_frames = 2048;
+            c.key_segment_hop_frames = 1024;
+        }),
+        ("seg_clarity_0", |c| c.key_segment_min_clarity = 0.0),
+        ("seg_clarity_0.4", |c| c.key_segment_min_clarity = 0.4),
+        ("bass_w_0.2", |c| c.key_hpcp_bass_weight = 0.2),
+        ("bass_w_0.5", |c| c.key_hpcp_bass_weight = 0.5),
+        ("bass_fmax_150", |c| c.key_hpcp_bass_fmax_hz = 150.0),
+        ("ms_short", |c| {
+            c.key_multi_scale_lengths = vec![60, 120, 360]
+        }),
+        ("ms_long", |c| {
+            c.key_multi_scale_lengths = vec![360, 720, 1440]
+        }),
+        ("ms_clarity_0.1", |c| c.key_multi_scale_min_clarity = 0.1),
+        ("ms_clarity_0.3", |c| c.key_multi_scale_min_clarity = 0.3),
+        ("tuning_0.2", |c| c.key_tuning_max_abs_semitones = 0.2),
+    ]
+}
+
+/// Key settings against annotated keys: each track decoded once, its key
+/// window (as the app picks it) run through every `sweep_variants` setting.
+///
+/// ```text
+/// KEY_REFERENCE_LIST=/path/to/list.tsv [KEY_SWEEP_ONLY=mask,temperley+tuning] \
+///   cargo test --release -p backend key_sweep -- --ignored --nocapture
+/// ```
+///
+/// `KEY_SWEEP_ONLY` picks variants by name; `a+b` applies both. Prints the
+/// relations and MIREX score of each, how many tracks it gets right that the
+/// app's settings get wrong and the other way round, and its key time.
+#[test]
+#[ignore]
+fn key_sweep() {
+    let Some(list) = std::env::var_os("KEY_REFERENCE_LIST").map(PathBuf::from) else {
+        println!("KEY_REFERENCE_LIST not set; skipping");
+        return;
+    };
+    let singles = sweep_variants();
+    let names: Vec<String> = match std::env::var("KEY_SWEEP_ONLY") {
+        Ok(v) => std::iter::once("app".to_string())
+            .chain(v.split(',').map(|s| s.trim().to_string()))
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Err(_) => singles.iter().map(|(n, _)| n.to_string()).collect(),
+    };
+    // Each variant: its name and the changes it makes, in order.
+    let variants: Vec<(String, Vec<Change>)> = names
+        .iter()
+        .map(|name| {
+            let changes = name
+                .split('+')
+                .map(|part| {
+                    singles
+                        .iter()
+                        .find(|(n, _)| *n == part)
+                        .unwrap_or_else(|| panic!("no key sweep variant {part}"))
+                        .1
+                })
+                .collect();
+            (name.clone(), changes)
+        })
+        .collect();
+    let references = load_list(&list);
+    let jobs = std::env::var("KEY_REFERENCE_JOBS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(4usize);
+    let next = AtomicUsize::new(0);
+    // Per track: the reference and each variant's key.
+    type Keys = Vec<(Option<(u8, bool)>, f64)>;
+    let results: Mutex<Vec<((u8, bool), Keys)>> = Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        for _ in 0..jobs {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some((path, reference)) = references.get(i) else {
+                        break;
+                    };
+                    let Ok(decoded) = first_pass(
+                        path,
+                        &|_| BPM_KEY_MAX_SAMPLES,
+                        waveform_detail_bins_for_duration,
+                    ) else {
+                        eprintln!("FAILED to decode {}", path.display());
+                        continue;
+                    };
+                    let rate = decoded.sample_rate;
+                    let mid = decoded
+                        .waveform
+                        .as_ref()
+                        .map(|w| w.mid_energy.as_slice())
+                        .unwrap_or(&[]);
+                    let window =
+                        key_window(mid, decoded.head.len(), KEY_WINDOW_SECS * rate as usize);
+                    let samples = &decoded.head[window];
+                    let keys = variants
+                        .iter()
+                        .map(|(_, changes)| {
+                            let mut config = cheap_config();
+                            changes.iter().for_each(|change| change(&mut config));
+                            let t = Instant::now();
+                            let key = key_of(samples, rate, config).map(|k| key_parts(k.0));
+                            (key, t.elapsed().as_secs_f64())
+                        })
+                        .collect();
+                    eprintln!("{}/{}", i + 1, references.len());
+                    results.lock().unwrap().push((*reference, keys));
+                }
+            });
+        }
+    });
+    let results = results.into_inner().unwrap();
+    let n = results.len();
+    println!(
+        "\n{n} tracks against the reference keys ({})",
+        list.display()
+    );
+    println!(
+        "variant            same  fifth  relat  paral  other  none   MIREX   +won  -lost  s/track"
+    );
+    for (v, (name, _)) in variants.iter().enumerate() {
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        let (mut score, mut won, mut lost, mut secs) = (0.0, 0, 0, 0.0);
+        for (reference, keys) in &results {
+            let rel = keys[v].0.map(|k| relation(k, *reference)).unwrap_or("none");
+            *counts.entry(rel).or_default() += 1;
+            score += mirex(rel);
+            secs += keys[v].1;
+            let app_right = keys[0].0 == Some(*reference);
+            let right = keys[v].0 == Some(*reference);
+            won += usize::from(right && !app_right);
+            lost += usize::from(app_right && !right);
+        }
+        let c = |k| counts.get(k).copied().unwrap_or(0);
+        println!(
+            "SWEEP|{name:<17} {:>4}  {:>5}  {:>5}  {:>5}  {:>5}  {:>4}  {:>5.1}%  {won:>5}  {lost:>5}  {:.2}",
+            c("same"),
+            c("fifth"),
+            c("relative"),
+            c("parallel"),
+            c("other"),
+            c("none"),
+            100.0 * score / n.max(1) as f64,
+            secs / n.max(1) as f64
+        );
+    }
 }
 
 #[cfg(test)]

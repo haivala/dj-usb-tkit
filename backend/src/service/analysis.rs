@@ -6,8 +6,9 @@ use super::anlz::{
 };
 use super::anlz_read::row_waveform_from_pwv4;
 use super::bpm_key::{
-    AnalysisEngine, AnalysisEngines, BpmKeyResult, DetectRequest, detect_bpm_key_stratum,
-    first_beat_secs,
+    AnalysisEngine, AnalysisEngines, BEAT_PIECE_SECS, BpmKeyResult, DetectRequest,
+    DetectionAudio, KEY_WINDOW_SECS, OnsetAccumulator, beat_pieces, detect_bpm_key_stratum,
+    key_window, onset_envelope,
 };
 use super::export_helpers::{
     KeptAnalysis, LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash,
@@ -48,12 +49,11 @@ pub(crate) use coordinator::{AnalysisCoordinatorHandle, FileAnalysis};
 pub use coordinator::{AnalysisEvent, AnalysisJobSummary, AnalysisObserver};
 pub use job_events::analysis_event_payload;
 
-/// The mono samples analysis keeps for BPM and key detection: about 9 minutes
-/// at 44.1 kHz. Detection holds them all at once and its working set grows
-/// with their length, so this bounds a worker's memory (see the budgets below)
-/// however long the track. The first 9 minutes are enough for a constant-tempo
-/// grid and the key. The waveform is drawn from the whole file regardless
-/// (`decode_audio_with_waveform`).
+/// The most mono samples a decode keeps when the file's metadata gives no
+/// length: about 9 minutes at 44.1 kHz. Without a length, the waveform can't
+/// be drawn as the audio arrives, so it is drawn over what was kept, and the
+/// key window and beat pieces are picked within it. With a length, analysis
+/// streams a key window and rolling candidate (`decode_for_detection`).
 pub(super) const BPM_KEY_MAX_SAMPLES: usize = 24_000_000;
 // Reserved for the OS, the Tauri/WebKit UI process, and other running apps.
 const ANALYSIS_MEMORY_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
@@ -138,8 +138,7 @@ fn resolve_analysis_engines(
 /// and `request` asks for. Essentia detects from all of `samples`.
 fn detect_bpm_key(
     engines: AnalysisEngines,
-    samples: &[f32],
-    sample_rate: u32,
+    audio: &DetectionAudio,
     request: &DetectRequest,
 ) -> BackendResult<BpmKeyResult> {
     let mut detected = BpmKeyResult::default();
@@ -152,7 +151,7 @@ fn detect_bpm_key(
         if !part.detect_bpm && !part.detect_key {
             continue;
         }
-        let found = detect_bpm_key_with(engine, samples, sample_rate, &part)?;
+        let found = detect_bpm_key_with(engine, audio, &part)?;
         detected.bpm = detected.bpm.or(found.bpm);
         detected.first_beat_ms = detected.first_beat_ms.or(found.first_beat_ms);
         detected.key = detected.key.or(found.key);
@@ -162,14 +161,14 @@ fn detect_bpm_key(
 
 fn detect_bpm_key_with(
     engine: AnalysisEngine,
-    samples: &[f32],
-    sample_rate: u32,
+    audio: &DetectionAudio,
     request: &DetectRequest,
 ) -> BackendResult<BpmKeyResult> {
     match engine {
-        AnalysisEngine::Stratum => detect_bpm_key_stratum(samples, sample_rate, request),
+        AnalysisEngine::Stratum => detect_bpm_key_stratum(audio, request),
         AnalysisEngine::Essentia => {
-            let result = detect_bpm_key_with_essentia_js(samples, sample_rate, request)?;
+            let result =
+                detect_bpm_key_with_essentia_js(&audio.window, audio.sample_rate, request)?;
             let Some(result) = result else {
                 return Err(BackendError::Internal(
                     "Essentia analysis returned no result; no fallback engine applied".to_string(),
@@ -181,10 +180,19 @@ fn detect_bpm_key_with(
                         .to_string(),
                 ));
             }
+            // Essentia's beats count from the window's start; the first beat
+            // is placed on the track's start as for stratum's BPM.
+            let window_start_ms = audio.window_start as f64 * 1000.0 / f64::from(audio.sample_rate);
+            let first_beat_ms = result
+                .bpm
+                .and_then(|bpm| audio.place_first_beat(bpm))
+                .map(|secs| secs * 1000.0)
+                .or_else(|| result.first_beat_ms.map(|ms| ms + window_start_ms))
+                .map(|ms| ms.round() as u32);
             Ok(BpmKeyResult {
                 bpm: result.bpm,
                 key: result.key,
-                first_beat_ms: result.first_beat_ms.map(|v| v.round() as u32),
+                first_beat_ms,
             })
         }
     }
@@ -1192,8 +1200,7 @@ impl<'a> AnalysisStageTimer<'a> {
 /// The track's first beat after analysis, and whether this analysis placed
 /// it (`false` for a kept one, or the existing one when the audio gives none).
 fn first_beat_for_saved_bpm(
-    samples: &[f32],
-    sample_rate: u32,
+    audio: &DetectionAudio,
     kept_bpm: Option<f64>,
     detected_first_beat_ms: Option<u32>,
     existing_first_beat_ms: Option<u32>,
@@ -1203,32 +1210,15 @@ fn first_beat_for_saved_bpm(
         return (kept_first_beat_ms, false);
     }
     let placed = match kept_bpm {
-        Some(bpm) => {
-            first_beat_secs(samples, sample_rate, bpm).map(|secs| (secs * 1000.0).round() as u32)
-        }
+        Some(bpm) => audio
+            .place_first_beat(bpm)
+            .map(|secs| (secs * 1000.0).round() as u32),
         None => detected_first_beat_ms,
     };
     match placed {
         Some(ms) => (Some(ms), true),
         None => (existing_first_beat_ms, false),
     }
-}
-
-/// The waveform's mid-band energy over the decoded `samples`: the waveform
-/// spans the whole track, the samples only its first `BPM_KEY_MAX_SAMPLES`.
-fn mid_energy_of_samples(
-    waveform: &WaveformData,
-    duration_ms: Option<u64>,
-    samples: usize,
-    sample_rate: u32,
-) -> &[u8] {
-    let mid = &waveform.mid_energy;
-    let total = duration_ms.map_or(0, |ms| ms.saturating_mul(u64::from(sample_rate)) / 1000);
-    if total == 0 {
-        return mid;
-    }
-    let covered = (mid.len() as u128 * samples as u128 / u128::from(total)).min(mid.len() as u128);
-    &mid[..covered as usize]
 }
 
 /// What [`analyze_audio_core`] keeps instead of detecting, and how it detects
@@ -1270,10 +1260,10 @@ pub(crate) struct CoreAnalysis {
     pub(crate) first_beat_estimated: bool,
 }
 
-/// The analysis pipeline's core, which needs no library: decodes `path` once,
-/// draws its waveform from all of it, detects what isn't kept and places the
-/// first beat. `on_decoded` gets the waveform and length as soon as the decode
-/// is done, before the (slow) detection.
+/// The analysis pipeline's core, which needs no library: decodes `path`
+/// (`decode_for_detection`), draws its waveform from all of it, detects what
+/// isn't kept and places the first beat. `on_decoded` gets the waveform and
+/// length as soon as the decode is done, before the (slow) detection.
 pub(crate) fn analyze_audio_core(
     path: &Path,
     request: &CoreRequest,
@@ -1281,12 +1271,11 @@ pub(crate) fn analyze_audio_core(
 ) -> BackendResult<CoreAnalysis> {
     // A file with no decodable audio track fails here -- it must not be
     // "analyzed" into a waveform drawn from its raw bytes.
-    let DecodedAudio {
-        samples,
-        sample_rate,
+    let DecodedForDetection {
+        audio,
         duration_ms,
         waveform,
-    } = decode_audio_with_waveform(path, BPM_KEY_MAX_SAMPLES, waveform_detail_bins_for_duration)?;
+    } = decode_for_detection(path, waveform_detail_bins_for_duration)?;
     // The waveform's detail entries are a time axis: with no known length
     // there is no waveform, rather than one stretched to a made-up length.
     let waveform = waveform.unwrap_or_else(WaveformData::empty);
@@ -1300,17 +1289,15 @@ pub(crate) fn analyze_audio_core(
             bpm_max: request.bpm_max,
             detect_bpm: request.kept_bpm.is_none(),
             detect_key: request.detect_key,
-            mid_energy: mid_energy_of_samples(&waveform, duration_ms, samples.len(), sample_rate),
         };
-        match detect_bpm_key(request.engines, &samples, sample_rate, &detect_request) {
+        match detect_bpm_key(request.engines, &audio, &detect_request) {
             Ok(detected) => detected,
             Err(err) if request.detection_required => return Err(err),
             Err(_) => BpmKeyResult::default(),
         }
     };
     let (first_beat_ms, first_beat_estimated) = first_beat_for_saved_bpm(
-        &samples,
-        sample_rate,
+        &audio,
         request.kept_bpm,
         detected.first_beat_ms,
         request.existing_first_beat_ms,
@@ -1389,11 +1376,7 @@ pub(crate) fn write_waveform_bundle_for_audio(
     audio: &Path,
     paths: &AnlzBundlePaths,
 ) -> BackendResult<()> {
-    let decoded = decode_audio_with_waveform(
-        audio,
-        BPM_KEY_MAX_SAMPLES,
-        waveform_detail_bins_for_duration,
-    )?;
+    let decoded = first_pass(audio, &|_| 0, waveform_detail_bins_for_duration)?;
     let (Some(duration_ms), Some(waveform)) = (decoded.duration_ms, decoded.waveform) else {
         return Err(BackendError::Internal(format!(
             "no audio length for {}",
@@ -1936,8 +1919,8 @@ pub(crate) fn build_waveform_preview_from_audio(
     if bins == 0 {
         return Ok(WaveformData::empty());
     }
-    let decoded = decode_audio_with_waveform(path, max_samples, |_| bins)?;
-    if decoded.samples.is_empty() {
+    let decoded = first_pass(path, &|_| max_samples, |_| bins)?;
+    if decoded.head.is_empty() {
         return Err(BackendError::Internal(format!(
             "no audio samples decoded from {}",
             path.display()
@@ -1945,49 +1928,62 @@ pub(crate) fn build_waveform_preview_from_audio(
     }
     Ok(decoded
         .waveform
-        .unwrap_or_else(|| waveform_from_samples(&decoded.samples, bins, decoded.sample_rate)))
+        .unwrap_or_else(|| waveform_from_samples(&decoded.head, bins, decoded.sample_rate)))
 }
 
-/// One decode of `path`: what analysis needs from its audio.
-pub(crate) struct DecodedAudio {
-    /// The first `max_samples` mono samples, for BPM and key.
-    pub(crate) samples: Vec<f32>,
+/// A decode's first (often only) pass over a file.
+pub(crate) struct FirstPass {
+    /// The first mono samples: as many as asked for, or with no length in
+    /// the metadata, at least `BPM_KEY_MAX_SAMPLES`.
+    pub(crate) head: Vec<f32>,
+    /// How many samples the file decoded to.
+    pub(crate) total: usize,
     pub(crate) sample_rate: u32,
     /// From the file's metadata, else from the decoded samples.
     pub(crate) duration_ms: Option<u64>,
     /// `bins_for(duration_ms)` bins over the track's length; `None` with no
     /// known length.
     pub(crate) waveform: Option<WaveformData>,
+    /// The onset envelope of all of it (`onset_envelope`).
+    pub(crate) envelope: Vec<f32>,
 }
 
-/// Decodes `path` once, keeping its first `max_samples` mono samples and
-/// drawing its waveform from all of its audio as it goes, each bin over its
-/// own stretch of the track's length, so a track longer than the cap isn't
-/// drawn as its first part stretched. With no length in the metadata, the
-/// decode stops at the cap and the waveform is drawn over what it kept.
-pub(crate) fn decode_audio_with_waveform(
+/// Decodes all of `path` once, keeping its first `keep(sample rate)` mono
+/// samples and drawing its waveform and onset envelope from all of its audio
+/// as it goes, each waveform bin over its own stretch of the track's length.
+/// With no length in the metadata, the decode stops at `BPM_KEY_MAX_SAMPLES`
+/// (or `keep` at 48 kHz, if more) and the waveform is drawn over what it
+/// kept.
+pub(crate) fn first_pass(
     path: &Path,
-    max_samples: usize,
+    keep: &dyn Fn(u32) -> usize,
     bins_for: impl Fn(u64) -> usize,
-) -> BackendResult<DecodedAudio> {
+) -> BackendResult<FirstPass> {
     let Some(duration_ms) = detect_track_duration_ms(path) else {
-        let (samples, sample_rate) = decode_audio_mono_samples(path, max_samples)?;
-        let duration_ms = duration_ms_from_decoded(samples.len(), sample_rate);
+        let (head, sample_rate) =
+            decode_audio_mono_samples(path, keep(48_000).max(BPM_KEY_MAX_SAMPLES))?;
+        let duration_ms = duration_ms_from_decoded(head.len(), sample_rate);
         let waveform = duration_ms
-            .map(|duration_ms| waveform_from_samples(&samples, bins_for(duration_ms), sample_rate));
-        return Ok(DecodedAudio {
-            samples,
+            .map(|duration_ms| waveform_from_samples(&head, bins_for(duration_ms), sample_rate));
+        return Ok(FirstPass {
+            total: head.len(),
+            envelope: onset_envelope(&head),
+            head,
             sample_rate,
             duration_ms,
             waveform,
         });
     };
     let bins = bins_for(duration_ms);
-    let mut samples = Vec::<f32>::new();
+    let mut head = Vec::<f32>::new();
+    let mut total = 0usize;
+    let mut onsets = OnsetAccumulator::default();
     let mut waveform: Option<WaveformAccumulator> = None;
     let sample_rate = decode_audio_mono_chunks(path, &mut |chunk, rate| {
-        let room = max_samples.saturating_sub(samples.len());
-        samples.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        let room = keep(rate).saturating_sub(head.len());
+        head.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        total += chunk.len();
+        onsets.push(chunk);
         waveform
             .get_or_insert_with(|| {
                 let total = duration_ms.saturating_mul(u64::from(rate)) / 1000;
@@ -1996,11 +1992,209 @@ pub(crate) fn decode_audio_with_waveform(
             .push(chunk);
         true
     })?;
-    Ok(DecodedAudio {
-        samples,
+    Ok(FirstPass {
+        head,
+        total,
         sample_rate,
         duration_ms: Some(duration_ms),
         waveform: waveform.map(WaveformAccumulator::finish),
+        envelope: onsets.finish(),
+    })
+}
+
+/// A decode for analysis: the waveform and length, and what detection needs
+/// (`DetectionAudio`).
+pub(crate) struct DecodedForDetection {
+    pub(crate) audio: DetectionAudio,
+    /// From the file's metadata, else from the decoded samples.
+    pub(crate) duration_ms: Option<u64>,
+    /// `bins_for(duration_ms)` bins over the track's length; `None` with no
+    /// known length.
+    pub(crate) waveform: Option<WaveformData>,
+}
+
+/// A fixed-size ring of mono samples, returned in playback order.
+struct SampleRing {
+    samples: Vec<f32>,
+    next: usize,
+    len: usize,
+}
+
+impl SampleRing {
+    fn new(capacity: usize) -> Self {
+        Self {
+            samples: vec![0.0; capacity],
+            next: 0,
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, sample: f32) {
+        if self.samples.is_empty() {
+            return;
+        }
+        self.samples[self.next] = sample;
+        self.next = (self.next + 1) % self.samples.len();
+        self.len = (self.len + 1).min(self.samples.len());
+    }
+
+    fn copy(&self) -> Vec<f32> {
+        if self.len < self.samples.len() {
+            return self.samples[..self.len].to_vec();
+        }
+        self.samples[self.next..]
+            .iter()
+            .chain(&self.samples[..self.next])
+            .copied()
+            .collect()
+    }
+}
+
+/// Tracks the strongest completed three-minute waveform window. The score is
+/// raw mid-band RMS: the waveform's p95-normalized bytes are for display and
+/// require the entire track before they exist.
+struct WindowTracker {
+    width: usize,
+    bins: std::collections::VecDeque<f32>,
+    sum: f64,
+    best: f64,
+    samples: Vec<f32>,
+    start: usize,
+}
+
+impl WindowTracker {
+    fn new(total: usize, bins: usize, window: usize) -> Self {
+        Self {
+            width: (window * bins).div_ceil(total).clamp(1, bins),
+            bins: std::collections::VecDeque::new(),
+            sum: 0.0,
+            best: f64::NEG_INFINITY,
+            samples: Vec::new(),
+            start: 0,
+        }
+    }
+
+    fn push(&mut self, score: f32, total_samples: usize, ring: &SampleRing) {
+        self.bins.push_back(score);
+        self.sum += f64::from(score);
+        if self.bins.len() > self.width {
+            self.sum -= f64::from(self.bins.pop_front().expect("nonempty"));
+        }
+        // A window is only eligible after it holds the requested audio. At a
+        // bin boundary the waveform score represents this latest ring.
+        if self.bins.len() == self.width && ring.len == ring.samples.len() && self.sum > self.best {
+            self.best = self.sum;
+            self.samples = ring.copy();
+            self.start = total_samples - self.samples.len();
+        }
+    }
+}
+
+/// Decodes `path` for analysis in one pass. With a known duration it draws
+/// the waveform, builds the full onset envelope, and keeps only a rolling
+/// three-minute audio window plus the best one found so far. A candidate is
+/// copied when its just-finished waveform bins have the strongest raw
+/// mid-band energy. No second decode is needed for a late harmonic section.
+///
+/// Files without duration metadata retain the capped fallback: no complete
+/// time axis exists for streaming waveform windows, so the first capped audio
+/// is treated as the track as before.
+pub(crate) fn decode_for_detection(
+    path: &Path,
+    bins_for: impl Fn(u64) -> usize,
+) -> BackendResult<DecodedForDetection> {
+    let Some(duration_ms) = detect_track_duration_ms(path) else {
+        let first = first_pass(path, &|rate| KEY_WINDOW_SECS * rate as usize, bins_for)?;
+        let window = key_window(
+            first
+                .waveform
+                .as_ref()
+                .map(|w| w.mid_energy.as_slice())
+                .unwrap_or(&[]),
+            first.total,
+            KEY_WINDOW_SECS * first.sample_rate as usize,
+        );
+        let beat_pieces = first
+            .waveform
+            .as_ref()
+            .map(|w| beat_pieces(&w.low_energy, first.total, first.sample_rate))
+            .unwrap_or([0..0, 0..0]);
+        return Ok(DecodedForDetection {
+            audio: DetectionAudio {
+                sample_rate: first.sample_rate,
+                window_start: window.start,
+                window: first.head[window].to_vec(),
+                bpm_window: None,
+                envelope: first.envelope,
+                beat_pieces,
+            },
+            duration_ms: first.duration_ms,
+            waveform: first.waveform,
+        });
+    };
+
+    let bins = bins_for(duration_ms);
+    let mut total = 0usize;
+    let mut onsets = OnsetAccumulator::default();
+    let mut waveform: Option<WaveformAccumulator> = None;
+    let mut ring: Option<SampleRing> = None;
+    let mut tracker: Option<WindowTracker> = None;
+    let mut beat_ring: Option<SampleRing> = None;
+    let mut beat_tracker: Option<WindowTracker> = None;
+    let mut previous_low = 0.0f32;
+    let sample_rate = decode_audio_mono_chunks(path, &mut |chunk, rate| {
+        let expected = duration_ms.saturating_mul(u64::from(rate)) / 1000;
+        let window = KEY_WINDOW_SECS * rate as usize;
+        let ring = ring.get_or_insert_with(|| SampleRing::new(window));
+        let tracker =
+            tracker.get_or_insert_with(|| WindowTracker::new(expected as usize, bins, window));
+        let beat_window = BEAT_PIECE_SECS * rate as usize;
+        let beat_ring = beat_ring.get_or_insert_with(|| SampleRing::new(beat_window));
+        let beat_tracker = beat_tracker
+            .get_or_insert_with(|| WindowTracker::new(expected as usize, bins, beat_window));
+        let waveform =
+            waveform.get_or_insert_with(|| WaveformAccumulator::new(bins, expected as usize, rate));
+        onsets.push(chunk);
+        waveform.push_with(chunk, |sample, levels| {
+            ring.push(sample);
+            beat_ring.push(sample);
+            total += 1;
+            if let Some((raw_low, raw_mid)) = levels {
+                tracker.push(raw_mid, total, ring);
+                let rise = (raw_low - previous_low).max(0.0);
+                previous_low = raw_low;
+                if total <= expected as usize / 2 {
+                    beat_tracker.push(rise, total, beat_ring);
+                }
+            }
+        });
+        true
+    })?;
+    let ring = ring.unwrap_or_else(|| SampleRing::new(0));
+    let tracker = tracker.unwrap_or_else(|| WindowTracker::new(1, 1, 1));
+    let beat_tracker = beat_tracker.unwrap_or_else(|| WindowTracker::new(1, 1, 1));
+    let (window, window_start) = if tracker.samples.is_empty() {
+        (ring.copy(), 0)
+    } else {
+        (tracker.samples, tracker.start)
+    };
+    let bpm_window = (!beat_tracker.samples.is_empty()).then_some(beat_tracker.samples);
+    let waveform = waveform.map(WaveformAccumulator::finish);
+    let beat_pieces = waveform
+        .as_ref()
+        .map(|w| beat_pieces(&w.low_energy, total, sample_rate))
+        .unwrap_or([0..0, 0..0]);
+    Ok(DecodedForDetection {
+        audio: DetectionAudio {
+            sample_rate,
+            window,
+            window_start,
+            bpm_window,
+            envelope: onsets.finish(),
+            beat_pieces,
+        },
+        duration_ms: Some(duration_ms),
+        waveform,
     })
 }
 
@@ -2157,6 +2351,18 @@ impl WaveformAccumulator {
     }
 
     pub(crate) fn push(&mut self, samples: &[f32]) {
+        self.push_with(samples, |_, _| {});
+    }
+
+    /// As [`Self::push`], notifying callers while each sample is still at the
+    /// end of the waveform and when a waveform bin closes. This lets analysis
+    /// keep a short rolling audio window in step with the raw band levels,
+    /// rather than decoding the file again after the waveform is complete.
+    fn push_with(
+        &mut self,
+        samples: &[f32],
+        mut on_sample: impl FnMut(f32, Option<(f32, f32)>),
+    ) {
         for &v in samples {
             if self.pos >= self.total || self.levels.peak.len() >= self.bins {
                 return;
@@ -2183,18 +2389,25 @@ impl WaveformAccumulator {
             self.len += 1;
             self.pos += 1;
             if self.pos >= self.bin_end {
-                self.close_bin();
+                on_sample(v, Some(self.close_bin()));
+            } else {
+                on_sample(v, None);
             }
         }
     }
 
-    fn close_bin(&mut self) {
+    /// Closes a bin and returns its unscaled low- and mid-band RMS. The displayed
+    /// waveform scales these values later, after its whole-track percentile
+    /// is known; analysis deliberately scores the raw values as it streams.
+    fn close_bin(&mut self) -> (f32, f32) {
         let len = self.len.max(1) as f32;
         let levels = &mut self.levels;
         levels.peak.push(self.peak);
         levels.max_peak = levels.max_peak.max(self.peak);
-        levels.low.push((self.sum_low / len).sqrt());
-        levels.mid.push((self.sum_mid / len).sqrt());
+        let low = (self.sum_low / len).sqrt();
+        levels.low.push(low);
+        let mid = (self.sum_mid / len).sqrt();
+        levels.mid.push(mid);
         levels.high.push((self.sum_high / len).sqrt());
         levels.zcr.push(if self.len > 1 {
             self.crossings as f32 / (self.len - 1) as f32
@@ -2207,6 +2420,7 @@ impl WaveformAccumulator {
         self.crossings = 0;
         self.prev = None;
         self.bin_end = Self::end_of(levels.peak.len(), self.bins, self.total);
+        (low, mid)
     }
 
     pub(crate) fn finish(mut self) -> WaveformData {
@@ -2569,40 +2783,23 @@ mod tests {
             let start = (0.2 * f64::from(sample_rate) + f64::from(beat) * period_samples) as usize;
             samples[start..start + 100].fill(1.0);
         }
-        let (first, placed) = first_beat_for_saved_bpm(
-            &samples,
-            sample_rate,
-            Some(120.0),
-            Some(100),
-            Some(300),
-            None,
-        );
+        use crate::service::bpm_key::DetectionAudio;
+        let audio = DetectionAudio::from_samples(&samples, sample_rate, &[], &[]);
+        let silence = DetectionAudio::from_samples(&[0.0; 512], sample_rate, &[], &[]);
+        let (first, placed) =
+            first_beat_for_saved_bpm(&audio, Some(120.0), Some(100), Some(300), None);
         assert!(first.is_some_and(|ms| ms.abs_diff(200) <= 10), "{first:?}");
         assert!(placed);
         assert_eq!(
-            first_beat_for_saved_bpm(
-                &samples,
-                sample_rate,
-                Some(120.0),
-                Some(100),
-                Some(300),
-                Some(250)
-            ),
+            first_beat_for_saved_bpm(&audio, Some(120.0), Some(100), Some(300), Some(250)),
             (Some(250), false)
         );
         assert_eq!(
-            first_beat_for_saved_bpm(&samples, sample_rate, None, Some(100), Some(300), None),
+            first_beat_for_saved_bpm(&audio, None, Some(100), Some(300), None),
             (Some(100), true)
         );
         assert_eq!(
-            first_beat_for_saved_bpm(
-                &[0.0; 512],
-                sample_rate,
-                Some(120.0),
-                Some(100),
-                Some(300),
-                None
-            ),
+            first_beat_for_saved_bpm(&silence, Some(120.0), Some(100), Some(300), None),
             (Some(300), false)
         );
     }
@@ -3529,6 +3726,55 @@ mod tests {
         out.extend_from_slice(&(data.len() as u32).to_le_bytes());
         out.extend_from_slice(&data);
         std::fs::write(path, out).expect("write wav");
+    }
+
+    /// Keeps the strongest late window from the single decode, and nothing
+    /// more when it finishes. The onset envelope still covers all of it.
+    #[test]
+    fn decode_for_detection_keeps_only_the_key_window() {
+        use crate::service::analysis::decode_for_detection;
+        use crate::service::bpm_key::{KEY_WINDOW_SECS, onset_envelope};
+        let dir = tempdir().expect("tempdir");
+        let rate = 8_000u32;
+        let secs = |s: usize| s * rate as usize;
+        // 6 minutes: quiet hiss, then a loud 600 Hz tone from 3:30 to 6:00.
+        let mut seed = 7u32;
+        let samples: Vec<f32> = (0..secs(360))
+            .map(|i| {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let hiss = ((seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5) * 0.02;
+                let tone = if i >= secs(210) {
+                    (i as f32 / rate as f32 * 600.0 * std::f32::consts::TAU).sin() * 0.8
+                } else {
+                    0.0
+                };
+                hiss + tone
+            })
+            .collect();
+        let path = dir.path().join("late.wav");
+        write_mono_wav(&path, rate, &samples);
+        let (whole, _) = decode_audio_mono_samples(&path, secs(400)).expect("decode");
+
+        let decoded =
+            decode_for_detection(&path, waveform_detail_bins_for_duration).expect("decode");
+        let audio = &decoded.audio;
+        assert_eq!(audio.window.len(), secs(KEY_WINDOW_SECS));
+        assert!(audio.window_start >= secs(175), "{}", audio.window_start);
+        assert_eq!(
+            audio.window,
+            whole[audio.window_start..audio.window_start + audio.window.len()]
+        );
+        assert_eq!(audio.envelope, onset_envelope(&whole));
+
+        // A window at the start comes from the first pass alone.
+        let early: Vec<f32> = samples.iter().rev().copied().collect();
+        let path = dir.path().join("early.wav");
+        write_mono_wav(&path, rate, &early);
+        let (whole, _) = decode_audio_mono_samples(&path, secs(400)).expect("decode");
+        let decoded =
+            decode_for_detection(&path, waveform_detail_bins_for_duration).expect("decode");
+        assert_eq!(decoded.audio.window_start, 0);
+        assert_eq!(decoded.audio.window, whole[..secs(KEY_WINDOW_SECS)]);
     }
 
     // A track longer than the decode cap: silent for 3 s, then loud. Its

@@ -39,28 +39,41 @@ analysis keeps (step 1).
    per stretch of the track: its peak, the RMS of each band and how often the
    signal crosses zero. The bin count follows the length,
    `max(2400, ceil(seconds × 150) + 4)`, so each bin covers the same time on
-   any track, and the whole track is drawn however long it is. A file with no
-   known length gets no waveform rather than one stretched to a made-up
-   length. These bins become rekordbox's waveform chunks (`PWAV`, `PWV2`–
+   any track, and the whole track is drawn however long it is. The same pass
+   builds the track's onset envelope (`OnsetAccumulator`: the rise in energy
+   per 512 samples). It keeps a rolling three minutes of samples and copies
+   the strongest three-minute harmonic window aside as the waveform bins
+   complete. At the same time it keeps a two-minute early beat window, scored
+   from sharp raw low-band rises. The rolling copies are then discarded. A
+   file with no known length gets no waveform
+   rather than one stretched to a made-up length; for it, the first 24M
+   samples (about 9 minutes at 44.1 kHz, `BPM_KEY_MAX_SAMPLES`) are kept and
+   everything below is picked within them. These bins become rekordbox's waveform chunks (`PWAV`, `PWV2`–
    `PWV7`) and the track table's small waveform; see `docs/WAVEFORMS.md`.
 4. **The first pieces reach the screen.** As soon as the decode is done the
    row gets its cover (the file's embedded art, else a cover image in its
    folder or the one above, saved as a thumbnail), its waveform and its length, before the slow part.
-5. **BPM and key.** Only the first 24M samples (about 9 minutes at 44.1 kHz,
-   `BPM_KEY_MAX_SAMPLES`) are kept for detection, to bound memory. The
-   selected engine detects from them (`detect_bpm_key`): `stratum` in Rust,
+5. **BPM and key.** Detection retains the best three-minute harmonic window
+   and a two-minute early beat window (`DetectionAudio`). As waveform bins
+   complete, their unscaled mid-band energy scores the harmonic window, and
+   sharp raw low-band rises score the beat window, so a late harmonic section
+   never needs a second decode. The beat pieces are picked from the finished waveform:
+   the 2 minutes with the sharpest
+   low-band rises (kicks) in the first half and the same after them, at most
+   15 minutes on (`beat_pieces`). The
+   selected engine detects from the window (`detect_bpm_key`): `stratum` in Rust,
    or `essentia` in its own runner, which fails the track rather than falling
    back to stratum. Each engine detects only what it's chosen for and what's
    wanted (`detect_bpm_key`); with both chosen the same, it runs once. stratum
-   detects the BPM from all the kept samples, then refines it and places its
-   first beat again, as "Stratum BPM and first beat" below describes, within
-   the BPM range set in Settings, and the key from part of them, as "Stratum
-   key" describes. essentia detects from all the kept samples: the BPM with
-   `PercivalBpmEstimator` and its first beat with `RhythmExtractor2013`, not
-   refined, and the key with `KeyExtractor` (`desktop/scripts/essentia_runner.cjs`,
-   asked with `detectBpm` / `detectKey`).
+   compares BPM estimates from both windows, then refines the selected one on the beat pieces and
+   places its first beat, as "Stratum BPM and first beat" below describes,
+   within the BPM range set in Settings, and detects the key from the window,
+   as "Stratum key" describes. essentia detects from the window too: the BPM
+   with `PercivalBpmEstimator`, not refined, and the key with `KeyExtractor`
+   (`desktop/scripts/essentia_runner.cjs`, asked with `detectBpm` /
+   `detectKey`); its first beat is placed the same way as stratum's.
 6. **First beat.** A kept first beat stays. With a kept BPM, the first beat is
-   placed from the audio at that BPM (`first_beat_secs`); otherwise the
+   placed from the audio at that BPM (`place_first_beat`); otherwise the
    engine's first beat is used. When the audio gives none (silence), the old
    one stays.
 7. **Analysis files.** `write_track_bundle`, the one writer of a new analysis
@@ -100,9 +113,11 @@ coordinator schedules tracks, and the memory and worker limits, are under
 
 stratum searches whole-BPM steps and is typically off by up to ±2 BPM, so its
 raw estimate isn't stored as is. `refine_bpm` (`service/bpm_key.rs`) scores
-tempos by how consistently the onset envelope stays in phase with their beat
-over the whole track; a tempo even 0.1 BPM off drifts a beat over ten
-minutes, so the right one stands out. Each tempo is scored on the beat and
+tempos by how consistently the onset envelope stays in phase with one beat
+grid laid through both beat pieces, each at its place in the track. A tempo
+0.01 BPM off moves the grid only 0.03 beats over three minutes, but the
+further apart the pieces lie, the further it moves between them, so two
+pieces tell tempos apart as well as all the audio between them would. Each tempo is scored on the beat and
 on its 2× and 4× subdivisions, which keeps the score sharp when a backbeat
 falls half a beat off (drum & bass analyzed at 87 instead of 174).
 
@@ -123,19 +138,26 @@ falls half a beat off (drum & bass analyzed at 87 instead of 174).
    way, and failing that the estimate is rounded to a whole BPM.
 3. **First beat.** stratum's beats follow its own estimate and are often well
    off a beat, so the first beat is placed from the onsets of the track's
-   first minute at the final BPM (`first_beat_secs`): the phase on the beat
-   picks which beat it is, and the phases on the 2× and 4× subdivisions
-   place it more precisely. stratum's first beat is used only when that
-   isn't possible (silence).
+   first minute at the final BPM (`place_first_beat`, `first_beat_secs`):
+   the phase on the beat picks which beat it is, and the phases on the 2×
+   and 4× subdivisions place it more precisely. When the first minute has no
+   clear beat at that tempo (an intro of noise or pads), the early beat
+   piece is used instead: its phase carries back along the grid to the
+   track's start. stratum's first beat is used only when neither works
+   (silence).
 
 ### Stratum key
 
-The key is detected from the 3 minutes of the kept samples whose waveform
-bins hold the most mid-band energy (`key_window`, `KEY_WINDOW_SECS`), where
+The key is detected from the strongest rolling 3 minutes of the track, scored
+as its waveform bins complete by their unscaled mid-band energy
+(`KEY_WINDOW_SECS`), where
 the harmony sits, rather than from intros, breakdowns or drum-only parts; a
-shorter track is used whole. stratum's spectrogram time smoothing and
-harmonic mask are off for it (`stratum_key_config`): they took most of its key
-time without making the key more often right. The vendored stratum's
+shorter track is used whole. Its key settings (`stratum_key_config`) were
+chosen with the opt-in `key_sweep` test on two sets of annotated keys:
+Temperley's key profiles, multi-scale voting, a bass-band blend, tuning
+compensation and a peak-based pitch profile. stratum's spectrogram time
+smoothing and harmonic mask are off: they took most of its key time without
+making the key more often right. The vendored stratum's
 `analyze_key` skips its onset, tempo and beat-tracking steps, and
 `analyze_bpm` its key step (`backend/vendor/stratum-dsp/VENDORED.md`).
 

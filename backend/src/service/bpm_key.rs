@@ -75,27 +75,154 @@ fn empty_bpm_key_result() -> BpmKeyResult {
     }
 }
 
-/// What to detect, and from what. stratum detects the BPM from all of
-/// `samples`, the key from the `KEY_WINDOW_SECS` of them whose waveform bins
-/// (`mid_energy`, spread evenly over `samples`) hold the most mid-band
-/// energy.
+/// What to detect.
 #[derive(Debug, Clone, Copy)]
-pub struct DetectRequest<'a> {
+pub struct DetectRequest {
     pub bpm_min: u32,
     pub bpm_max: u32,
     pub detect_bpm: bool,
     pub detect_key: bool,
-    pub mid_energy: &'a [u8],
+}
+
+/// What detection gets from a track's decode: a harmonic window and, when
+/// available, a beat-rich early window. Each is short however long the track.
+///
+/// - `window`: the `KEY_WINDOW_SECS` whose waveform bins hold the most
+///   mid-band energy (`key_window`), where the harmony sits. The key and one
+///   BPM estimate come from it.
+/// - `bpm_window`: the beat-rich early `BEAT_PIECE_SECS`, selected by rises
+///   in raw low-band energy while decoding. It supplies a second BPM estimate.
+/// - `envelope`: the whole track's onset envelope (`onset_envelope`), one
+///   value per `ONSET_HOP` samples, a few hundred kilobytes for an hour.
+///   `refine_bpm` pins the estimate on its two `beat_pieces`, and the first
+///   beat is placed on its start (`place_first_beat`).
+pub struct DetectionAudio {
+    pub sample_rate: u32,
+    pub window: Vec<f32>,
+    /// Where `window` starts in the track, in samples.
+    pub window_start: usize,
+    pub bpm_window: Option<Vec<f32>>,
+    pub envelope: Vec<f32>,
+    pub beat_pieces: [Range<usize>; 2],
+}
+
+impl DetectionAudio {
+    /// From all of a track's `samples` and its waveform bands, which spread
+    /// evenly over them.
+    #[cfg(test)]
+    pub fn from_samples(
+        samples: &[f32],
+        sample_rate: u32,
+        mid_energy: &[u8],
+        low_energy: &[u8],
+    ) -> Self {
+        let window = key_window(
+            mid_energy,
+            samples.len(),
+            KEY_WINDOW_SECS * sample_rate as usize,
+        );
+        Self {
+            sample_rate,
+            window_start: window.start,
+            window: samples[window].to_vec(),
+            bpm_window: None,
+            envelope: onset_envelope(samples),
+            beat_pieces: beat_pieces(low_energy, samples.len(), sample_rate),
+        }
+    }
+
+    fn onsets(&self, ranges: &[Range<usize>]) -> Onsets {
+        Onsets::from_envelope(&self.envelope, self.sample_rate, ranges)
+    }
+
+    /// The track's first `secs` seconds.
+    fn start(&self, secs: usize) -> Onsets {
+        let start = 0..secs * self.sample_rate as usize;
+        self.onsets(std::slice::from_ref(&start))
+    }
+
+    /// Refine an estimate and return the beat-grid coherence that supports it.
+    fn refine_bpm_with_coherence(&self, raw: f32, bpm_min: u32, bpm_max: u32) -> (f64, f64) {
+        let onsets = self.onsets(&self.beat_pieces);
+        let bpm = refine_bpm_onsets(
+            &onsets,
+            &self.start(BROAD_WINDOW_SECS),
+            raw,
+            bpm_min,
+            bpm_max,
+        );
+        (bpm, subdivided_coherence(&onsets, bpm))
+    }
+
+    /// The first beat at `bpm` (`first_beat_secs`), placed on the track's
+    /// first `FIRST_BEAT_WINDOW_SECS`; on its early beat piece when the start
+    /// has no clear beat at that tempo (an intro of noise or pads). `None`
+    /// for silence.
+    pub fn place_first_beat(&self, bpm: f64) -> Option<f64> {
+        let start = self.start(FIRST_BEAT_WINDOW_SECS);
+        if has_clear_beat(&start, bpm) {
+            return first_beat_secs_onsets(&start, bpm);
+        }
+        let early = self.onsets(&self.beat_pieces[..1]);
+        first_beat_secs_onsets(&early, bpm).or_else(|| first_beat_secs_onsets(&start, bpm))
+    }
+}
+
+/// Length of each `beat_pieces` stretch.
+pub(super) const BEAT_PIECE_SECS: usize = 120;
+/// How far apart the beat pieces' starts may lie: the beat count between
+/// them must stay unambiguous for stratum's estimate, and a long mix's tempo
+/// may wander.
+const BEAT_SPAN_MAX_SECS: usize = 15 * 60;
+
+/// The two stretches `refine_bpm` pins the tempo on, in samples of a track
+/// `total` long: the most beat-like `BEAT_PIECE_SECS` in its first half, and
+/// the most beat-like after that, starting at most `BEAT_SPAN_MAX_SECS` from
+/// the first. A tempo 0.01 BPM off moves a grid only 0.03 beats in three
+/// minutes, but the further apart the two lie, the further it moves between
+/// them, so they tell 0.01 BPM apart as well as all the audio between them.
+/// `low_energy` is the waveform's low band, its bins spread evenly over the
+/// track (`beat_strength`).
+pub fn beat_pieces(low_energy: &[u8], total: usize, sample_rate: u32) -> [Range<usize>; 2] {
+    let piece = BEAT_PIECE_SECS * sample_rate as usize;
+    let strength = beat_strength(low_energy);
+    let early = best_window(&strength, total, 0..total.div_ceil(2), piece);
+    let late_end = total.min(early.start + BEAT_SPAN_MAX_SECS * sample_rate as usize);
+    let late = best_window(&strength, total, early.end.min(late_end)..late_end, piece);
+    [early, late]
+}
+
+/// How beat-like each waveform bin is: the rise of its low-band energy over
+/// the bin before. A kick rises sharply every beat; a held bassline or pad
+/// is loud but barely rises.
+fn beat_strength(low_energy: &[u8]) -> Vec<u8> {
+    std::iter::once(0)
+        .chain(low_energy.windows(2).map(|p| p[1].saturating_sub(p[0])))
+        .collect()
+}
+
+/// The `window` samples within `within` (of `total`, which `score`'s bins
+/// spread evenly over) whose bins score highest, as `key_window` picks.
+fn best_window(score: &[u8], total: usize, within: Range<usize>, window: usize) -> Range<usize> {
+    let bins = score.len();
+    if bins == 0 || total == 0 {
+        return within.start..(within.start + window).min(within.end);
+    }
+    let first = (within.start as u128 * bins as u128 / total as u128) as usize;
+    let last = ((within.end as u128 * bins as u128).div_ceil(total as u128) as usize).min(bins);
+    let picked = key_window(&score[first..last.max(first)], within.len(), window);
+    within.start + picked.start..(within.start + picked.end).min(within.end)
 }
 
 /// Run BPM/key detection using the stratum-dsp engine; what isn't asked for
-/// is left out (`None`) and costs nothing.
+/// is left out (`None`) and costs nothing. BPM compares estimates from the
+/// harmonic and beat-rich windows, pinning either on the same beat pieces.
 pub fn detect_bpm_key_stratum(
-    samples: &[f32],
-    sample_rate: u32,
+    audio: &DetectionAudio,
     request: &DetectRequest,
 ) -> BackendResult<BpmKeyResult> {
-    if samples.is_empty() || sample_rate == 0 {
+    let sample_rate = audio.sample_rate;
+    if audio.window.is_empty() || sample_rate == 0 {
         return Ok(empty_bpm_key_result());
     }
     let failed = |e: stratum_dsp::AnalysisError| {
@@ -105,16 +232,44 @@ pub fn detect_bpm_key_stratum(
 
     let (bpm, first_beat_ms) = if request.detect_bpm {
         let result =
-            stratum_dsp::analyze_bpm(samples, sample_rate, stratum_config(bpm_min, bpm_max))
+            stratum_dsp::analyze_bpm(&audio.window, sample_rate, stratum_config(bpm_min, bpm_max))
                 .map_err(failed)?;
-        let bpm = (result.bpm > 0.0)
-            .then(|| refine_bpm(samples, sample_rate, result.bpm, bpm_min, bpm_max));
+        let harmonic = (result.bpm > 0.0)
+            .then(|| audio.refine_bpm_with_coherence(result.bpm, bpm_min, bpm_max));
+        let beat = audio
+            .bpm_window
+            .as_deref()
+            .filter(|window| !window.is_empty())
+            .map(|window| {
+                stratum_dsp::analyze_bpm(window, sample_rate, stratum_config(bpm_min, bpm_max))
+                    .map_err(failed)
+                    .map(|result| (result.bpm, result.bpm > 0.0))
+            })
+            .transpose()?
+            .and_then(|(raw, valid)| valid.then(|| audio.refine_bpm_with_coherence(raw, bpm_min, bpm_max)));
+        // A second estimate may disagree because it saw drums rather than
+        // harmony. Let it replace the harmonic estimate only with a clear
+        // beat-grid advantage; equal evidence keeps the established path.
+        let bpm = match (harmonic, beat) {
+            (Some((_harmonic, harmonic_score)), Some((beat, beat_score)))
+                if beat_score >= harmonic_score * 1.2 => Some(beat),
+            (Some((harmonic, _)), _) => Some(harmonic),
+            (None, Some((beat, _))) => Some(beat),
+            (None, None) => None,
+        };
         // stratum places its beats at its own estimate, which `refine_bpm` may
         // have moved by up to 2 BPM or to a 3:2 / 4:3 relative; its first beat
         // is also often well off a beat.
+        let window_start_secs = audio.window_start as f64 / f64::from(sample_rate);
         let first_beat_ms = bpm
-            .and_then(|bpm| first_beat_secs(samples, sample_rate, bpm))
-            .or_else(|| result.beat_grid.beats.first().map(|&t| f64::from(t)))
+            .and_then(|bpm| audio.place_first_beat(bpm))
+            .or_else(|| {
+                result
+                    .beat_grid
+                    .beats
+                    .first()
+                    .map(|&t| f64::from(t) + window_start_secs)
+            })
             .map(|t| (t * 1000.0).round() as u32);
         (bpm, first_beat_ms)
     } else {
@@ -122,13 +277,8 @@ pub fn detect_bpm_key_stratum(
     };
 
     let key = if request.detect_key {
-        let window = key_window(
-            request.mid_energy,
-            samples.len(),
-            KEY_WINDOW_SECS * sample_rate as usize,
-        );
         let result = stratum_dsp::analyze_key(
-            &samples[window],
+            &audio.window,
             sample_rate,
             stratum_key_config(bpm_min, bpm_max),
         )
@@ -156,13 +306,28 @@ pub(super) fn stratum_config(bpm_min: u32, bpm_max: u32) -> stratum_dsp::Analysi
 /// How much of the track the key is detected from.
 pub(super) const KEY_WINDOW_SECS: usize = 180;
 
-/// stratum's key settings: without the spectrogram time smoothing and the
-/// harmonic mask. They take about two thirds of its key time, and on
-/// annotated keys the key came out as often right without them.
+/// stratum's key settings, chosen by `key_sweep` (key_reference_eval.rs) on
+/// the two GiantSteps key sets, picked on one and confirmed on the other:
+/// Temperley's key profiles, the key voted over stretches of 60, 120 and
+/// 360 spectrogram frames (multi-scale), the bass band blended into the pitch profile,
+/// tuning compensation, and the profile built from the 12 strongest spectral
+/// peaks per frame, by magnitude, weighting every frame alike. Each helped
+/// on both sets, and together they find the exact key on over half again as
+/// many tracks as stratum's defaults, at the same speed. Without the
+/// spectrogram time smoothing and the harmonic mask: they take about two
+/// thirds of the key time and added nothing on these sets.
 pub(super) fn stratum_key_config(bpm_min: u32, bpm_max: u32) -> stratum_dsp::AnalysisConfig {
     stratum_dsp::AnalysisConfig {
         enable_key_spectrogram_time_smoothing: false,
         enable_key_harmonic_mask: false,
+        key_template_set: stratum_dsp::features::key::templates::TemplateSet::Temperley,
+        enable_key_multi_scale: true,
+        key_multi_scale_lengths: vec![60, 120, 360],
+        enable_key_hpcp_bass_blend: true,
+        enable_key_tuning_compensation: true,
+        key_hpcp_mag_power: 1.0,
+        key_hpcp_peaks_per_frame: 12,
+        key_energy_power: 0.0,
         ..stratum_config(bpm_min, bpm_max)
     }
 }
@@ -249,6 +414,7 @@ pub(super) const TEMPO_FAMILY: [(f64, f64); 6] = [
 /// stratum's octave is kept as is, but a tempo related to it by 3:2, 4:3 or
 /// 5:4 replaces it when that one clearly fits the track better
 /// (`TEMPO_FAMILY`).
+#[cfg(test)]
 pub(super) fn refine_bpm(
     samples: &[f32],
     sample_rate: u32,
@@ -256,24 +422,108 @@ pub(super) fn refine_bpm(
     bpm_min: u32,
     bpm_max: u32,
 ) -> f64 {
-    let local_peak = find_tempo_peak(samples, sample_rate, raw, bpm_min, bpm_max);
+    refine_bpm_onsets(
+        &Onsets::of(samples, sample_rate),
+        &Onsets::of(broad_window(samples, sample_rate), sample_rate),
+        raw,
+        bpm_min,
+        bpm_max,
+    )
+}
+
+/// `refine_bpm` over `onsets`; `start` is the onset envelope of the track's
+/// first `BROAD_WINDOW_SECS`, for the broad search.
+pub(super) fn refine_bpm_onsets(
+    onsets: &Onsets,
+    start: &Onsets,
+    raw: f32,
+    bpm_min: u32,
+    bpm_max: u32,
+) -> f64 {
+    let local_peak = find_tempo_peak_onsets(onsets, raw, bpm_min, bpm_max);
     if local_peak.is_none()
-        && let Some(candidate) = broad_tempo_candidate(samples, sample_rate, raw, bpm_min, bpm_max)
+        && let Some(candidate) = broad_tempo_candidate_onsets(start, raw, bpm_min, bpm_max)
     {
-        return refine_near_estimate(samples, sample_rate, candidate, bpm_min, bpm_max);
+        return refine_near_estimate_onsets(onsets, candidate, bpm_min, bpm_max);
     }
-    let estimate = match tempo_family_alternative(samples, sample_rate, raw, bpm_min, bpm_max) {
+    let estimate = match tempo_family_alternative_onsets(onsets, raw, bpm_min, bpm_max) {
         Some((alternative, margin)) if margin >= 1.0 => alternative,
         _ => raw,
     };
     if estimate == raw {
         bpm_from_peak(local_peak, raw)
     } else {
-        refine_near_estimate(samples, sample_rate, estimate, bpm_min, bpm_max)
+        refine_near_estimate_onsets(onsets, estimate, bpm_min, bpm_max)
     }
 }
 
+/// The onset envelope (`onset_envelope`) of some stretches of a track, each
+/// with the frame it starts at, so a beat grid laid at one tempo lines up
+/// across the gaps between them. The tempo is only as precise as the stretches
+/// are far apart: an error of 0.01 BPM moves the grid 0.03 beats in three
+/// minutes, 0.1 in ten.
+pub(super) struct Onsets {
+    frame_secs: f64,
+    /// First frame (`ONSET_HOP` samples each) and the envelope from there.
+    parts: Vec<(usize, Vec<f32>)>,
+}
+
+impl Onsets {
+    /// All of `samples`, from the track's start.
+    #[cfg(test)]
+    pub(super) fn of(samples: &[f32], sample_rate: u32) -> Self {
+        Self {
+            frame_secs: ONSET_HOP as f64 / f64::from(sample_rate),
+            parts: vec![(0, onset_envelope(samples))],
+        }
+    }
+
+    /// The `ranges` (sample positions in the track) of a whole track's onset
+    /// `envelope`, from their first whole frame; overlapping ones are merged.
+    /// Each starts at 0, as `onset_envelope` of that stretch alone would.
+    pub(super) fn from_envelope(
+        envelope: &[f32],
+        sample_rate: u32,
+        ranges: &[Range<usize>],
+    ) -> Self {
+        let mut frames = ranges
+            .iter()
+            .map(|r| r.start / ONSET_HOP..r.end.div_ceil(ONSET_HOP).min(envelope.len()))
+            .filter(|r| r.start < r.end)
+            .collect::<Vec<_>>();
+        frames.sort_by_key(|r| r.start);
+        let mut merged: Vec<Range<usize>> = Vec::new();
+        for r in frames {
+            match merged.last_mut() {
+                Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
+                _ => merged.push(r),
+            }
+        }
+        Self {
+            frame_secs: ONSET_HOP as f64 / f64::from(sample_rate),
+            parts: merged
+                .into_iter()
+                .map(|r| {
+                    let mut part = envelope[r.clone()].to_vec();
+                    part[0] = 0.0;
+                    (r.start, part)
+                })
+                .collect(),
+        }
+    }
+}
+
+/// How much of the track's start the broad search looks at.
+pub(super) const BROAD_WINDOW_SECS: usize = 120;
+
+/// The first `BROAD_WINDOW_SECS` of `samples`.
+#[cfg(test)]
+pub(super) fn broad_window(samples: &[f32], sample_rate: u32) -> &[f32] {
+    &samples[..samples.len().min(sample_rate as usize * BROAD_WINDOW_SECS)]
+}
+
 /// `refine_bpm` without the tempo family check.
+#[cfg(test)]
 pub(super) fn refine_near_estimate(
     samples: &[f32],
     sample_rate: u32,
@@ -281,10 +531,11 @@ pub(super) fn refine_near_estimate(
     bpm_min: u32,
     bpm_max: u32,
 ) -> f64 {
-    bpm_from_peak(
-        find_tempo_peak(samples, sample_rate, raw, bpm_min, bpm_max),
-        raw,
-    )
+    refine_near_estimate_onsets(&Onsets::of(samples, sample_rate), raw, bpm_min, bpm_max)
+}
+
+fn refine_near_estimate_onsets(onsets: &Onsets, raw: f32, bpm_min: u32, bpm_max: u32) -> f64 {
+    bpm_from_peak(find_tempo_peak_onsets(onsets, raw, bpm_min, bpm_max), raw)
 }
 
 fn bpm_from_peak(peak: Option<TempoPeak>, raw: f32) -> f64 {
@@ -299,6 +550,7 @@ fn bpm_from_peak(peak: Option<TempoPeak>, raw: f32) -> f64 {
 /// estimate has no clear peak. A short window lets us search more broadly at
 /// 0.05 BPM resolution without slowing every successful local search. The
 /// full track is still used by `refine_near_estimate` for the final BPM.
+#[cfg(test)]
 pub(super) fn broad_tempo_candidate(
     samples: &[f32],
     sample_rate: u32,
@@ -306,14 +558,26 @@ pub(super) fn broad_tempo_candidate(
     bpm_min: u32,
     bpm_max: u32,
 ) -> Option<f32> {
-    const WINDOW_SECS: usize = 120;
+    broad_tempo_candidate_onsets(
+        &Onsets::of(broad_window(samples, sample_rate), sample_rate),
+        raw,
+        bpm_min,
+        bpm_max,
+    )
+}
+
+/// `broad_tempo_candidate` over `start`, the onsets of the track's first
+/// `BROAD_WINDOW_SECS`.
+fn broad_tempo_candidate_onsets(
+    start: &Onsets,
+    raw: f32,
+    bpm_min: u32,
+    bpm_max: u32,
+) -> Option<f32> {
     const STEP: f64 = 0.05;
     const MIN_SCORE: f64 = 0.1;
     const MIN_LEAD: f64 = 1.25;
 
-    let window = &samples[..samples.len().min(sample_rate as usize * WINDOW_SECS)];
-    let envelope = onset_envelope(window);
-    let frame_secs = ONSET_HOP as f64 / f64::from(sample_rate);
     let (min, max) = (f64::from(bpm_min), f64::from(bpm_max));
     let raw = f64::from(raw);
     let candidates = [
@@ -332,7 +596,7 @@ pub(super) fn broad_tempo_candidate(
         (-steps..=steps)
             .map(|step| centre + f64::from(step) * STEP)
             .filter(|&bpm| bpm >= min && bpm <= max)
-            .map(|bpm| (bpm, subdivided_coherence(&envelope, frame_secs, bpm)))
+            .map(|bpm| (bpm, subdivided_coherence(start, bpm)))
             .max_by(|a, b| a.1.total_cmp(&b.1))
     })
     .collect::<Vec<_>>();
@@ -356,6 +620,7 @@ pub(super) fn broad_tempo_candidate(
 /// best whole or half BPM within the search radius, which is enough to
 /// tell tempo families apart. The winning BPM is passed to the fine search
 /// so it stays within that search's radius.
+#[cfg(test)]
 pub(super) fn tempo_family_alternative(
     samples: &[f32],
     sample_rate: u32,
@@ -363,7 +628,16 @@ pub(super) fn tempo_family_alternative(
     bpm_min: u32,
     bpm_max: u32,
 ) -> Option<(f32, f64)> {
-    tempo_family_leads(samples, sample_rate, raw, bpm_min, bpm_max)?
+    tempo_family_alternative_onsets(&Onsets::of(samples, sample_rate), raw, bpm_min, bpm_max)
+}
+
+fn tempo_family_alternative_onsets(
+    onsets: &Onsets,
+    raw: f32,
+    bpm_min: u32,
+    bpm_max: u32,
+) -> Option<(f32, f64)> {
+    tempo_family_leads_onsets(onsets, raw, bpm_min, bpm_max)?
         .into_iter()
         .zip(TEMPO_FAMILY)
         .filter_map(|(l, (_, required))| l.map(|l| (l.bpm, l.lead / required)))
@@ -382,6 +656,7 @@ pub(super) struct FamilyLead {
 /// order, compared with the estimate at their best whole or half BPM; a
 /// relative outside the analysis range is `None`. `None` altogether when
 /// the estimate has no coherence at all.
+#[cfg(test)]
 pub(super) fn tempo_family_leads(
     samples: &[f32],
     sample_rate: u32,
@@ -389,8 +664,15 @@ pub(super) fn tempo_family_leads(
     bpm_min: u32,
     bpm_max: u32,
 ) -> Option<Vec<Option<FamilyLead>>> {
-    let envelope = onset_envelope(samples);
-    let frame_secs = ONSET_HOP as f64 / f64::from(sample_rate);
+    tempo_family_leads_onsets(&Onsets::of(samples, sample_rate), raw, bpm_min, bpm_max)
+}
+
+fn tempo_family_leads_onsets(
+    onsets: &Onsets,
+    raw: f32,
+    bpm_min: u32,
+    bpm_max: u32,
+) -> Option<Vec<Option<FamilyLead>>> {
     let (min, max) = (f64::from(bpm_min), f64::from(bpm_max));
     let raw = f64::from(raw);
     let best_near = |centre: f64, radius: f64| {
@@ -398,7 +680,7 @@ pub(super) fn tempo_family_leads(
         (-steps..=steps)
             .map(|step| (centre * 2.0).round() / 2.0 + f64::from(step) * 0.5)
             .filter(|&bpm| bpm >= min && bpm <= max)
-            .map(|bpm| (bpm, subdivided_coherence(&envelope, frame_secs, bpm)))
+            .map(|bpm| (bpm, subdivided_coherence(onsets, bpm)))
             .max_by(|a, b| a.1.total_cmp(&b.1))
     };
     let own = best_near(raw, BPM_SEARCH_RADIUS)?.1;
@@ -430,6 +712,7 @@ pub(super) struct TempoPeak {
 }
 
 /// `None` when no tempo clearly wins, not even among whole and half BPMs.
+#[cfg(test)]
 pub(super) fn find_tempo_peak(
     samples: &[f32],
     sample_rate: u32,
@@ -437,9 +720,16 @@ pub(super) fn find_tempo_peak(
     bpm_min: u32,
     bpm_max: u32,
 ) -> Option<TempoPeak> {
-    let envelope = onset_envelope(samples);
-    let frame_secs = ONSET_HOP as f64 / f64::from(sample_rate);
-    let coherence = |bpm: f64| subdivided_coherence(&envelope, frame_secs, bpm);
+    find_tempo_peak_onsets(&Onsets::of(samples, sample_rate), raw, bpm_min, bpm_max)
+}
+
+fn find_tempo_peak_onsets(
+    onsets: &Onsets,
+    raw: f32,
+    bpm_min: u32,
+    bpm_max: u32,
+) -> Option<TempoPeak> {
+    let coherence = |bpm: f64| subdivided_coherence(onsets, bpm);
     let steps = (BPM_SEARCH_RADIUS / BPM_SEARCH_STEP).round() as i32;
     let scored = (-steps..=steps)
         .map(|step| f64::from(raw.round()) + f64::from(step) * BPM_SEARCH_STEP)
@@ -479,46 +769,94 @@ pub(super) fn find_tempo_peak(
     })
 }
 
+/// How well `onsets` keep in phase at `bpm` (`subdivided_coherence`); a
+/// beat is clear at `MIN_BEAT_COHERENCE` or more.
+pub(super) fn has_clear_beat(onsets: &Onsets, bpm: f64) -> bool {
+    subdivided_coherence(onsets, bpm) >= MIN_BEAT_COHERENCE
+}
+
 /// `beat_coherence` averaged over the beat and its `SUBDIVISIONS`.
-fn subdivided_coherence(envelope: &[f32], frame_secs: f64, bpm: f64) -> f64 {
+fn subdivided_coherence(onsets: &Onsets, bpm: f64) -> f64 {
     SUBDIVISIONS
         .iter()
-        .map(|m| beat_coherence(envelope, frame_secs, bpm * m))
+        .map(|m| beat_coherence(onsets, bpm * m))
         .sum::<f64>()
         / SUBDIVISIONS.len() as f64
 }
 
 /// Rise in signal energy per `ONSET_HOP` frame (negative changes dropped):
 /// peaks where notes and drums start.
-fn onset_envelope(samples: &[f32]) -> Vec<f32> {
+pub(super) fn onset_envelope(samples: &[f32]) -> Vec<f32> {
     let energy = samples
         .chunks(ONSET_HOP)
         .map(|frame| frame.iter().map(|x| x * x).sum::<f32>())
         .collect::<Vec<_>>();
+    envelope_of_energies(&energy)
+}
+
+fn envelope_of_energies(energy: &[f32]) -> Vec<f32> {
+    if energy.is_empty() {
+        return Vec::new();
+    }
     std::iter::once(0.0)
         .chain(energy.windows(2).map(|pair| (pair[1] - pair[0]).max(0.0)))
         .collect()
 }
 
+/// `onset_envelope` built as a track decodes, chunk by chunk, keeping
+/// nothing but one energy per `ONSET_HOP` samples.
+#[derive(Default)]
+pub struct OnsetAccumulator {
+    energies: Vec<f32>,
+    energy: f32,
+    filled: usize,
+}
+
+impl OnsetAccumulator {
+    pub fn push(&mut self, samples: &[f32]) {
+        for &x in samples {
+            self.energy += x * x;
+            self.filled += 1;
+            if self.filled == ONSET_HOP {
+                self.energies.push(self.energy);
+                (self.energy, self.filled) = (0.0, 0);
+            }
+        }
+    }
+
+    /// `onset_envelope` of everything pushed.
+    pub fn finish(mut self) -> Vec<f32> {
+        if self.filled > 0 {
+            self.energies.push(self.energy);
+        }
+        envelope_of_energies(&self.energies)
+    }
+}
+
 /// The part of the track the first beat is placed from: the grid has to fit
 /// where it starts, and a tempo that wanders a little moves the phase
 /// measured over the whole track away from the start.
-const FIRST_BEAT_WINDOW_SECS: usize = 60;
+pub(super) const FIRST_BEAT_WINDOW_SECS: usize = 60;
 
 /// Time of the first beat at `bpm`, within the first beat period: the phase
 /// the onsets share on the beat picks which beat it is, and the phase on the
 /// 2× and then 4× subdivisions, whose onsets are sharper and more frequent,
 /// then places it more precisely. `None` for a silent start.
+#[cfg(test)]
 pub(super) fn first_beat_secs(samples: &[f32], sample_rate: u32, bpm: f64) -> Option<f64> {
     let window = &samples[..samples
         .len()
         .min(sample_rate as usize * FIRST_BEAT_WINDOW_SECS)];
-    let envelope = onset_envelope(window);
-    let frame_secs = ONSET_HOP as f64 / f64::from(sample_rate);
+    first_beat_secs_onsets(&Onsets::of(window, sample_rate), bpm)
+}
+
+/// `first_beat_secs` over `start`, the onsets of the track's first
+/// `FIRST_BEAT_WINDOW_SECS`.
+pub(super) fn first_beat_secs_onsets(start: &Onsets, bpm: f64) -> Option<f64> {
     let period = 60.0 / bpm;
     let mut first = None::<f64>;
     for multiple in [1.0, 2.0, 4.0] {
-        let (re, im, total) = beat_phasor(&envelope, frame_secs, bpm * multiple);
+        let (re, im, total) = beat_phasor(start, bpm * multiple);
         if total <= 0.0 {
             return None;
         }
@@ -531,10 +869,10 @@ pub(super) fn first_beat_secs(samples: &[f32], sample_rate: u32, bpm: f64) -> Op
 }
 
 /// How consistently the onsets fall on the same beat phase at `bpm`, over
-/// the whole track: 1.0 when every onset lands on the grid, near 0 when the
+/// all of `onsets`: 1.0 when every onset lands on the grid, near 0 when the
 /// grid drifts through them.
-fn beat_coherence(envelope: &[f32], frame_secs: f64, bpm: f64) -> f64 {
-    let (re, im, total) = beat_phasor(envelope, frame_secs, bpm);
+fn beat_coherence(onsets: &Onsets, bpm: f64) -> f64 {
+    let (re, im, total) = beat_phasor(onsets, bpm);
     if total <= 0.0 {
         return 0.0;
     }
@@ -543,21 +881,31 @@ fn beat_coherence(envelope: &[f32], frame_secs: f64, bpm: f64) -> f64 {
 
 /// The onset envelope summed as vectors whose angle is each frame's beat
 /// phase at `bpm`, and the plain sum of its weights.
-fn beat_phasor(envelope: &[f32], frame_secs: f64, bpm: f64) -> (f64, f64, f64) {
+fn beat_phasor(onsets: &Onsets, bpm: f64) -> (f64, f64, f64) {
+    let step = std::f64::consts::TAU * onsets.frame_secs * bpm / 60.0;
     // The beat phase advances by a fixed angle per frame: rotate a unit
     // vector instead of evaluating sin/cos for every frame.
-    let (step_sin, step_cos) = (std::f64::consts::TAU * frame_secs * bpm / 60.0).sin_cos();
-    let (mut cos, mut sin) = (1.0f64, 0.0f64);
+    let (step_sin, step_cos) = step.sin_cos();
     let (mut re, mut im, mut total) = (0.0f64, 0.0f64, 0.0f64);
-    for &weight in envelope {
-        let weight = f64::from(weight);
-        re += weight * cos;
-        im += weight * sin;
-        total += weight;
-        (cos, sin) = (
-            cos * step_cos - sin * step_sin,
-            sin * step_cos + cos * step_sin,
-        );
+    for (first, envelope) in &onsets.parts {
+        // Each stretch starts at its own phase; the first at frame 0 at 0.
+        let (mut sin, mut cos) = if *first == 0 {
+            (0.0, 1.0)
+        } else {
+            (step * *first as f64)
+                .rem_euclid(std::f64::consts::TAU)
+                .sin_cos()
+        };
+        for &weight in envelope {
+            let weight = f64::from(weight);
+            re += weight * cos;
+            im += weight * sin;
+            total += weight;
+            (cos, sin) = (
+                cos * step_cos - sin * step_sin,
+                sin * step_cos + cos * step_sin,
+            );
+        }
     }
     (re, im, total)
 }
@@ -595,14 +943,16 @@ mod tests {
         );
     }
 
-    fn both(mid_energy: &[u8]) -> DetectRequest<'_> {
-        DetectRequest {
-            bpm_min: 70,
-            bpm_max: 180,
-            detect_bpm: true,
-            detect_key: true,
-            mid_energy,
-        }
+    const BOTH: DetectRequest = DetectRequest {
+        bpm_min: 70,
+        bpm_max: 180,
+        detect_bpm: true,
+        detect_key: true,
+    };
+
+    /// All of `samples`, with no waveform: the window is their start.
+    fn audio(samples: &[f32], sample_rate: u32) -> DetectionAudio {
+        DetectionAudio::from_samples(samples, sample_rate, &[], &[])
     }
 
     #[test]
@@ -625,22 +975,20 @@ mod tests {
     fn stratum_detects_only_what_is_asked() {
         let samples = click_track_secs(124.0, 44100, 30);
         let bpm_only = detect_bpm_key_stratum(
-            &samples,
-            44100,
+            &audio(&samples, 44100),
             &DetectRequest {
                 detect_key: false,
-                ..both(&[])
+                ..BOTH
             },
         )
         .unwrap();
         assert!(bpm_only.bpm.is_some() && bpm_only.first_beat_ms.is_some());
         assert!(bpm_only.key.is_none());
         let key_only = detect_bpm_key_stratum(
-            &samples,
-            44100,
+            &audio(&samples, 44100),
             &DetectRequest {
                 detect_bpm: false,
-                ..both(&[])
+                ..BOTH
             },
         )
         .unwrap();
@@ -650,7 +998,7 @@ mod tests {
 
     #[test]
     fn stratum_empty_samples_returns_none() {
-        let result = detect_bpm_key_stratum(&[], 44100, &both(&[])).unwrap();
+        let result = detect_bpm_key_stratum(&audio(&[], 44100), &BOTH).unwrap();
         assert!(result.bpm.is_none());
         assert!(result.key.is_none());
         assert!(result.first_beat_ms.is_none());
@@ -658,7 +1006,7 @@ mod tests {
 
     #[test]
     fn stratum_zero_sample_rate_returns_none() {
-        let result = detect_bpm_key_stratum(&[0.1, 0.2, 0.3], 0, &both(&[])).unwrap();
+        let result = detect_bpm_key_stratum(&audio(&[0.1, 0.2, 0.3], 0), &BOTH).unwrap();
         assert!(result.bpm.is_none());
         assert!(result.key.is_none());
         assert!(result.first_beat_ms.is_none());
@@ -677,7 +1025,7 @@ mod tests {
             })
             .collect();
 
-        let result = detect_bpm_key_stratum(&samples, sample_rate, &both(&[])).unwrap();
+        let result = detect_bpm_key_stratum(&audio(&samples, sample_rate), &BOTH).unwrap();
         // A pure sine won't have clear BPM, but key detection should produce something
         assert!(result.key.is_some(), "expected key detection on sine wave");
     }
@@ -781,6 +1129,63 @@ mod tests {
         let samples = click_track_secs(86.88, 44100, 300);
         let bpm = refine_bpm(&samples, 44100, 87.4, 70, 180);
         assert!((bpm - 86.88).abs() <= 0.02, "{bpm}");
+    }
+
+    #[test]
+    fn onset_accumulator_matches_the_envelope_however_it_is_fed() {
+        let samples = click_track_secs(124.0, 8_000, 20);
+        let mut acc = OnsetAccumulator::default();
+        let (mut rest, mut size) = (samples.as_slice(), 1usize);
+        while !rest.is_empty() {
+            let (head, tail) = rest.split_at(size.min(rest.len()));
+            acc.push(head);
+            rest = tail;
+            size = size * 7 % 2_003 + 1;
+        }
+        assert_eq!(acc.finish(), onset_envelope(&samples));
+    }
+
+    /// The early piece is the beat-rich stretch in the first half, the late
+    /// one the beat-rich stretch after it; pads alone don't count.
+    #[test]
+    fn beat_pieces_pick_the_stretches_with_kicks() {
+        // 10 minutes at 10 bins a second: a held pad (loud, steady) for the
+        // first 2, kicks (sharp rises) from 3 to 5 and from 7 to 9.
+        let bins = 6_000;
+        let low: Vec<u8> = (0..bins)
+            .map(|i| match i {
+                0..1_200 => 100,
+                1_800..3_000 | 4_200..5_400 if i % 5 == 0 => 120,
+                _ => 10,
+            })
+            .collect();
+        let rate = 1_000u32;
+        let total = 600 * rate as usize;
+        let [early, late] = beat_pieces(&low, total, rate);
+        // Within a second: the bins round to the samples they cover.
+        let near = |r: &Range<usize>, start: usize| {
+            r.start.abs_diff(start * rate as usize) <= rate as usize
+                && r.len() == 120 * rate as usize
+        };
+        assert!(near(&early, 180), "{early:?}");
+        assert!(near(&late, 420), "{late:?}");
+    }
+
+    #[test]
+    fn a_start_and_an_end_stretch_pin_an_off_grid_tempo() {
+        // 8 minutes; only the first 3 and the last 2 are looked at.
+        let rate = 44100;
+        let samples = click_track_secs(174.79, rate, 480);
+        let secs = |s: usize| s * rate as usize;
+        let envelope = onset_envelope(&samples);
+        let onsets = Onsets::from_envelope(&envelope, rate, &[0..secs(180), secs(360)..secs(480)]);
+        assert_eq!(onsets.parts.len(), 2);
+        let start = Onsets::of(broad_window(&samples, rate), rate);
+        let bpm = refine_bpm_onsets(&onsets, &start, 175.3, 70, 180);
+        assert!((bpm - 174.79).abs() <= 0.01, "{bpm}");
+        // Overlapping stretches are one.
+        let merged = Onsets::from_envelope(&envelope, rate, &[0..secs(200), secs(100)..secs(300)]);
+        assert_eq!(merged.parts.len(), 1);
     }
 
     #[test]
