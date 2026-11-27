@@ -19,6 +19,8 @@ mod export_log;
 pub(crate) mod format_compat;
 mod import_conflicts;
 pub(crate) mod key_notation;
+#[cfg(test)]
+mod key_reference_eval;
 mod migrations;
 mod mixxx_import;
 mod rekordbox_import;

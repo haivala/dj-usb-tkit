@@ -29,8 +29,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::analysis::{BPM_KEY_MAX_SAMPLES, decode_audio_mono_samples};
 use super::anlz::{read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz};
 use super::bpm_key::{
-    find_tempo_peak, first_beat_secs, refine_bpm, refine_near_estimate, stratum_config,
-    tempo_family_alternative,
+    TEMPO_FAMILY, broad_tempo_candidate, find_tempo_peak, first_beat_secs, refine_bpm,
+    refine_near_estimate, stratum_config, tempo_family_alternative, tempo_family_leads,
 };
 use crate::pdb_reader::parse_pdb;
 
@@ -56,6 +56,10 @@ struct Outcome {
     /// Closest 3:2 / 4:3 alternative: its margin (1.0 = switches), and the
     /// BPM refined around it, for tuning `TEMPO_FAMILY`.
     family: Option<(f64, f64)>,
+    /// Every `TEMPO_FAMILY` relative: factor, required lead, its lead, and
+    /// the BPM refined around it, to replay other required leads offline.
+    /// Empty when `refine_bpm` skips the family check (broad search).
+    family_leads: Vec<(f64, f64, f64, f64)>,
     grid: Option<(f64, f64)>,
     /// stratum's first beat and ours (seconds).
     first_beat: Option<f64>,
@@ -176,22 +180,26 @@ fn analyze(
     bpm_min: u32,
     bpm_max: u32,
 ) -> Outcome {
-    let outcome = |stratum: Option<StratumResult>, refined, peak, family, own_first_beat| Outcome {
-        title: reference.title.clone(),
-        path: reference.path.clone(),
-        reference: reference.bpm,
-        raw: stratum.map(|s| s.0),
-        refined,
-        peak,
-        family,
-        grid: reference.grid,
-        first_beat: stratum.and_then(|s| s.1),
-        own_first_beat,
-    };
+    let outcome =
+        |stratum: Option<StratumResult>, refined, peak, family, family_leads, own_first_beat| {
+            Outcome {
+                title: reference.title.clone(),
+                path: reference.path.clone(),
+                reference: reference.bpm,
+                raw: stratum.map(|s| s.0),
+                refined,
+                peak,
+                family,
+                family_leads,
+                grid: reference.grid,
+                first_beat: stratum.and_then(|s| s.1),
+                own_first_beat,
+            }
+        };
     let Ok((samples, sample_rate)) =
         decode_audio_mono_samples(&reference.path, BPM_KEY_MAX_SAMPLES)
     else {
-        return outcome(None, None, None, None, None);
+        return outcome(None, None, None, None, Vec::new(), None);
     };
     // Older cache lines have no first beat: run stratum again for those.
     let stratum = cached.filter(|c| c.1.is_some()).or_else(|| {
@@ -212,8 +220,25 @@ fn analyze(
                 refine_near_estimate(&samples, sample_rate, alternative, bpm_min, bpm_max);
             (margin, refined)
         });
+    // Empty when `refine_bpm` takes the broad search, which skips the family check.
+    let broad = peak.is_none()
+        && raw.is_some_and(|raw| {
+            broad_tempo_candidate(&samples, sample_rate, raw, bpm_min, bpm_max).is_some()
+        });
+    let family_leads = raw
+        .filter(|_| !broad)
+        .and_then(|raw| tempo_family_leads(&samples, sample_rate, raw, bpm_min, bpm_max))
+        .unwrap_or_default()
+        .into_iter()
+        .zip(TEMPO_FAMILY)
+        .filter_map(|(l, (factor, required))| {
+            let l = l?;
+            let refined = refine_near_estimate(&samples, sample_rate, l.bpm, bpm_min, bpm_max);
+            Some((factor, required, l.lead, refined))
+        })
+        .collect();
     let own_first_beat = refined.and_then(|bpm| first_beat_secs(&samples, sample_rate, bpm));
-    outcome(stratum, refined, peak, family, own_first_beat)
+    outcome(stratum, refined, peak, family, family_leads, own_first_beat)
 }
 
 /// `test-results/bpm-reference/<local time>_<set>.csv` in the repository,
@@ -351,11 +376,11 @@ fn bpm_reference_accuracy() {
             .unwrap_or_else(|| default_csv_path(list.as_deref(), &playlist));
         let mut csv = String::from(
             "reference,raw,final,error,peak,snap_ratio,family_margin,family_final,\
-             rb_first_ms,rb_grid_bpm,stratum_first_ms,first_beat_ms,title,path\n",
+             rb_first_ms,rb_grid_bpm,stratum_first_ms,first_beat_ms,family_leads,title,path\n",
         );
         for o in &outcomes {
             csv.push_str(&format!(
-                "{:.2},{},{},{},{},{},{},{},{},{},{},{},\"{}\",\"{}\"\n",
+                "{:.2},{},{},{},{},{},{},{},{},{},{},{},{},\"{}\",\"{}\"\n",
                 o.reference,
                 o.raw.map(|v| format!("{v:.2}")).unwrap_or_default(),
                 o.refined.map(|v| format!("{v:.2}")).unwrap_or_default(),
@@ -374,6 +399,13 @@ fn bpm_reference_accuracy() {
                 o.own_first_beat
                     .map(|v| format!("{:.1}", v * 1000.0))
                     .unwrap_or_default(),
+                o.family_leads
+                    .iter()
+                    .map(|(factor, required, lead, refined)| {
+                        format!("{factor:.4}:{required}:{lead:.4}:{refined:.2}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(";"),
                 o.title.replace('"', "'"),
                 o.path.display()
             ));

@@ -126,16 +126,19 @@ const GRID_SNAP_COHERENCE: f64 = 0.9;
 /// Each factor comes with how many times more coherent the related tempo
 /// must be than stratum's to replace it. 3/2 and 3/4 need far more: one of
 /// their `SUBDIVISIONS` is 3× stratum's tempo, where every one of its beats
-/// lands in phase too, so they score well even when they are wrong. On 54
-/// store-referenced tracks, a right tempo's 5:4 and 4:5 relatives scored at
-/// most 1.02 times as coherent, and the real tempo under a 5:4 mistake 5.9
-/// to 60 times (USB_KEY_PLAN.md); 2.5 sits between.
-const TEMPO_FAMILY: [(f64, f64); 6] = [
+/// lands in phase too, so they score well even when they are wrong.
+///
+/// Stepping down by 4:5 (stratum hearing 160 for 128, 175 for 140) needs
+/// less than stepping up: on a public set of crowd-annotated tempos, the
+/// real tempo under such a mistake scored 0.68 to 2.37 times as coherent,
+/// and down to 1.5 no track that was right turned wrong. Stepping up by 5:4
+/// at that lead would move tracks at 87-91 BPM to 108-114.
+pub(super) const TEMPO_FAMILY: [(f64, f64); 6] = [
     (1.5, 8.0),
     (0.75, 8.0),
     (2.0 / 3.0, 2.5),
     (4.0 / 3.0, 2.5),
-    (0.8, 2.5),
+    (0.8, 1.6),
     (1.25, 2.5),
 ];
 
@@ -202,7 +205,7 @@ fn bpm_from_peak(peak: Option<TempoPeak>, raw: f32) -> f64 {
 /// estimate has no clear peak. A short window lets us search more broadly at
 /// 0.05 BPM resolution without slowing every successful local search. The
 /// full track is still used by `refine_near_estimate` for the final BPM.
-fn broad_tempo_candidate(
+pub(super) fn broad_tempo_candidate(
     samples: &[f32],
     sample_rate: u32,
     raw: f32,
@@ -266,6 +269,32 @@ pub(super) fn tempo_family_alternative(
     bpm_min: u32,
     bpm_max: u32,
 ) -> Option<(f32, f64)> {
+    tempo_family_leads(samples, sample_rate, raw, bpm_min, bpm_max)?
+        .into_iter()
+        .zip(TEMPO_FAMILY)
+        .filter_map(|(l, (_, required))| l.map(|l| (l.bpm, l.lead / required)))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// One `TEMPO_FAMILY` relative of stratum's estimate.
+pub(super) struct FamilyLead {
+    /// Its best whole or half BPM within the search radius.
+    pub bpm: f32,
+    /// How many times as coherent as the estimate it is.
+    pub lead: f64,
+}
+
+/// Each `TEMPO_FAMILY` relative of stratum's estimate, in `TEMPO_FAMILY`'s
+/// order, compared with the estimate at their best whole or half BPM; a
+/// relative outside the analysis range is `None`. `None` altogether when
+/// the estimate has no coherence at all.
+pub(super) fn tempo_family_leads(
+    samples: &[f32],
+    sample_rate: u32,
+    raw: f32,
+    bpm_min: u32,
+    bpm_max: u32,
+) -> Option<Vec<Option<FamilyLead>>> {
     let envelope = onset_envelope(samples);
     let frame_secs = ONSET_HOP as f64 / f64::from(sample_rate);
     let (min, max) = (f64::from(bpm_min), f64::from(bpm_max));
@@ -282,15 +311,19 @@ pub(super) fn tempo_family_alternative(
     if own <= 0.0 {
         return None;
     }
-    TEMPO_FAMILY
-        .iter()
-        .map(|&(factor, required)| (raw * factor, factor, required))
-        .filter_map(|(centre, factor, required)| {
-            // stratum's error scales with the factor.
-            let (bpm, score) = best_near(centre, BPM_SEARCH_RADIUS * factor.max(1.0))?;
-            Some((bpm as f32, score / own / required))
-        })
-        .max_by(|a, b| a.1.total_cmp(&b.1))
+    Some(
+        TEMPO_FAMILY
+            .iter()
+            .map(|&(factor, _)| {
+                // stratum's error scales with the factor.
+                let (bpm, score) = best_near(raw * factor, BPM_SEARCH_RADIUS * factor.max(1.0))?;
+                Some(FamilyLead {
+                    bpm: bpm as f32,
+                    lead: score / own,
+                })
+            })
+            .collect(),
+    )
 }
 
 /// The tempo that clearly keeps the onsets in phase best, near stratum's
@@ -634,6 +667,28 @@ mod tests {
         let samples = click_track(125.0, 44100);
         assert_eq!(refine_bpm(&samples, 44100, 156.25, 70, 180), 125.0);
         assert_eq!(refine_bpm(&samples, 44100, 100.0, 70, 180), 125.0);
+    }
+
+    /// A 128 track with quieter hits on a 160 grid: stratum answering 160
+    /// is replaced by 128, which is about twice as coherent; with louder 160
+    /// hits (128 only about 1.4 times as coherent) 160 stays.
+    #[test]
+    fn refine_bpm_steps_down_four_fifths_at_a_moderate_lead() {
+        let with_hits_at_160 = |level: f32| -> Vec<f32> {
+            click_track(128.0, 44100)
+                .iter()
+                .zip(click_track(160.0, 44100))
+                .map(|(a, b)| a + level * b)
+                .collect()
+        };
+        assert_eq!(
+            refine_bpm(&with_hits_at_160(0.3), 44100, 160.0, 70, 180),
+            128.0
+        );
+        assert_eq!(
+            refine_bpm(&with_hits_at_160(0.5), 44100, 160.0, 70, 180),
+            160.0
+        );
     }
 
     #[test]
