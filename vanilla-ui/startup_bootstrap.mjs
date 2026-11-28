@@ -205,7 +205,15 @@ export async function runDataMigrations(ctx) {
 // window shown and the library drawn. Opened earlier, in the hidden window,
 // its row keeps a height that doesn't fit its chips.
 function openSourceBar(ctx) {
-  ctx.requestAnimationFrameFn(() => ctx.el.sourceBar.classList.remove("collapsed"));
+  // This happens just after the native window becomes visible. Animating the
+  // accordion's height at that point makes the search and selection toolbar
+  // below it bounce while the first frame is being composited.
+  const { sourceBar } = ctx.el;
+  sourceBar.classList.add("skip-transition");
+  ctx.requestAnimationFrameFn(() => {
+    sourceBar.classList.remove("collapsed");
+    ctx.requestAnimationFrameFn(() => sourceBar.classList.remove("skip-transition"));
+  });
 }
 
 export function runDeferredInitialLoad(ctx) {

@@ -1216,6 +1216,15 @@ main {
   opacity: 1;
 }
 
+/* Opening Sources after the window is first shown must settle its height in
+   one frame: a height animation there moves the search and selection toolbar
+   below it while the window is being composited. Normal user toggles retain
+   the accordion transition. */
+.source-bar.skip-transition .source-body,
+.source-bar.skip-transition .source-filter-header::before {
+  transition: none;
+}
+
 .source-body-inner {
   display: flex;
   flex-direction: column;
