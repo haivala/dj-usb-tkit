@@ -2034,8 +2034,38 @@ impl SampleRing {
             return;
         }
         self.samples[self.next] = sample;
-        self.next = (self.next + 1) % self.samples.len();
+        self.next += 1;
+        if self.next == self.samples.len() {
+            self.next = 0;
+        }
         self.len = (self.len + 1).min(self.samples.len());
+    }
+
+    fn clear(&mut self) {
+        self.next = 0;
+        self.len = 0;
+    }
+
+    /// Replace `destination` with this ring in playback order. Both rings
+    /// normally have the same capacity, so this reuses the retained window's
+    /// allocation.
+    fn copy_into(&self, destination: &mut Self) {
+        destination.clear();
+        self.copy_tail_into(self.len, destination);
+    }
+
+    /// Append this ring's newest `count` samples to `destination`, in
+    /// playback order. Advancing a selected window by one waveform bin then
+    /// copies only that bin's worth of new audio, not the whole window.
+    fn copy_tail_into(&self, count: usize, destination: &mut Self) {
+        let count = count.min(self.len);
+        if count == 0 {
+            return;
+        }
+        let start = (self.next + self.samples.len() - count) % self.samples.len();
+        for offset in 0..count {
+            destination.push(self.samples[(start + offset) % self.samples.len()]);
+        }
     }
 
     fn copy(&self) -> Vec<f32> {
@@ -2058,8 +2088,11 @@ struct WindowTracker {
     bins: std::collections::VecDeque<f32>,
     sum: f64,
     best: f64,
-    samples: Vec<f32>,
+    /// The best window so far. Once it is populated, each later best score
+    /// advances it with only the newly decoded samples.
+    snapshot: SampleRing,
     start: usize,
+    last_snapshot: usize,
 }
 
 impl WindowTracker {
@@ -2069,8 +2102,9 @@ impl WindowTracker {
             bins: std::collections::VecDeque::new(),
             sum: 0.0,
             best: f64::NEG_INFINITY,
-            samples: Vec::new(),
+            snapshot: SampleRing::new(window),
             start: 0,
+            last_snapshot: 0,
         }
     }
 
@@ -2082,11 +2116,24 @@ impl WindowTracker {
         }
         // A window is only eligible after it holds the requested audio. At a
         // bin boundary the waveform score represents this latest ring.
-        if self.bins.len() == self.width && ring.len == ring.samples.len() && self.sum > self.best {
+        if self.bins.len() == self.width
+            && ring.len == ring.samples.len()
+            && self.sum > self.best
+        {
             self.best = self.sum;
-            self.samples = ring.copy();
-            self.start = total_samples - self.samples.len();
+            let advanced = total_samples.saturating_sub(self.last_snapshot);
+            if self.snapshot.len == 0 || advanced > self.snapshot.samples.len() {
+                ring.copy_into(&mut self.snapshot);
+            } else {
+                ring.copy_tail_into(advanced, &mut self.snapshot);
+            }
+            self.start = total_samples - self.snapshot.len;
+            self.last_snapshot = total_samples;
         }
+    }
+
+    fn into_samples(self) -> Vec<f32> {
+        self.snapshot.copy()
     }
 }
 
@@ -2173,12 +2220,13 @@ pub(crate) fn decode_for_detection(
     let ring = ring.unwrap_or_else(|| SampleRing::new(0));
     let tracker = tracker.unwrap_or_else(|| WindowTracker::new(1, 1, 1));
     let beat_tracker = beat_tracker.unwrap_or_else(|| WindowTracker::new(1, 1, 1));
-    let (window, window_start) = if tracker.samples.is_empty() {
+    let (window, window_start) = if tracker.snapshot.len == 0 {
         (ring.copy(), 0)
     } else {
-        (tracker.samples, tracker.start)
+        let start = tracker.start;
+        (tracker.into_samples(), start)
     };
-    let bpm_window = (!beat_tracker.samples.is_empty()).then_some(beat_tracker.samples);
+    let bpm_window = (beat_tracker.snapshot.len > 0).then(|| beat_tracker.into_samples());
     let waveform = waveform.map(WaveformAccumulator::finish);
     let beat_pieces = waveform
         .as_ref()

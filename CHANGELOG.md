@@ -39,6 +39,12 @@
 
 ## Unreleased
 
+## 0.7.1
+
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** Long tracks analyze quickly again. Version 0.7.0 repeatedly copied the selected three-minute BPM/key window while it searched for the strongest section, making some tracks slower than older versions. Analysis still decodes the track once, but now advances that retained window with only the newly decoded audio.
+
 ## 0.7.0
 
 **Severity:** feature
@@ -68,7 +74,6 @@ Broken waveform data needs reanalysis. BPM and key analysis has improvements. It
 - **Fix:** A key the app detects is now recorded as detected. Before, reanalyzing a track whose key came from rekordbox, Mixxx or the user replaced the key but left the old source on it: the next import from that same library then overwrote the detected key without asking, as if it were that library's own, and the key was treated as a corrected one that analysis must keep. Keys analyzed before this version stay as they are until the track is analyzed again.
 - **Fix:** Reanalyze in the selection bar now works on a track in a source folder that isn't in the library yet: the track is added and analyzed, as its own Analyze button does. Before, it said no tracks need analysis.
 - **Fix:** Hot cues set on a CDJ-2000NXS2 now keep their colour in the app and in the Engine DJ library, as the closest colour the app offers. The player stores the colour in a place the app didn't read, so they showed as green.
-- **Fix:** A window error logged to the Event Log and the session log file now shows its message and where it came from. Before, such an error showed up as just `{}`.
 - **Fix:** Named USBs that the computer mounts at the same place (on Windows, the same drive letter; on Linux, the same volume label) are now told apart by their name: each keeps its own entry in the recent list and its own record of the tracks read from it. Before, they shared one entry, and a stick seen at two places had two.
 - **Chore:** The backend's largest files are split by area: the USB code lives in one folder, with its playlists, histories, tracks, caches, root and stick files in their own modules, and the grab-bag helper files are gone, each function moved next to the code that uses it. The desktop commands and the API types are split the same way, one module per area. Every progress callback shares one named type, and the tests' placeholder analysis files are real, empty ones from one shared helper. The MP3 converter and the seek-index builder read MP3 frame headers through one reader, and the dev tools read PDB pages, rows, strings, stick paths, the eDB and analysis files through the app's own readers, the waveform tools sharing one set of helpers. The tests share one set of helpers for player history, stick paths and fixtures, and export tests use the eDB the app initializes instead of a hand-made one. The cue editor and the selection bar's Edit draw their star rating from one template. The PDB writer uses the reader's playlist and playlist entry rows instead of its own copies.
 - **Chore:** The BPM and key analysis engine, stratum-dsp, is now kept in the repository with the app's own changes, in place of the crates.io release. The first change lets analysis detect only the BPM or only the key, with the same results as the full analysis gives for each.
