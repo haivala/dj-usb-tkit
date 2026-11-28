@@ -1,4 +1,5 @@
 /USB_*
+/scripts/analysis-release-gate.mp3
 target/
 vanilla-ui/node_modules/
 desktop/node_modules/

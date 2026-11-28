@@ -220,6 +220,20 @@ if [[ "$RUN_TESTS" == "1" ]]; then
     cargo test
   )
 
+  ANALYSIS_RELEASE_GATE="$ROOT_DIR/scripts/analysis-release-gate.mp3"
+  if [[ -f "$ANALYSIS_RELEASE_GATE" ]]; then
+    echo "==> Running long-track analysis release gate"
+    (
+      cd "$BACKEND_DIR"
+      ANALYSIS_RELEASE_GATE="$ANALYSIS_RELEASE_GATE" \
+        cargo test --release -p backend --lib \
+          service::key_reference_eval::analysis_release_gate \
+          -- --ignored --exact --nocapture
+    )
+  else
+    echo "==> Skipping long-track analysis release gate (scripts/analysis-release-gate.mp3 not present)"
+  fi
+
   ensure_playwright_browser
 
   echo "==> Running frontend tests"

@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+- **Fix:** MP3s with an FFmpeg `Lavf` seek header or a short metadata preamble before their audio frames now get seek data. They analyzed and played normally before, but the app logged a misleading warning and left their seek index empty.
+
 ## 0.7.1
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

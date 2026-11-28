@@ -63,6 +63,12 @@ const VARIANTS: [&str; 6] = [
     "app",
 ];
 
+/// A long local reference track used by the release script when present. The
+/// expected analysis values are a regression snapshot, not key ground truth:
+/// FMAK labels this track F# minor while the current app analysis returns F
+/// minor. The full reference suite remains the accuracy gate.
+const ANALYSIS_RELEASE_GATE_RELATIVE_PATH: &str = "scripts/analysis-release-gate.mp3";
+
 fn cheap_config() -> AnalysisConfig {
     stratum_key_config(BPM_MIN, BPM_MAX)
 }
@@ -310,6 +316,61 @@ fn load_list(path: &Path) -> Vec<(PathBuf, (u8, bool))> {
             Some((PathBuf::from(file), parse_key(key)?))
         })
         .collect()
+}
+
+/// Exercises the complete one-pass analysis path on a 15-minute track and
+/// reports its elapsed time for the release record. It is deliberately
+/// ignored: the local audio fixture is not part of the repository.
+#[test]
+#[ignore = "needs scripts/analysis-release-gate.mp3"]
+fn analysis_release_gate() {
+    let default_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("backend has workspace parent")
+        .join(ANALYSIS_RELEASE_GATE_RELATIVE_PATH);
+    let path = std::env::var_os("ANALYSIS_RELEASE_GATE")
+        .map(PathBuf::from)
+        .unwrap_or(default_path);
+    if !path.is_file() {
+        eprintln!("analysis release gate: fixture is absent at {}", path.display());
+        return;
+    }
+
+    let started = Instant::now();
+    let analysis = analyze_audio_core(
+        &path,
+        &CoreRequest {
+            kept_bpm: None,
+            kept_first_beat_ms: None,
+            existing_first_beat_ms: None,
+            detect_key: true,
+            detection_required: true,
+            bpm_min: BPM_MIN,
+            bpm_max: BPM_MAX,
+            engines: AnalysisEngines::STRATUM,
+        },
+        &mut |_, _| {},
+    )
+    .expect("release-gate analysis succeeds");
+
+    let elapsed = started.elapsed();
+    assert!(
+        analysis
+            .duration_ms
+            .is_some_and(|ms| (924_000..=925_000).contains(&ms)),
+        "expected the 15:24.7 fixture duration, got {:?}",
+        analysis.duration_ms
+    );
+    assert!(
+        analysis.bpm.is_some_and(|bpm| (bpm - 156.0).abs() <= 0.01),
+        "expected 156.00 BPM, got {:?}",
+        analysis.bpm
+    );
+    assert_eq!(analysis.key.as_deref(), Some("Fm"));
+    eprintln!(
+        "analysis release gate: 924.7 s audio in {:.2} s (BPM 156.00, key Fm)",
+        elapsed.as_secs_f64()
+    );
 }
 
 #[test]

@@ -211,13 +211,15 @@ What rekordbox writes:
 - **VBR entries:** `entry[i]` is the byte offset of counted frame
   `max(floor((i + 1) · N / 400) − 8, 0)`. `N` is the number of counted frames, and the
   offset is measured from the first counted frame, not from the start of the file.
-- **Counted frames** are the MPEG frames between any ID3v2 tag and the tags at the end (APEv2,
-  Lyrics3v2, ID3v1, in any combination; each is taken off by its own size). Whether
+- **Counted frames** are the MPEG frames after any ID3v2 tag and before the tags at the end
+  (APEv2, Lyrics3v2, ID3v1, in any combination; each is taken off by its own size). A short
+  non-frame preamble (up to 4 KiB) directly before the first MPEG frame is also left out; this
+  covers legacy ID3v1 tags and FFmpeg-accepted encoder preambles. Whether
   the first frame (a `Xing`/`Info` header) counts depends on the encoder string in that
   header:
   - `LAME…` or `iTunes…` → counted
-  - `Lavc…` (ffmpeg) or mixed-case `Lame…` → **not** counted; offsets start at the second
-    frame
+  - `Lavc…` / `Lavf…` (ffmpeg) or mixed-case `Lame…` → **not** counted; offsets start at the
+    second frame
   - no header → every frame counts
 - **CBR vs VBR** is decided by whether the audio frames' bitrates vary.
 - **Two damaged layouts**, seen only on CBR files without a `Xing`/`Info` header:

@@ -14,6 +14,10 @@ const PVBR_ENTRIES: usize = 400;
 pub(super) const PVBR_PAYLOAD_LEN: usize = PVBR_ENTRIES * 4 + 4;
 const PVB2_ENTRIES: usize = 400;
 const MP3_SAMPLES_PER_FRAME: u32 = 1152;
+/// Some otherwise-valid MP3s put a short legacy tag or encoder preamble
+/// between ID3v2 and the first MPEG frame. It is outside the audio stream, so
+/// it does not affect the PVBR offsets, which are relative to that frame.
+const MAX_LEADING_MP3_PREAMBLE: usize = 4 * 1024;
 
 /// A zero-filled run this long inside the audio is damage, not an encoder
 /// layout: far more than any frame (at most 1441 bytes) or padding.
@@ -168,11 +172,28 @@ fn read_reporting(path: &Path, on_read: &mut dyn FnMut(usize)) -> std::io::Resul
 }
 
 fn parse_mp3_pvbr(bytes: &[u8]) -> Result<Vec<u8>, SeekIndexSkip> {
-    let start = id3v2_end(bytes)?;
+    let mut start = id3v2_end(bytes)?;
     // rekordbox ignores APE and Lyrics3 tags: the frames end where they start.
     let end = strip_ape_and_lyrics3_tags(bytes, id3v1_start(bytes))?;
     if start >= end {
         return Err(SeekIndexSkip::NoAudioFrames);
+    }
+
+    // Legacy ID3v1 tags and encoder-private bytes sometimes appear directly
+    // before the first MPEG frame, rather than at the end. FFmpeg accepts
+    // such files; the prefix is not part of the frame stream. Keep this
+    // bounded so a damaged or wholly non-MP3 file cannot be searched through.
+    if parse_mpeg1_layer3_frame(bytes, start).is_none() {
+        let search_end = (start + MAX_LEADING_MP3_PREAMBLE).min(end);
+        if let Some(first_frame) = (start + 1..search_end)
+            .find(|&at| parse_mpeg1_layer3_frame(bytes, at).is_some())
+        {
+            // The existing zero-frame exception below is deliberately more
+            // restrictive: a zero preamble can be a wiped audio frame.
+            if bytes[start..first_frame].iter().any(|byte| *byte != 0) {
+                start = first_frame;
+            }
+        }
     }
 
     let mut frames = Vec::new();
@@ -411,7 +432,10 @@ fn mp3_header_frame(frame: &[u8]) -> Result<Option<XingHeader>, SeekIndexSkip> {
     let encoder = frame.get(cursor..cursor + 9).ok_or(truncated)?;
     let skip = if encoder.starts_with(b"LAME") || encoder.starts_with(b"iTunes") {
         false
-    } else if encoder.starts_with(b"Lavc") || encoder.starts_with(b"Lame") {
+    } else if encoder.starts_with(b"Lavc")
+        || encoder.starts_with(b"Lavf")
+        || encoder.starts_with(b"Lame")
+    {
         true
     } else {
         return Err(SeekIndexSkip::UnknownEncoder);
@@ -721,6 +745,29 @@ mod tests {
         let mut frames = vec![xing_frame(b"Info", 4, b"Lavc61.19")];
         frames.extend(vec![mp3_frame(KBPS_128); 4]);
         assert_eq!(total(&parse_mp3_pvbr(&file(&frames)).unwrap()), 4 * 1152);
+    }
+
+    #[test]
+    fn lavf_header_frame_is_not_counted() {
+        let mut frames = vec![xing_frame(b"Info", 4, b"Lavf54.63")];
+        frames.extend(vec![mp3_frame(KBPS_128); 4]);
+        assert_eq!(total(&parse_mp3_pvbr(&file(&frames)).unwrap()), 4 * 1152);
+    }
+
+    #[test]
+    fn short_non_frame_preamble_before_audio_is_left_out() {
+        let audio = file(&vec![mp3_frame(KBPS_320); 3]);
+        let mut id3v1 = vec![0u8; 128];
+        id3v1[..3].copy_from_slice(b"TAG");
+        assert_eq!(
+            total(&parse_mp3_pvbr(&[id3v1, audio.clone()].concat()).unwrap()),
+            3 * 1152
+        );
+        let junk = [b"Fusion preamble".as_slice(), &[0x01; 183]].concat();
+        assert_eq!(
+            total(&parse_mp3_pvbr(&[junk, audio].concat()).unwrap()),
+            3 * 1152
+        );
     }
 
     #[test]
