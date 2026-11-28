@@ -906,11 +906,27 @@ impl BackendService {
         // Tracks whose stretched waveform was replaced, for the export log.
         let mut redrawn = Vec::<String>::new();
         for (index, update) in updates.iter().enumerate() {
-            on_event(SeekApplyEvent::ItemDone { done: index, total });
+            // Announce this bundle before its I/O begins. Otherwise the
+            // footer keeps the preceding database-backup message while a
+            // large bundle is copied.
+            on_event(SeekApplyEvent::Reading {
+                done: index,
+                total,
+                file: &update.track_path,
+                mb_per_s: None,
+            });
             if failures.contains_key(&update.track_id) {
+                on_event(SeekApplyEvent::ItemDone {
+                    done: index + 1,
+                    total,
+                });
                 continue;
             }
             let Some(row) = row_by_id.get(&update.track_id) else {
+                on_event(SeekApplyEvent::ItemDone {
+                    done: index + 1,
+                    total,
+                });
                 continue;
             };
             if update.own_bundle {
@@ -918,12 +934,20 @@ impl BackendService {
                 // the bundles written before it.
                 let Some((Some(audio), analysis)) = analyses.remove(&update.track_id) else {
                     failures.insert(update.track_id, UpdateFailure::Unreadable);
+                    on_event(SeekApplyEvent::ItemDone {
+                        done: index + 1,
+                        total,
+                    });
                     continue;
                 };
                 let analysis = match analysis {
                     Ok(analysis) => analysis,
                     Err(err) => {
                         failures.insert(update.track_id, err.into());
+                        on_event(SeekApplyEvent::ItemDone {
+                            done: index + 1,
+                            total,
+                        });
                         continue;
                     }
                 };
@@ -962,9 +986,17 @@ impl BackendService {
                         _ => BackendError::Internal("bundle not written".to_string()),
                     };
                     failures.insert(update.track_id, UpdateFailure::Write(err));
+                    on_event(SeekApplyEvent::ItemDone {
+                        done: index + 1,
+                        total,
+                    });
                     continue;
                 }
                 let Some(rel) = usb_relative_path(usb_root, &dat) else {
+                    on_event(SeekApplyEvent::ItemDone {
+                        done: index + 1,
+                        total,
+                    });
                     continue;
                 };
                 let mut data = track_row_data_from_reader_row(row);
@@ -981,6 +1013,10 @@ impl BackendService {
                 ));
                 moved.push((update.track_path.clone(), rel));
                 outcome.separated += 1;
+                on_event(SeekApplyEvent::ItemDone {
+                    done: index + 1,
+                    total,
+                });
                 continue;
             }
 
@@ -1054,6 +1090,10 @@ impl BackendService {
                     failures.insert(update.track_id, failure);
                 }
             }
+            on_event(SeekApplyEvent::ItemDone {
+                done: index + 1,
+                total,
+            });
         }
 
         if !mutations.is_empty()
