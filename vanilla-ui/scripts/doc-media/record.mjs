@@ -843,7 +843,7 @@ async function openHealthCard(page) {
 // also opens its first item, so wait for this item's heading and finished rows.
 // Fails if the track table scrolls sideways: the shot needs a wider window.
 async function openUsbListItem(page, { list, name, heading, body }) {
-  await page.locator(`${list} li`, { hasText: name }).click();
+  await page.locator(`${list} li`, { hasText: name }).locator("button").click();
   await page.locator(`${heading} .track-list-heading-name`, { hasText: name }).waitFor();
   await page.locator(`${body}:not([aria-busy="true"]) .track-grid-row`).first().waitFor();
   await waitProgressHidden(page);
